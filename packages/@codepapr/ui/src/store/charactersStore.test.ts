@@ -15,6 +15,14 @@ vi.mock('./toastStore', () => ({
   toast: { error: toastErrorMock, success: vi.fn(), warning: vi.fn() },
 }));
 
+vi.mock('./agentStore', () => ({
+  useAgentStore: { setState: vi.fn(), getState: vi.fn(() => ({ activeSessionId: null })) },
+}));
+
+vi.mock('./internals/projectSnapshot', () => ({
+  saveCurrentProjectState: vi.fn(),
+}));
+
 import { useCharactersStore, applySessionCharacterMap, sessionActiveCharacterMap } from './charactersStore';
 
 describe('useCharactersStore persist guard', () => {

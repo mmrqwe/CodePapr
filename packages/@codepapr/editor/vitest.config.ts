@@ -1,8 +1,9 @@
 import { defineConfig } from 'vitest/config';
-import { sharedCoverageConfig } from '../../../vitest.shared';
+import { sharedCoverageConfig, sharedTestExclude } from '../../../vitest.shared';
 
 export default defineConfig({
   test: {
+    exclude: [...sharedTestExclude],
     coverage: sharedCoverageConfig,
   },
 });

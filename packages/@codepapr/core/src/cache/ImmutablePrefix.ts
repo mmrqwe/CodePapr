@@ -16,7 +16,7 @@ import {
   IPrefixContent,
   PrefixModificationError,
 } from '@codepapr/types';
-import { sha256, deepFreeze } from '@codepapr/common';
+import { sha256, deepFreeze, STATIC_CONTENT_FORBIDDEN_PATTERNS } from '@codepapr/common';
 import { Serializer } from './Serializer';
 
 function canonicalToolDefinition(tool: IToolDefinition): IToolDefinition {
@@ -52,21 +52,11 @@ export function validateStaticContent(
   if (options?.allowTemplateLiterals) {
     return;
   }
-  const forbidden = [
-    /\$\{[^}]+\}/, // Template interpolation
-    /{{[^}]+}}/, // Double braces
-    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, // ISO timestamps
-    /\[TIMESTAMP\]/i,
-    /\[SESSION/i,
-    /\[TIME/i,
-    /\[DATE/i,
-    /\[RANDOM/i,
-  ];
 
-  for (const pattern of forbidden) {
-    if (pattern.test(prompt)) {
+  for (const { re } of STATIC_CONTENT_FORBIDDEN_PATTERNS) {
+    if (re.test(prompt)) {
       throw new PrefixModificationError(
-        `System prompt contains dynamic content matching: ${pattern}. ` +
+        `System prompt contains dynamic content matching: ${re}. ` +
           `This would destroy cache consistency. Use static content only. ` +
           `If the text is a literal example (static, never changes), construct the ` +
           `prefix with { allowTemplateLiterals: true } to allow it.`

@@ -51,7 +51,7 @@ import { nextCheckpointSequence } from '../utils/workspaceGitPanel';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 import { warmupLspForWorkspace, stopWorkspaceLsp } from '../utils/lspWarmup';
 import { grantWorkspaceAssetScope } from '../utils/workspaceAssetScope';
-import { restoreTodoListContexts, clearAllTodoListContexts, resetTodoListContext } from '../tools/todoListTool';
+import { restoreTodoListContexts, clearAllTodoListContexts, resetTodoListContext } from '../tools/todoListRegistry';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
 import {
   loadSkillDefinitions,

@@ -419,6 +419,9 @@ export class ResponseProvider extends BaseLLMProvider {
         let usage: ResponseUsage | undefined;
         let sawDone = false;
         let sawFinishReason = false;
+        // response.completed/done 事件携带的最终状态('completed'/'incomplete'/'failed')。
+        // 网关截断时可能缺失——缺失时靠 usage 输出 token 达顶作为截断证据。
+        let responseStatus: string | undefined;
         const toolCallStates: ResponsesToolCallState[] = [];
 
         try {
@@ -546,7 +549,12 @@ export class ResponseProvider extends BaseLLMProvider {
               eventType === 'response.done'
             ) {
               sawDone = true;
-              sawFinishReason = true;
+              // 终止信号以 response.status 为准（'incomplete' = 输出达到
+              // max_output_tokens 上限被截断）。不在此处置 sawFinishReason——
+              // 那是 choices 兼容路径 finish_reason 的专用标志。
+              if (chunk.response?.status) {
+                responseStatus = chunk.response.status;
+              }
               if (chunk.response?.usage) {
                 usage = chunk.response.usage;
               } else if (chunk.usage) {
@@ -635,20 +643,49 @@ export class ResponseProvider extends BaseLLMProvider {
           });
         }
 
-        if (!sawDone && !sawFinishReason && !content && toolCallStates.length === 0) {
+        // 流干净地结束但没有任何终止信号（response.completed/done 或 choices
+        // finish_reason）：典型是中转/网关截断后直接关连接。即使已发出部分内容
+        // 也绝不能当正常完成处理——抛可重试错误走流层重试（部分内容由
+        // stream-restart 流程丢弃）。usage 不算终止信号：截断流常常先发 usage。
+        if (!sawDone && !sawFinishReason) {
           throw new ProviderRequestError({
             provider: this.name,
-            message: 'Stream ended prematurely: no completed event or output received',
+            message: 'Stream ended prematurely: no completion event or finish_reason received',
+            retriable: true,
+          });
+        }
+
+        if (responseStatus === 'failed' || responseStatus === 'cancelled') {
+          throw new ProviderRequestError({
+            provider: this.name,
+            message: `Responses API stream ended with status '${responseStatus}'`,
             retriable: true,
           });
         }
 
         const effectiveToolCalls = finalizeNamedResponsesToolCalls(toolCallStates);
-        const effectiveFinishReason = (effectiveToolCalls && effectiveToolCalls.length > 0)
-          ? 'tool_calls'
-          : sawFinishReason
+        const outputTokensSeen = getResponseOutputTokens(usage);
+        const maxTokens = request.maxTokens ?? DEFAULT_MAX_TOKENS;
+
+        let effectiveFinishReason: string;
+        if (responseStatus === 'incomplete') {
+          // 输出达到 max_output_tokens 被截断：映射 'length' 走 Agent 续写守卫。
+          // 优先于 tool_calls——截断的 tool call JSON 绝不能执行。
+          effectiveFinishReason = 'length';
+        } else if (effectiveToolCalls && effectiveToolCalls.length > 0) {
+          effectiveFinishReason = 'tool_calls';
+        } else if (responseStatus === 'completed') {
+          effectiveFinishReason = sawFinishReason ? finishReason : 'stop';
+        } else {
+          // 收到终止信号但无最终状态（部分中转只发 response.done/[DONE]）：
+          // 与 OpenAIProvider 对齐——绝不默认伪装 'stop'，以输出 token 达顶作
+          // 截断证据降级 'length'，否则显式标记 'unknown'。
+          effectiveFinishReason = sawFinishReason
             ? finishReason
-            : 'stop';
+            : outputTokensSeen >= maxTokens
+              ? 'length'
+              : 'unknown';
+        }
 
         const result: IChatResponse = {
           id: responseId,
@@ -799,7 +836,27 @@ export class ResponseProvider extends BaseLLMProvider {
       }
     }
 
-    const finishReason = toolCalls.length > 0 ? 'tool_calls' : (data.status === 'completed' ? 'stop' : (data.status || 'stop'));
+    if (data.status === 'failed' || data.status === 'cancelled') {
+      throw new ProviderRequestError({
+        provider: this.name,
+        message: data.error?.message || `Responses API response ended with status '${data.status}'`,
+        retriable: true,
+      });
+    }
+
+    let finishReason: string;
+    if (data.status === 'incomplete') {
+      // 输出达到 max_output_tokens 被截断：映射 'length' 走 Agent 续写守卫，
+      // 且优先于 tool_calls——截断的 tool call JSON 绝不能执行。
+      finishReason = 'length';
+    } else if (toolCalls.length > 0) {
+      finishReason = 'tool_calls';
+    } else if (data.status === 'completed') {
+      finishReason = 'stop';
+    } else {
+      // 无 status 字段的中转响应：不伪装成模型主动停止。
+      finishReason = 'unknown';
+    }
 
     return {
       id: data.id || '',
@@ -927,16 +984,14 @@ export class ResponseProvider extends BaseLLMProvider {
           const name = t.name.trim();
           const description = t.description || '';
           const parameters = t.parameters || { type: 'object', properties: {} };
+          // Responses API 规范为扁平结构 { type: 'function', name, description,
+          // parameters }——与 Chat Completions 的 function 包装相反。额外嵌套的
+          // function 字段属非标准,严格网关可能 400,且会白白增大序列化体积。
           return {
             type: 'function' as const,
             name,
             description,
             parameters,
-            function: {
-              name,
-              description,
-              parameters,
-            },
           };
         });
     }

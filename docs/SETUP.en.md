@@ -35,9 +35,12 @@ Managed download/installation upstream tools and licenses: Eclipse JDTLS (EPL-2.
 ### 3.1 Standard Installation
 
 ```bash
+git submodule update --init --recursive   # Required on first clone: the 9 tree-sitter grammars under .cargo-vendor
 npm install
 npm run build
 ```
+
+The desktop build (`cargo check` / `npm run debug` / `release` / `publish`) depends on tree-sitter grammars (PHP, C#, CSS, HTML, JSON, Ruby, Kotlin, Swift, SQL) vendored as git submodules under `.cargo-vendor/*`. If you cloned without `--recurse-submodules`, run the command above first; otherwise Cargo will fail with a path-dependency error that gives no hint about submodules. The `npm run debug` / `release` / `publish` / `check:tauri` entry points detect missing submodules and run `git submodule update` automatically.
 
 If you only plan to read source or use the CLI, these two steps are usually sufficient. If you plan to make commit-level changes to the repository, continue with full verification.
 
@@ -208,6 +211,7 @@ npm run debug
 From the current version, `debug / release / publish` all first run a unified desktop pre-check script:
 
 - Auto-runs `npm install` if workspace `node_modules` is missing
+- Auto-runs `git submodule update --init --recursive` if the `.cargo-vendor/*` submodules are not initialized
 - Auto-attempts to fix or install Rust toolchain if `cargo/rustc` is missing or broken
 - release / publish additionally checks for `.NET SDK` and auto-installs if missing
 
@@ -350,6 +354,7 @@ First check:
 ### 10.3 cargo check or desktop debugging fails
 
 First check:
+- Whether the `.cargo-vendor/*` submodules are initialized (`git submodule update --init --recursive`). When missing, Cargo reports a missing path dependency, which gives no hint about submodules
 - Whether Rust toolchain is fully installed
 - Whether Cargo is in PATH
 

@@ -203,9 +203,13 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   const onPreviewImage = useCallback((src: string) => setPreviewImage(src), []);
 
   const sessionLock = useMemo<'app' | 'coding' | null>(() => {
-    const userMessages = messages.filter((m) => m.role === 'user' && !m.synthetic && !m.hidden);
-    if (userMessages.length === 0) return null;
-    return userMessages[0].workMode === 'app' ? 'app' : 'coding';
+    // 会话锁只取决于第一条可见用户消息：find 短路即可，无需全量 filter
+    // （流式合批时本 memo 每帧重算，长会话下 filter 是纯浪费）。
+    const firstUserMessage = messages.find(
+      (m) => m.role === 'user' && !m.synthetic && !m.hidden
+    );
+    if (!firstUserMessage) return null;
+    return firstUserMessage.workMode === 'app' ? 'app' : 'coding';
   }, [messages]);
 
   useEffect(() => {

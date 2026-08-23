@@ -35,9 +35,12 @@ CLI 只需 Node。桌面端、cargo check、打包需要 Rust。浏览器烟测�
 ### 3.1 标准安装
 
 ```bash
+git submodule update --init --recursive   # 首次克隆必需：.cargo-vendor 下的 9 个 tree-sitter grammar
 npm install
 npm run build
 ```
+
+桌面端构建（`cargo check` / `npm run debug` / `release` / `publish`）依赖 `.cargo-vendor/*` 下以 git 子模块形式 vendor 的 tree-sitter grammar（PHP、C#、CSS、HTML、JSON、Ruby、Kotlin、Swift、SQL）。如果克隆时没有带 `--recurse-submodules`，必须先执行上面的命令；否则 Cargo 解析依赖时会报与子模块毫无关联的 path 依赖错误。通过 `npm run debug` / `release` / `publish` / `check:tauri` 入口执行时脚本会自动探测缺失并补跑 `git submodule update`。
 
 如果你只打算阅读源码或使用 CLI，完成这两步通常就够了。
 如果你要对仓库做提交级别修改，建议继续跑完整验证。
@@ -211,6 +214,7 @@ npm run debug
 从当前版本开始，`debug / release / publish` 都会先走统一的桌面前置检查脚本：
 
 - 缺少 workspace `node_modules` 时会自动执行 `npm install`
+- `.cargo-vendor/*` 子模块未初始化时会自动执行 `git submodule update --init --recursive`
 - 缺少或损坏 Rust toolchain（`cargo/rustc` 不可用）时会自动尝试修复或安装
 - release / publish 额外会检查 `.NET SDK`，缺失时自动安装
 
@@ -359,6 +363,7 @@ smoke:agent-tools 更适合本地回归，不建议把它当作最基础 CI 门�
 
 优先排查：
 
+- `.cargo-vendor/*` 子模块是否已初始化（`git submodule update --init --recursive`）。缺失时 Cargo 报的是 path 依赖找不到，与子模块毫无关联
 - Rust toolchain 是否安装完整
 - Cargo 是否在 PATH 中
 

@@ -67,10 +67,13 @@ CodePapr is a local coding agent system built with DeepSeek cache optimization. 
 ### Install
 
 ```bash
+git submodule update --init --recursive   # first clone: tree-sitter grammars under .cargo-vendor
 npm install
 npm run build
 npm run verify
 ```
+
+> Desktop builds depend on the nine tree-sitter grammar submodules under `.cargo-vendor/*`. Clone with `--recurse-submodules` or run the command above; without them Cargo fails with a cryptic path-dependency error (the `npm run debug`/`release`/`publish` entry points detect and initialize them automatically).
 
 ### Launch Desktop
 

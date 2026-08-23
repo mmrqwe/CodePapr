@@ -1,0 +1,119 @@
+/**
+ * TodoList 上下文的纯注册表（无 store / IPC 依赖）。
+ *
+ * 拆出原因：worker（agentRuntime.worker）经
+ * `compactionHandler → contextCheckpoint` 只需**读取** TodoListContext，
+ * 但旧实现里读取函数与 `useAgentStore` 推送混在 todoListTool.ts，导致整条
+ * agentStore 图谱（约 860KB，含 i18n / sendMessage / projectStorage 等）
+ * 被打进 6MB 的 worker 包。本模块不导入任何 store，worker 侧只依赖它；
+ * 主线程的 todoListTool 通过 `setTodoChecklistListener` 注册 store 推送，
+ * 未注册时（worker 环境）变更仅落在注册表内存、不推送渲染结构——这与旧实现
+ * 在 worker 里写入一个无人消费的 agentStore 副本等价，但不再拖入整个依赖图。
+ */
+import type { TodoListContext } from '@codepapr/types';
+import type { TaskChecklist, TaskChecklistItemStatus } from '../utils/taskChecklistTypes';
+
+/**
+ * 把 core 的 TodoListContext 转成现有 TaskChecklist 渲染结构，
+ * 让既有 `_taskChecklists` store 和 `TaskChecklist.tsx` 组件无需改动即可显示。
+ */
+export function todoContextToChecklist(
+  ctx: TodoListContext,
+  sessionId: string
+): TaskChecklist {
+  const items = ctx.tasks.map((task) => ({
+    id: task.id,
+    title: task.title,
+    prompt: task.description,
+    status: task.status as TaskChecklistItemStatus,
+    summary: task.summary
+      ?? (task.errorLog ? `失败: ${task.errorLog}` : undefined),
+  }));
+
+  return {
+    sessionId,
+    title: ctx.goal,
+    items,
+    status: ctx.status,
+    createdAt: ctx.createdAt,
+    updatedAt: ctx.updatedAt,
+  };
+}
+
+/**
+ * 进程级的 TodoListContext 仓库，按 sessionId 索引。
+ * 因为 Worker 走 tool-request 桥回主线程执行工具，主线程持有一份足矣。
+ */
+const todoContexts = new Map<string, TodoListContext>();
+
+type ChecklistListener = (sessionId: string, checklist: TaskChecklist | null) => void;
+
+let checklistListener: ChecklistListener | null = null;
+
+/** 注册清单变更监听（主线程注册，把渲染结构推进 agentStore）。 */
+export function setTodoChecklistListener(listener: ChecklistListener | null): void {
+  checklistListener = listener;
+}
+
+function notifyChecklist(sessionId: string, checklist: TaskChecklist | null): void {
+  try {
+    checklistListener?.(sessionId, checklist);
+  } catch (err) {
+    console.warn('TodoList checklist listener failed:', err);
+  }
+}
+
+export function getTodoListContext(sessionId: string): TodoListContext | null {
+  return todoContexts.get(sessionId) ?? null;
+}
+
+/**
+ * 写入上下文并按模式通知监听：
+ * - `'rendered'`（默认）：推送渲染结构（工具提交、持久化恢复）
+ * - `'null'`：推送空值（新建空清单时旧实现即推 null，保持一致）
+ * - `'none'`：不通知（rememberTodoGoal 仅改 goal，旧实现不推送）
+ */
+export type TodoChecklistNotification = 'rendered' | 'null' | 'none';
+
+export function setTodoListContext(
+  sessionId: string,
+  ctx: TodoListContext,
+  notify: TodoChecklistNotification = 'rendered'
+): void {
+  todoContexts.set(sessionId, ctx);
+  if (notify === 'none') return;
+  notifyChecklist(sessionId, notify === 'null' ? null : todoContextToChecklist(ctx, sessionId));
+}
+
+/** 提交上下文：落库 + 推送渲染结构（工具提交路径用）。 */
+export function commitTodoListContext(sessionId: string, ctx: TodoListContext): TodoListContext {
+  setTodoListContext(sessionId, ctx, 'rendered');
+  return ctx;
+}
+
+export function resetTodoListContext(sessionId: string): void {
+  todoContexts.delete(sessionId);
+  notifyChecklist(sessionId, null);
+}
+
+/** 清空全部 TodoList 上下文（切换/关闭工作区时调用，防止跨项目累积）。 */
+export function clearAllTodoListContexts(): void {
+  for (const sessionId of todoContexts.keys()) {
+    notifyChecklist(sessionId, null);
+  }
+  todoContexts.clear();
+}
+
+/** 获取所有 TodoList 上下文，供持久化使用。 */
+export function getAllTodoListContexts(): ReadonlyMap<string, TodoListContext> {
+  return todoContexts;
+}
+
+/** 从持久化数据恢复 TodoList 上下文。 */
+export function restoreTodoListContexts(contexts: Readonly<Record<string, TodoListContext>>): void {
+  for (const [sessionId, ctx] of Object.entries(contexts)) {
+    if (ctx && ctx.tasks && Array.isArray(ctx.tasks) && ctx.tasks.length > 0) {
+      setTodoListContext(sessionId, ctx as TodoListContext);
+    }
+  }
+}

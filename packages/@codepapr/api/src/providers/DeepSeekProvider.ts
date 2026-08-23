@@ -471,11 +471,10 @@ export class DeepSeekProvider extends BaseLLMProvider {
               const name = t.name.trim();
               const description = t.description || '';
               const parameters = t.parameters || { type: 'object', properties: {} };
+              // OpenAI 兼容规范:{ type: 'function', function: {...} };顶层重复的
+              // name/description/parameters 属非标准字段,严格网关可能 400。
               return {
                 type: 'function' as const,
-                name,
-                description,
-                parameters,
                 function: {
                   name,
                   description,

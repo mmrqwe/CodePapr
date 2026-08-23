@@ -191,6 +191,30 @@ describe('Agent provider-overflow recovery (PR3)', () => {
     await expect(agent.chat('hi')).rejects.toThrow('network down');
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it('treats Anthropic "prompt is too long" 400 as overflow and runs emergency compaction', async () => {
+    // Anthropic 上下文超限的真实文案与 OpenAI 系完全不同——旧正则全部不匹配，
+    // Claude 路线超限会把裸错误直接抛给用户，不走 emergency-compact 恢复。
+    const anthropicOverflow = Object.assign(
+      new Error('Anthropic API error: prompt is too long: 210432 tokens > 200000 maximum'),
+      { retriable: false, status: 400 },
+    );
+    const chat = vi.fn<ILLMProvider['chat']>()
+      .mockRejectedValueOnce(anthropicOverflow)
+      .mockResolvedValueOnce(okResponse('恢复成功'));
+
+    const handler = vi.fn(async () => COMPACTION_RESULT);
+
+    const { agent } = buildAgent({ provider: buildProvider(chat), compactionHandler: handler });
+    const events: IChatStreamEvent[] = [];
+    const response = await agent.chat('hi', (event) => events.push(event));
+
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect((handler.mock.calls[0] as unknown[])[1]).toBe('provider-overflow');
+    expect(events.some((event) => event.type === 'context-compacted')).toBe(true);
+    expect(response.content).toBe('恢复成功');
+  });
 });
 
 describe('Agent round-start context budget decision (PR2)', () => {

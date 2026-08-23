@@ -92,6 +92,52 @@ describe('OpenAIProvider', () => {
     });
   });
 
+  it('工具定义使用规范的单层 function 包装，不带顶层重复字段', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-tools',
+        choices: [
+          {
+            message: { role: 'assistant', content: 'ok' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'gpt-4o',
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+      maxTokens: 1024,
+      tools: [
+        {
+          name: ' get_weather ',
+          description: 'Get weather',
+          parameters: { type: 'object', properties: { city: { type: 'string' } } },
+        },
+      ],
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.tools).toEqual([
+      {
+        type: 'function',
+        function: {
+          name: 'get_weather',
+          description: 'Get weather',
+          parameters: { type: 'object', properties: { city: { type: 'string' } } },
+        },
+      },
+    ]);
+    // 顶层重复字段是回归点：严格网关可能因非标准字段 400
+    expect(body.tools[0].name).toBeUndefined();
+    expect(body.tools[0].description).toBeUndefined();
+    expect(body.tools[0].parameters).toBeUndefined();
+  });
+
   it('filters the legacy reasoning placeholder echo out of responses', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

@@ -5,6 +5,7 @@ import { validateCustomTheme } from '../../theme/themeEngine';
 import { BUILTIN_THEMES, getBuiltinTheme } from '../../theme/themes';
 import type { CustomThemeRecord, ThemeMode } from '../../theme/types';
 import { useThemeStore } from '../../store/themeStore';
+import { useAgentStore } from '../../store/agentStore';
 import { toast } from '../../store/toastStore';
 import { FieldCard, FieldLabel, ToggleField } from '../forms';
 import type { SettingsTabProps } from './types';
@@ -184,6 +185,7 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
       await invoke('export_text_file', {
         savePath: filePath,
         content: JSON.stringify(payload, null, 2),
+        workspacePath: useAgentStore.getState().workspacePath || null,
       });
       toast.success(t.themeCustomExportSuccess);
     } catch (e) {

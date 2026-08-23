@@ -82,6 +82,54 @@ describe('DeepSeekProvider', () => {
     expect(body.messages[0]?.metadata).toBeUndefined();
   });
 
+  it('工具定义使用规范的单层 function 包装，不带顶层重复字段', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 'resp-tools',
+        choices: [
+          {
+            message: { role: 'assistant', content: 'ok' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({ apiKey: 'test-key' });
+    await provider.chat({
+      model: 'deepseek-chat',
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: 1 }],
+      maxTokens: 1024,
+      tools: [
+        {
+          name: 'search',
+          description: 'Search docs',
+          parameters: { type: 'object', properties: { q: { type: 'string' } } },
+        },
+      ],
+    });
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      tools?: Array<Record<string, unknown>>;
+    };
+    expect(body.tools).toEqual([
+      {
+        type: 'function',
+        function: {
+          name: 'search',
+          description: 'Search docs',
+          parameters: { type: 'object', properties: { q: { type: 'string' } } },
+        },
+      },
+    ]);
+    expect(body.tools?.[0]?.name).toBeUndefined();
+    expect(body.tools?.[0]?.description).toBeUndefined();
+    expect(body.tools?.[0]?.parameters).toBeUndefined();
+  });
+
   it('响应中的占位符回声会被剥离（含旧字面量与新模板句）', async () => {
     const fetchMock = vi
       .fn()

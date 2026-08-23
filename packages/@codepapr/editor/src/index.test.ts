@@ -66,10 +66,24 @@ describe('validateStaticPrompt', () => {
     expect(result.issues[0]).toContain('DATE');
   });
 
-  it('detects multiple patterns at once', () => {
-    const result = validateStaticPrompt('${a} {{b}} [TIMESTAMP] [DATE]');
+  it('detects ISO timestamps like the core ImmutablePrefix guard', () => {
+    const result = validateStaticPrompt('示例时间：2024-01-01T12:00');
     expect(result.valid).toBe(false);
-    expect(result.issues.length).toBe(4);
+    expect(result.issues[0]).toContain('ISO');
+  });
+
+  it('detects multiple patterns at once', () => {
+    // 注意 [TIMESTAMP] 同时命中 [TIMESTAMP] 与 [TIME 两条模式，故为 6 条
+    const result = validateStaticPrompt('${a} {{b}} [TIMESTAMP] [DATE] [SESSION_ID]');
+    expect(result.valid).toBe(false);
+    expect(result.issues.length).toBe(6);
+  });
+
+  it('repeated calls give stable results (no lastIndex drift from /g flags)', () => {
+    const prompt = 'Hello ${name}';
+    for (let i = 0; i < 3; i++) {
+      expect(validateStaticPrompt(prompt).valid).toBe(false);
+    }
   });
 });
 

@@ -396,6 +396,71 @@ async function installDotnetSdk() {
   throw new Error(`Automatic .NET SDK installation is not implemented for ${process.platform}.`);
 }
 
+const CARGO_VENDOR_SUBMODULES = [
+  'c-sharp',
+  'css',
+  'html',
+  'json',
+  'kotlin',
+  'php',
+  'ruby',
+  'sql',
+  'swift',
+];
+
+function missingVendorSubmodules() {
+  return CARGO_VENDOR_SUBMODULES.filter(
+    (name) => !fs.existsSync(path.resolve(repoRoot, '.cargo-vendor', name, 'Cargo.toml')),
+  );
+}
+
+// src-tauri/Cargo.toml 以 path 依赖引用 .cargo-vendor/* 下的 9 个 tree-sitter
+// grammar 子模块；未初始化时 cargo 报错与子模块毫无关联，这里提前探测并自动补齐。
+async function ensureCargoVendorSubmodules() {
+  let missing = missingVendorSubmodules();
+  if (missing.length === 0) {
+    return;
+  }
+
+  if (!fs.existsSync(path.resolve(repoRoot, '.git'))) {
+    throw new Error(
+      `Vendored tree-sitter grammars are missing (${missing.map((name) => `.cargo-vendor/${name}`).join(', ')}), `
+      + 'and the current directory is not a git checkout, so they cannot be initialized automatically. '
+      + 'Clone the repository with git so the .cargo-vendor submodules are available.',
+    );
+  }
+
+  const git = resolveExecutable(process.platform === 'win32' ? 'git.exe' : 'git');
+  if (!git) {
+    throw new Error(
+      `Vendored tree-sitter grammars are missing (${missing.map((name) => `.cargo-vendor/${name}`).join(', ')}). `
+      + 'git was not found in PATH to initialize them; run `git submodule update --init --recursive` manually.',
+    );
+  }
+
+  console.log('[desktop-workflow] .cargo-vendor submodules missing; running git submodule update --init --recursive ...');
+  await runWithRetries('git submodule update', 3, async () => {
+    await runCommand(git, ['submodule', 'update', '--init', '--recursive'], { cwd: repoRoot });
+  });
+
+  // 子模块 HEAD 已在目标 commit 但工作区文件缺失/损坏时,只有 --force 会重新检出。
+  missing = missingVendorSubmodules();
+  if (missing.length > 0) {
+    console.log('[desktop-workflow] Vendored grammars still missing; retrying with --force ...');
+    await runWithRetries('git submodule update --force', 2, async () => {
+      await runCommand(git, ['submodule', 'update', '--init', '--recursive', '--force'], { cwd: repoRoot });
+    });
+    missing = missingVendorSubmodules();
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `git submodule update finished but vendored grammars are still missing: ${missing.join(', ')}. `
+      + 'Run `git submodule update --init --recursive --force` manually and check network access to github.com.',
+    );
+  }
+}
+
 async function ensureRustToolchain() {
   if (await hasUsableRustToolchain()) {
     return;
@@ -502,6 +567,7 @@ if (!selectedWorkflow) {
 if (process.env[BOOTSTRAP_ENV_KEY] !== '1') {
   await ensureNodeDependencies();
   if (selectedWorkflow.needsRust) {
+    await ensureCargoVendorSubmodules();
     await ensureRustToolchain();
   }
   if (selectedWorkflow.needsDotnet) {

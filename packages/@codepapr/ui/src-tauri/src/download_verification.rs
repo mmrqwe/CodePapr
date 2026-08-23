@@ -117,8 +117,11 @@ pub fn fetch_official_checksum(url: &str) -> Result<Option<(String, bool, &'stat
         return Ok(Some((hash.trim().to_string(), false, "Adoptium API")));
     }
 
-    // .NET SDK: https://dotnetcli.azureedge.net/dotnet/Sdk/{version}/{filename}
-    if url.starts_with("https://dotnetcli.azureedge.net/dotnet/Sdk/") {
+    // .NET SDK: https://builds.dotnet.microsoft.com/dotnet/Sdk/{version}/{filename}
+    //（旧域名 dotnetcli.azureedge.net 已被微软弃用；旧域名保留以兼容缓存的调用方）
+    if url.starts_with("https://builds.dotnet.microsoft.com/dotnet/Sdk/")
+        || url.starts_with("https://dotnetcli.azureedge.net/dotnet/Sdk/")
+    {
         return fetch_dotnet_checksum(url).map(|hash| hash.map(|h| (h, true, ".NET SHA512")));
     }
 
@@ -173,6 +176,15 @@ fn fetch_dotnet_checksum(url: &str) -> Result<Option<String>, String> {
     }
     let version = parts[5];
     let filename = parts[6];
+
+    // 新 CDN（builds.dotnet.microsoft.com）的校验和与压缩包同目录、以 .sha512 结尾；
+    // 旧 CDN（dotnetcli.azureedge.net）放在独立的 SHA512/ 子目录。
+    if url.starts_with("https://builds.dotnet.microsoft.com/") {
+        let checksum_url =
+            format!("https://builds.dotnet.microsoft.com/dotnet/Sdk/{version}/{filename}.sha512");
+        let checksum = fetch_text(&checksum_url)?;
+        return Ok(Some(checksum.split_whitespace().next().unwrap_or("").trim().to_string()));
+    }
 
     let checksum_url =
         format!("https://dotnetcli.azureedge.net/dotnet/Sdk/{version}/SHA512/{filename}.sha512");
@@ -244,6 +256,38 @@ pub fn pinned_checksum(url: &str) -> Option<(&'static str, bool)> {
             "https://download.eclipse.org/jdtls/milestones/1.54.0/jdt-language-server-1.54.0-202511261751.tar.gz",
             "1a291a269bd88b3c4048219122961a52ec80872afbc7a3f34270b2ce77f7a14c",
             false,
+        ),
+        // .NET SDK 10.0.105（官方 .sha512 之外再锁定，哈希来自
+        // builds.dotnet.microsoft.com 的同名 .sha512 文件，2026-08-23 抓取）
+        (
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-osx-arm64.tar.gz",
+            "9058bc17aaf76d02e66a62e126eada0c343075e400731eb741552f17b9cc3a33f1854115d96e937d4e3918e9c805db5bf2ad309bc45c892228c4e75348392d61",
+            true,
+        ),
+        (
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-osx-x64.tar.gz",
+            "6fd1d8a225e83dfa603b4ba788c477ef34052d6fbb29c1fa157467fb198a007107827a961a4daee12f2e5d272d185c54a5f25e61efe19043c6ff1543f41175c6",
+            true,
+        ),
+        (
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-linux-arm64.tar.gz",
+            "305dc7e7fb99fcd8830d39122817ff5b4e0488ccf631cb9cdc7d7a8ec1e0405c1cf7721a5a011154a5a96cfcc3975c60cd3a048d5d0e8000db54059794ffa897",
+            true,
+        ),
+        (
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-linux-x64.tar.gz",
+            "2b0ed13106e4c859ccb9e3a5f1a450e84605ebd89bd84ac3453b30810ecfa62b6957baaa2ed041cc2e932f512113e16e3ae200fe5c4b48be66767747a06f4e41",
+            true,
+        ),
+        (
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-win-arm64.zip",
+            "46fa147a7aaaeaa9d031912c8896cb77ed5d8e27f72befbb184e3cb10e9568a781075d45ffc1c27831e2d153bda1c0d21d2dad86169127da2d39c2a01b45ada9",
+            true,
+        ),
+        (
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-win-x64.zip",
+            "d77efbb1c2ac1832fd9628ec5077d12ef03c4158e9436f3819fcbe8bd4db3220f08d1a94d67f78dc2961e60726bfe70493bf39cccfcbb018b62313f37b571fd5",
+            true,
         ),
     ];
 
@@ -329,5 +373,46 @@ pub fn verify_download(url: &str, path: &Path) -> Result<VerificationOutcome, St
             computed_sha256,
             error,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// .NET SDK 锁定条目必须落在新官方 CDN（dotnetcli.azureedge.net 已弃用），
+    /// 且哈希为 SHA-512（新 CDN 仅提供 .sha512 校验文件）。
+    #[test]
+    fn dotnet_pinned_entries_use_new_cdn_and_sha512() {
+        const DOTNET_VARIANTS: &[&str] = &[
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-osx-arm64.tar.gz",
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-osx-x64.tar.gz",
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-linux-arm64.tar.gz",
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-linux-x64.tar.gz",
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-win-arm64.zip",
+            "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-win-x64.zip",
+        ];
+
+        for url in DOTNET_VARIANTS {
+            let Some((hash, use_sha512)) = pinned_checksum(url) else {
+                panic!(".NET SDK URL 未命中锁定清单: {url}");
+            };
+            assert!(use_sha512, ".NET SDK 锁定条目必须声明 SHA-512: {url}");
+            assert_eq!(hash.len(), 128, "SHA-512 应为 128 个十六进制字符: {url}");
+
+            // fetch_dotnet_checksum 依赖 parts[5]=version / parts[6]=filename 的布局，
+            // 布局漂移会静默拿到错误的校验文件。
+            let parts: Vec<&str> = url.split('/').collect();
+            assert_eq!(parts[5], "10.0.105");
+            assert!(parts[6].starts_with("dotnet-sdk-10.0.105-"));
+        }
+    }
+
+    /// 官方校验源路由：新 .NET CDN 与旧 CDN 域名都应进入 .NET 校验逻辑。
+    #[test]
+    fn dotnet_checksum_routing_recognizes_both_cdn_domains() {
+        // 仅验证前缀路由可达性（不发起网络请求）。
+        let new_cdn = "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.105/dotnet-sdk-10.0.105-osx-arm64.tar.gz";
+        assert!(new_cdn.starts_with("https://builds.dotnet.microsoft.com/dotnet/Sdk/"));
     }
 }

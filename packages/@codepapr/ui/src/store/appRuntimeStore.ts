@@ -15,19 +15,25 @@ import {
   type PluginChrome,
   type PluginUiState,
 } from '../papr/pluginUiStorage';
+import { useAgentStore } from './agentStore';
 
 /** 诊断埋点：openedAppId 被清空 = 用户看到「app 自己退出」。把每次变更连同
- * 调用栈落盘，抓住无 UI 操作时的幕后调用者。 */
+ * 调用栈落盘，抓住无 UI 操作时的幕后调用者。
+ * 注：agentStore 为静态导入（它本就在主 chunk 中，动态导入无分割效果，
+ * 只会在构建时产生 INEFFECTIVE_DYNAMIC_IMPORT 告警）；这里仍异步执行，
+ * 保证诊断不阻塞主流程。 */
 function diagStoreEvent(action: string): void {
   const stack = (new Error().stack ?? '').split('\n').slice(2, 6).join(' <- ');
-  void import('./agentStore')
-    .then(({ useAgentStore }) => {
+  queueMicrotask(() => {
+    try {
       const workspacePath = useAgentStore.getState().workspacePath;
       if (workspacePath) {
         invoke('log_ui_event', { workspacePath, message: `${action} | ${stack}` }).catch(() => {});
       }
-    })
-    .catch(() => { /* 诊断不影响功能 */ });
+    } catch {
+      /* 诊断不影响功能 */
+    }
+  });
 }
 
 export interface AppInstance {
@@ -168,16 +174,18 @@ function chromeForPersist(
 }
 
 function schedulePersist(get: () => AppRuntimeState): void {
-  void import('./agentStore')
-    .then(({ useAgentStore }) => {
+  queueMicrotask(() => {
+    try {
       const workspacePath = useAgentStore.getState().workspacePath;
       if (!workspacePath) return;
       const state = get();
       void queueSavePluginUi(workspacePath, {
         chrome: chromeForPersist(state.pluginChrome, state.apps),
       });
-    })
-    .catch(() => {});
+    } catch {
+      /* 持久化失败不阻塞 UI */
+    }
+  });
 }
 
 export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({

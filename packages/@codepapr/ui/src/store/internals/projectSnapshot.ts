@@ -9,7 +9,7 @@ import {
   type ProjectStateSnapshot,
   type ProjectMessage,
 } from '../../utils/projectStorage';
-import { getAllTodoListContexts } from '../../tools/todoListTool';
+import { getAllTodoListContexts } from '../../tools/todoListRegistry';
 import { buildPruneOptions } from '../../agent/compactionHandler';
 import { sanitizeSessionMessagesForPersistence } from './persistence';
 import { toast } from '../toastStore';

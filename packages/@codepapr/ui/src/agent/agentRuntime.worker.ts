@@ -95,6 +95,13 @@ function setSessionLog(sessionId: string, log: AppendOnlyLog): void {
   }
 }
 
+/** 等待主线程回传 `full-sync-response`（sync-mismatch 的应答）。按
+ *  requestId 登记，随 cancel-session 的 waiter 清扫一并回收，避免取消后挂死。 */
+const fullSyncWaiters = new Map<
+  string,
+  { resolve: (payload: { messages: IMessage[] }) => void; reject: (err: Error) => void }
+>();
+
 const chatResponseWaiters = new Map<
   string,
   {
@@ -531,6 +538,39 @@ function createLog(sessionId: string, messages: IMessage[]): AppendOnlyLog {
     // happens to match by length and would spuriously throw if formatting changed.
     totalBytes: messages.reduce((sum, message) => sum + Serializer.getByteLength(message), 0),
   });
+  return log;
+}
+
+/** 增量同步前缀校验失败时的全量重建：向主线程换取该会话的完整日志，
+ *  原地重建缓存后返回（调用方负责继续追加本回合的新消息）。
+ *  取消时由 cancel-session 的 waiter 清扫（`fullSyncWaiters`）拒绝。 */
+async function requestFullSync(
+  requestId: string,
+  sessionId: string,
+  signal: AbortSignal
+): Promise<AppendOnlyLog> {
+  postMessageToMain({ type: 'sync-mismatch', requestId, sessionId });
+  const payload = await new Promise<{ messages: IMessage[] }>((resolve, reject) => {
+    const onAbort = (): void => {
+      if (fullSyncWaiters.get(requestId) === waiter) {
+        fullSyncWaiters.delete(requestId);
+        reject(new DOMException('Session was cancelled', 'AbortError'));
+      }
+    };
+    const waiter = {
+      // resolve 时摘除监听：回合正常结束后 abort 永不触发，滞留监听会把
+      // 已结算的闭包挂在 AbortController 上。
+      resolve: (value: { messages: IMessage[] }): void => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      reject,
+    };
+    fullSyncWaiters.set(requestId, waiter);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  const log = createLog(sessionId, payload.messages);
+  setSessionLog(sessionId, log);
   return log;
 }
 
@@ -1405,23 +1445,32 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
 
   // Reuse a per-session log across turns to avoid re-cloning + re-hashing the
   // full history each turn. Full sync rebuilds it from payload.messages;
-  // incremental sync appends only newMessages onto the cached log after
-  // verifying the cached length matches what the main thread expects (a
-  // mismatch means the cache is stale and is treated as an error — the main
-  // thread only sends incremental when its tracked length agrees; it is
-  // responsible for invalidating its tracked length whenever a turn errors
-  // or is cancelled so the next chat falls back to a full sync).
+  // incremental sync reconciles the cached log against the main-thread mirror:
+  //  - 长度一致或缓存有残留尾部（回合中道取消/出错）：前缀级联哈希校验通过
+  //    后裁剪尾部、追加 newMessages（主线程日志只追加，前缀必然一致）；
+  //  - 哈希不一致（中途压缩/裁剪改写过 worker 日志后回合又失败）或缓存缺失：
+  //    向主线程发 sync-mismatch 换取完整消息、原地重建后继续本回合。
+  // 主线程负责在回合出错/取消时保留（而非清除）同步坐标，并保证下次增量
+  // 携带正确的前缀哈希；校验失败永远有全量重建兜底，不会静默错位。
   let sessionLog = sessionLogs.get(payload.sessionId);
-  if (payload.incrementalSync && sessionLog) {
-    const { expectedBaseLength, newMessages } = payload.incrementalSync;
-    if (sessionLog.length() !== expectedBaseLength) {
-      throw new Error(
-        `Worker log cache mismatch for session ${payload.sessionId}: ` +
-          `cached ${sessionLog.length()}, expected base ${expectedBaseLength}`
-      );
-    }
-    if (newMessages.length > 0) {
-      await sessionLog.appendBatch(newMessages);
+  if (payload.incrementalSync) {
+    const { expectedBaseLength, newMessages, prefixHash } = payload.incrementalSync;
+    const cachedLength = sessionLog?.length() ?? 0;
+    const prefixVerified =
+      !!sessionLog &&
+      cachedLength >= expectedBaseLength &&
+      sessionLog.computeHashUpTo(expectedBaseLength) === prefixHash;
+    if (prefixVerified && sessionLog) {
+      if (cachedLength > expectedBaseLength) {
+        sessionLog.truncateTo(expectedBaseLength);
+      }
+      if (newMessages.length > 0) {
+        await sessionLog.appendBatch(newMessages);
+      }
+    } else {
+      // 前缀校验失败或缺缓存：换取完整日志原地重建（已是主线程全量，
+      // 不得再追加 newMessages——它们已被包含在重建结果中）。
+      sessionLog = await requestFullSync(payload.requestId, payload.sessionId, abortController.signal);
     }
   } else {
     sessionLog = createLog(payload.sessionId, payload.messages);
@@ -1660,6 +1709,14 @@ function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
       }
     }
 
+    {
+      const fullSyncWaiter = fullSyncWaiters.get(message.requestId);
+      if (fullSyncWaiter) {
+        fullSyncWaiters.delete(message.requestId);
+        fullSyncWaiter.reject(new DOMException('Session was cancelled', 'AbortError'));
+      }
+    }
+
     subagentCacheStatsMap.delete(message.requestId);
 
     postMessageToMain({
@@ -1673,6 +1730,15 @@ function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
     const controller = appAgentAbortControllers.get(message.requestId);
     if (controller) {
       controller.abort();
+    }
+    return;
+  }
+
+  if (message.type === 'full-sync-response') {
+    const waiter = fullSyncWaiters.get(message.requestId);
+    if (waiter) {
+      fullSyncWaiters.delete(message.requestId);
+      waiter.resolve({ messages: message.messages });
     }
     return;
   }

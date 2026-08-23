@@ -816,6 +816,11 @@ const ProjectGraphKnowledgeGraph = forwardRef<
     setGraphError(null);
     setSelectedNode(null);
 
+    // render 是异步的而依赖变化（主题/聚焦/点击回调重建等）会在完成前重跑本
+    // effect：cleanup 先 destroy 旧图，旧 render 的 then/catch 随后落到已销毁的
+    // 实例上抛错，被误报为「图渲染失败」。cancelled 标志让旧实例的回调静默退出。
+    let cancelled = false;
+
     try {
     const { nodes, edges } = buildG6Data(
       projectGraph.nodes,
@@ -1114,11 +1119,14 @@ const ProjectGraphKnowledgeGraph = forwardRef<
     graph.render()
       .then(() => {
         // 图重建（切换视图/聚焦/主题）后恢复外部高亮请求。
+        // 若本 effect 已被新一轮重建取消，旧实例已销毁，跳过以免抛错误报。
+        if (cancelled) return;
         if (highlightRef.current) {
           applyGraphHighlight(graph, highlightRef.current);
         }
       })
       .catch((err) => {
+        if (cancelled) return;
         console.error('G6 render error:', err);
         setGraphError(err instanceof Error ? err.message : String(err));
       });
@@ -1166,6 +1174,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
     observer.observe(container);
 
     return () => {
+      cancelled = true;
       cancelAnimationFrame(resizeRaf);
       observer.disconnect();
       graph.destroy();

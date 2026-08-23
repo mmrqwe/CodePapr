@@ -59,6 +59,9 @@ export function TtsInstaller({ onClose }: TtsInstallerProps) {
 
   const startInstall = useCallback(async () => {
     setRunning(true);
+    // 重复点击安装（或取消后重装）时先解绑旧监听器，避免监听器累积。
+    unlistenRef.current?.();
+    unlistenRef.current = null;
     unlistenRef.current = await listen<InstallStep>('tts-install-progress', (event) => {
       updateStep(event.payload);
       if (event.payload.status === 'cancelled' || event.payload.status === 'ok' || event.payload.status === 'fail') {
@@ -66,7 +69,13 @@ export function TtsInstaller({ onClose }: TtsInstallerProps) {
       }
     });
 
-    invoke('tts_install', { source: 'hf-mirror' }).catch(() => {});
+    try {
+      await invoke('tts_install', { source: 'hf-mirror' });
+    } catch (err) {
+      // 启动失败要让用户看到：日志区留痕并退出 running 态，否则按钮永远卡在 Installing。
+      setRunning(false);
+      setLogs((prev) => [...prev, `Failed to start installation: ${err instanceof Error ? err.message : String(err)}`]);
+    }
   }, [updateStep]);
 
   const handleCancel = useCallback(() => {

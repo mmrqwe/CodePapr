@@ -83,18 +83,17 @@ export interface MonacoLspHoverResult {
 
 // ─── 提示词校验 ───────────────────────────────────────────────
 
+import { STATIC_CONTENT_FORBIDDEN_PATTERNS } from '@codepapr/common';
+
 /**
  * 校验提示词不包含模板占位符（缓存破坏者）
+ *
+ * 与 `@codepapr/core` 的 `ImmutablePrefix.validateStaticContent` 共用同一份
+ * 模式表（`STATIC_CONTENT_FORBIDDEN_PATTERNS`），两处关卡语义保持一致。
  */
 export function validateStaticPrompt(prompt: string): { valid: boolean; issues: string[] } {
   const issues: string[] = [];
-  const patterns = [
-    { re: /\$\{[^}]+\}/g, name: '${var} 模板' },
-    { re: /\{\{[^}]+\}\}/g, name: '{{var}} 模板' },
-    { re: /\[TIMESTAMP\]/g, name: '[TIMESTAMP] 占位符' },
-    { re: /\[DATE\]/g, name: '[DATE] 占位符' },
-  ];
-  for (const { re, name } of patterns) {
+  for (const { re, name } of STATIC_CONTENT_FORBIDDEN_PATTERNS) {
     if (re.test(prompt)) {
       issues.push(`检测到动态内容: ${name} — 会破坏缓存一致性`);
     }

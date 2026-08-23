@@ -342,10 +342,12 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private readonly workerDiagnostics: string[] = [];
   private snapshotTimerId: ReturnType<typeof setTimeout> | null = null;
   // Tracks the log length the worker's per-session cache should currently hold.
-  // When it matches this.logStore.length() the next chat syncs incrementally
-  // (no full-log clone); a mismatch (first turn, resetToMessage, clear, pop,
-  // compaction) falls back to a full sync. Fresh per WorkerBackedAgent instance,
-  // so a recreated worker always starts with a full sync.
+  // 5.0.1：不同步时不再全量克隆——主线程日志只追加（delta 仅经 result 落地），
+  // 因此缓存坐标落后/超前都可用「前缀级联哈希校验 + 裁剪/追赶」增量修复；
+  // 校验失败由 worker 发 sync-mismatch 换全量。回合出错/取消时保留坐标（缓存
+  // 可能残留部分回合尾部，长度对不上但前缀一致，下次增量校验后裁剪即可）。
+  // Fresh per WorkerBackedAgent instance, so a recreated worker always starts
+  // with a full sync.
   private readonly workerSyncedLength = new Map<string, number>();
   /** Must match the worker's withIdleTimeout window for the same run, so a
     *  run is never killed on one side while the other still considers it
@@ -675,13 +677,17 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     const syncedLength = this.workerSyncedLength.get(sessionId);
     let chatMessages: IMessage[];
     let incrementalSync: AgentWorkerChatPayload['incrementalSync'];
-    if (syncedLength === mainLength) {
-      // Worker cache is in sync: send only messages appended since (normally
-      // none) and let the worker reuse its cached log — no full-log clone.
+    if (syncedLength !== undefined && syncedLength <= mainLength) {
+      // 增量路径（5.0.1）：坐标有效（等于或落后于主日志）。主日志只经
+      // result 追加，前缀必然与 worker 缓存一致；落后时把差额一并下发追赶，
+      // 缓存若残留上次出错/取消回合的部分尾部，由 worker 端按前缀哈希
+      // 校验后裁剪。校验失败时 worker 发 sync-mismatch 换全量，任何分支都
+      // 不会静默错位——长会话不再「一次不同步就全量克隆」。
       chatMessages = [];
       incrementalSync = {
         expectedBaseLength: syncedLength,
         newMessages: this.logStore.getMessagesSince(syncedLength),
+        prefixHash: syncedLength > 0 ? this.logStore.computeHashUpTo(syncedLength) : '',
       };
     } else {
       chatMessages = [...this.logStore.getAllMessages()];
@@ -933,9 +939,24 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           this.activeRequestId = null;
         }
         this.flushDeltas(pending);
-        this.workerSyncedLength.delete(this.config.sessionId);
+        // 保留同步坐标：被取消回合可能已在 worker 缓存里留下部分尾部，但
+        // 主日志未变（坐标仍等于主日志长度），下次增量校验前缀哈希后裁剪
+        // 尾部即可——旧实现整体置失效会强迫长会话全量克隆。
         pending.reject(new DOMException('Session was cancelled', 'AbortError'));
       }
+      return;
+    }
+
+    if (message.type === 'sync-mismatch') {
+      // worker 缓存前缀校验失败（中途压缩改写后回合失败等罕见路径）：
+      // 回传完整日志供原地重建。回合在飞期间主日志不会变化（delta 仅在
+      // result 落地），此处快照与挂起 chat 的基准一致。
+      this.postToWorker({
+        type: 'full-sync-response',
+        requestId: message.requestId,
+        sessionId: message.sessionId,
+        messages: [...this.logStore.getAllMessages()],
+      } satisfies MainToAgentWorkerMessage);
       return;
     }
 
@@ -1258,7 +1279,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     if (this.activeRequestId === message.requestId) {
       this.activeRequestId = null;
     }
-    this.workerSyncedLength.delete(this.config.sessionId);
+    // 保留同步坐标（同 cancelled 分支）：出错回合在缓存里的残留尾部由下次
+    // 增量的前缀哈希校验裁剪；若回合中途压缩改写过缓存，哈希不一致会触发
+    // sync-mismatch 全量重建兜底。
     pending.reject(reconstructWorkerError(message));
   };
 

@@ -25,7 +25,7 @@ import {
   validatePinnedStatePreserved,
 } from '../../utils/contextStateMerge';
 import { classifyContextMessages } from '../../utils/contextClassification';
-import { getTodoListContext } from '../../tools/todoListTool';
+import { getTodoListContext } from '../../tools/todoListRegistry';
 import {
   buildCompactorDefinition,
   resolveEffectiveCompactorTier,

@@ -116,13 +116,20 @@ export interface AgentWorkerChatPayload {
   sessionId: string;
   workspacePath: string;
   messages: IMessage[];
-  /** When set, the worker reuses its cached log for `sessionId` (verified to be
-   *  at `expectedBaseLength`) and appends `newMessages` instead of rebuilding
-   *  from `messages` — avoiding a full-log structured clone each turn. `messages`
-   *  is then empty. Absent => full sync from `messages`. */
+  /** When set, the worker reuses its cached log for `sessionId` instead of
+   *  rebuilding from `messages` — avoiding a full-log structured clone each
+   *  turn. `messages` is then empty. Absent => full sync from `messages`.
+   *
+   * 增量追赶（5.0.1）：缓存长度与 `expectedBaseLength` 不一致时（回合中道
+   * 取消/出错残留尾部，或中途压缩/裁剪改写了 worker 日志），先按
+   *  `prefixHash`（主线程日志前 `expectedBaseLength` 条消息的级联哈希，
+   *  `AppendOnlyLog.computeHashUpTo` 按前缀长度记忆化）校验公共前缀；
+   *  一致则把缓存裁剪/追赶到 `expectedBaseLength` 后追加 `newMessages`，
+   *  不一致则向主线程发 `sync-mismatch` 换取完整消息、原地重建后继续。 */
   incrementalSync?: {
     expectedBaseLength: number;
     newMessages: IMessage[];
+    prefixHash: string;
   };
   userInput: string;
   /**
@@ -260,6 +267,14 @@ export type MainToAgentWorkerMessage =
       error?: string;
     }
   | {
+      /** `sync-mismatch` 的应答：该会话当前完整日志，worker 用它重建缓存后
+       *  继续挂起的回合（重建结果已含全部消息，无需再追加增量）。 */
+      type: 'full-sync-response';
+      requestId: string;
+      sessionId: string;
+      messages: IMessage[];
+    }
+  | {
       type: 'fetch-response-start';
       fetchId: string;
       status: number;
@@ -389,6 +404,14 @@ export type AgentWorkerToMainMessage =
       type: 'commit-context-compaction';
       chatRequestId: string;
       request: CommitContextCompactionRequest;
+    }
+  | {
+      /** 增量同步校验失败（缓存前缀哈希与主线程不一致，或缓存落后无法
+       *  原地追赶）：请求主线程回传该会话的完整消息以原地重建缓存。
+       *  见 `full-sync-response`。 */
+      type: 'sync-mismatch';
+      requestId: string;
+      sessionId: string;
     }
   | {
       type: 'fetch-request';

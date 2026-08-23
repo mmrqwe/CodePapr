@@ -14,7 +14,7 @@ import {
 import { isModelVisibleUiMessage, SESSION_BOOTSTRAP_MESSAGE_ID } from '../utils/contextSurface';
 import { maybeGenerateContextCheckpoint } from '../store/internals/contextCheckpoint';
 import { effectiveMaxContextTokens, type ContextProvider } from '../utils/contextLimits';
-import { getTodoListContext } from '../tools/todoListTool';
+import { getTodoListContext } from '../tools/todoListRegistry';
 import type { CompactionSettings, UIToolInvocation } from '../store/internals/types';
 import type { MidLoopCompactionCommit } from './agentWorkerProtocol';
 

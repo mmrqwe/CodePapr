@@ -457,11 +457,12 @@ export class OpenAIProvider extends BaseLLMProvider {
               const name = t.name.trim();
               const description = t.description || '';
               const parameters = t.parameters || { type: 'object', properties: {} };
+              // OpenAI 规范:{ type: 'function', function: { name, description, parameters } }。
+              // 顶层再写一份 name/description/parameters 属非标准字段——官方端点
+              // 会忽略,但严格的兼容网关可能 400,且 sortedStringify 会把双份字段
+              // 全部序列化进缓存键/请求体。
               return {
                 type: 'function' as const,
-                name,
-                description,
-                parameters,
                 function: {
                   name,
                   description,

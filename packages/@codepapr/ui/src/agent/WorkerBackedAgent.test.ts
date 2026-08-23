@@ -387,6 +387,152 @@ describe('WorkerBackedAgent', () => {
     ]);
   });
 
+  it('keeps incremental sync after a cancelled turn (retained coordinate + prefix hash)', async () => {
+    const agent = createAgent();
+    const worker = MockWorker.instances[0];
+
+    // Turn 1 succeeds: main log = [u1, a1], workerSyncedLength = 2.
+    const chat1 = agent.chat('hello');
+    const msg1 = chatMessages(worker)[0];
+    if (msg1?.type !== 'chat') throw new Error('expected chat message');
+    const requestId1 = msg1.payload.requestId;
+    worker?.emit({
+      type: 'result',
+      requestId: requestId1,
+      response: { role: 'assistant', content: 'r1' },
+      deltaMessages: [
+        { id: 'u1', role: 'user', content: 'hello', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: 'r1', timestamp: 2 },
+      ],
+      logLength: 2,
+    });
+    await chat1;
+
+    // Turn 2 is cancelled mid-flight. The worker cache may hold a stale tail,
+    // but the main log is unchanged; the coordinate is retained (5.0.1).
+    const chat2 = agent.chat('again');
+    const msg2 = chatMessages(worker)[1];
+    if (msg2?.type !== 'chat') throw new Error('expected chat message');
+    const requestId2 = msg2.payload.requestId;
+    agent.cancelSession();
+    worker?.emit({ type: 'cancelled', requestId: requestId2 });
+    await expect(chat2).rejects.toBeInstanceOf(DOMException);
+
+    // Turn 3 must stay incremental — no full-log clone — and carry the prefix
+    // hash so the worker can hash-verify then truncate any stale tail.
+    const chat3 = agent.chat('third');
+    const msg3 = chatMessages(worker)[2];
+    if (msg3?.type !== 'chat') throw new Error('expected chat message');
+    expect(msg3.payload.incrementalSync).toBeDefined();
+    expect(msg3.payload.incrementalSync?.expectedBaseLength).toBe(2);
+    expect(msg3.payload.incrementalSync?.prefixHash).toBeTruthy();
+    expect(msg3.payload.messages).toEqual([]);
+
+    const requestId3 = msg3.payload.requestId;
+    worker?.emit({
+      type: 'result',
+      requestId: requestId3,
+      response: { role: 'assistant', content: 'r3' },
+      deltaMessages: [
+        { id: 'u3', role: 'user', content: 'third', timestamp: 3 },
+        { id: 'a3', role: 'assistant', content: 'r3', timestamp: 4 },
+      ],
+      logLength: 4,
+    });
+    await chat3;
+  });
+
+  it('keeps incremental sync after an errored turn', async () => {
+    const agent = createAgent();
+    const worker = MockWorker.instances[0];
+
+    const chat1 = agent.chat('hello');
+    const msg1 = chatMessages(worker)[0];
+    if (msg1?.type !== 'chat') throw new Error('expected chat message');
+    const requestId1 = msg1.payload.requestId;
+    worker?.emit({
+      type: 'result',
+      requestId: requestId1,
+      response: { role: 'assistant', content: 'r1' },
+      deltaMessages: [
+        { id: 'u1', role: 'user', content: 'hello', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: 'r1', timestamp: 2 },
+      ],
+      logLength: 2,
+    });
+    await chat1;
+
+    // Turn 2 errors. Coordinate retained; next turn stays incremental.
+    const chat2 = agent.chat('again');
+    const msg2 = chatMessages(worker)[1];
+    if (msg2?.type !== 'chat') throw new Error('expected chat message');
+    const requestId2 = msg2.payload.requestId;
+    worker?.emit({ type: 'error', requestId: requestId2, error: 'boom' });
+    await expect(chat2).rejects.toThrow('boom');
+
+    const chat3 = agent.chat('third');
+    const msg3 = chatMessages(worker)[2];
+    if (msg3?.type !== 'chat') throw new Error('expected chat message');
+    expect(msg3.payload.incrementalSync?.expectedBaseLength).toBe(2);
+    expect(msg3.payload.messages).toEqual([]);
+    const requestId3 = msg3.payload.requestId;
+    worker?.emit({
+      type: 'result',
+      requestId: requestId3,
+      response: { role: 'assistant', content: 'r3' },
+      deltaMessages: [],
+      logLength: 2,
+    });
+    await chat3;
+  });
+
+  it('answers sync-mismatch with the current full session log', async () => {
+    const agent = createAgent();
+    const worker = MockWorker.instances[0];
+
+    // Turn 1 fills the main log with 2 messages.
+    const chat1 = agent.chat('hello');
+    const msg1 = chatMessages(worker)[0];
+    if (msg1?.type !== 'chat') throw new Error('expected chat message');
+    const requestId1 = msg1.payload.requestId;
+    worker?.emit({
+      type: 'result',
+      requestId: requestId1,
+      response: { role: 'assistant', content: 'r1' },
+      deltaMessages: [
+        { id: 'u1', role: 'user', content: 'hello', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: 'r1', timestamp: 2 },
+      ],
+      logLength: 2,
+    });
+    await chat1;
+
+    // Turn 2: worker reports a prefix-hash mismatch (its cache was rewritten by
+    // mid-loop compaction and the turn then failed); main must ship the full log.
+    const chat2 = agent.chat('again');
+    const msg2 = chatMessages(worker)[1];
+    if (msg2?.type !== 'chat') throw new Error('expected chat message');
+    const requestId2 = msg2.payload.requestId;
+    worker?.emit({ type: 'sync-mismatch', requestId: requestId2, sessionId: 'session-1' });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const fullSync = worker?.messages.find(
+      (m) => m.type === 'full-sync-response' && m.requestId === requestId2
+    );
+    expect(fullSync).toBeDefined();
+    if (fullSync?.type !== 'full-sync-response') throw new Error('expected full-sync-response');
+    expect(fullSync.messages.map((m) => m.id)).toEqual(['u1', 'a1']);
+
+    worker?.emit({
+      type: 'result',
+      requestId: requestId2,
+      response: { role: 'assistant', content: 'r2' },
+      deltaMessages: [],
+      logLength: 2,
+    });
+    await chat2;
+  });
+
   it('excludes read_image and graph from worker tool definitions when multimodal is off', async () => {
     const agent = createAgent([], { multimodalEnabled: false });
     const chatPromise = agent.chat('hello');

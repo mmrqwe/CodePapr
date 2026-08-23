@@ -12,6 +12,8 @@ import {
   stripAvatarDataUrl,
 } from '../utils/characterAvatar';
 import { toast } from './toastStore';
+import { useAgentStore } from './agentStore';
+import { saveCurrentProjectState } from './internals/projectSnapshot';
 
 interface CharacterState {
   loaded: boolean;
@@ -131,8 +133,6 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
       console.warn('Failed to delete character voice files:', err);
     }
     try {
-      const { useAgentStore } = await import('./agentStore');
-      const { saveCurrentProjectState } = await import('./internals/projectSnapshot');
       useAgentStore.setState((s) => ({
         sessions: s.sessions.map((session) =>
           session.activeCharacterId === characterId
@@ -152,8 +152,6 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
     if (!get().loaded) return;
     set({ activeCharacterId: characterId });
     try {
-      const { useAgentStore } = await import('./agentStore');
-      const { saveCurrentProjectState } = await import('./internals/projectSnapshot');
       const sessionId = useAgentStore.getState().activeSessionId;
       if (!sessionId) return;
       useAgentStore.setState((s) => ({

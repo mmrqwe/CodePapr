@@ -211,6 +211,57 @@ describe('AppendOnlyLog - 追加式日志', () => {
       })
     ).toThrow(AppendOnlyViolationError);
   });
+
+  it('computeHashUpTo 与全量哈希的前缀语义一致且幂等', async () => {
+    const log = new AppendOnlyLog('s6');
+    await log.appendBatch([
+      MessageFactory.user('a'),
+      MessageFactory.assistant('b'),
+      MessageFactory.user('c'),
+    ]);
+
+    expect(log.computeHashUpTo(0)).toBe('');
+    expect(log.computeHashUpTo(3)).toBe(log.computeHash());
+    // 幂等 + 增量扩展：两次调用同值，扩展 1 条后前缀哈希与重新计算一致
+    expect(log.computeHashUpTo(2)).toBe(log.computeHashUpTo(2));
+    const ref = new AppendOnlyLog('s6-ref');
+    await ref.appendBatch(log.getAllMessages().slice(0, 2) as IMessage[]);
+    expect(log.computeHashUpTo(2)).toBe(ref.computeHash());
+
+    await log.append(MessageFactory.assistant('d'));
+    expect(log.computeHashUpTo(4)).toBe(log.computeHash());
+    expect(() => log.computeHashUpTo(5)).toThrow(AppendOnlyViolationError);
+  });
+
+  it('truncateTo 裁剪尾部并保持一致性，越界抛错', async () => {
+    const log = new AppendOnlyLog('s8');
+    await log.appendBatch([
+      MessageFactory.user('a'),
+      MessageFactory.assistant('b'),
+      MessageFactory.user('c'),
+    ]);
+
+    expect(() => log.truncateTo(4)).toThrow(AppendOnlyViolationError);
+    log.truncateTo(2);
+    expect(log.length()).toBe(2);
+    expect(log.validate()).toBe(true);
+    expect(log.getAllMessages().map((m) => m.content)).toEqual(['a', 'b']);
+    // 裁剪后继续追加：哈希链仍自洽
+    await log.append(MessageFactory.user('d'));
+    expect(log.length()).toBe(3);
+    expect(log.validate()).toBe(true);
+  });
+
+  it('popLastMessage 后前缀哈希记忆化失效（不会串用旧链）', async () => {
+    const log = new AppendOnlyLog('s9');
+    const before = [MessageFactory.user('a'), MessageFactory.assistant('b')];
+    await log.appendBatch(before as IMessage[]);
+    const h2 = log.computeHashUpTo(2);
+    log.popLastMessage();
+    await log.append(MessageFactory.user('different'));
+    // 长度回到 2 但内容已变，不得复用旧的 2 条哈希
+    expect(log.computeHashUpTo(2)).not.toBe(h2);
+  });
 });
 
 describe('MessageFactory - API 缓存内容稳定性', () => {

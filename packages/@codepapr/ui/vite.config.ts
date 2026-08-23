@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-import { sharedCoverageConfig } from '../../../vitest.shared';
+import { sharedCoverageConfig, sharedTestExclude } from '../../../vitest.shared';
+
+const tauriDebugRaw = process.env.TAURI_ENV_DEBUG ?? process.env.TAURI_DEBUG;
+const isTauriDebug = tauriDebugRaw === 'true' || tauriDebugRaw === '1';
 
 export default defineConfig(async () => ({
   plugins: [react()],
@@ -14,9 +17,13 @@ export default defineConfig(async () => ({
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {
-    target: process.env.TAURI_PLATFORM === 'windows' ? 'chrome105' : 'safari15',
-    minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
-    sourcemap: !!process.env.TAURI_DEBUG,
+    // Tauri 2 CLI 注入 TAURI_ENV_PLATFORM / TAURI_ENV_DEBUG（值为 "true"/"false"
+    // 字符串，必须显式比较；旧名仅作回退）
+    target: (process.env.TAURI_ENV_PLATFORM ?? process.env.TAURI_PLATFORM) === 'windows'
+      ? 'chrome105'
+      : 'safari15',
+    minify: isTauriDebug ? false : 'esbuild',
+    sourcemap: isTauriDebug,
     chunkSizeWarningLimit: 4096,
     rollupOptions: {
       output: {
@@ -36,6 +43,7 @@ export default defineConfig(async () => ({
     },
   },
   test: {
+    exclude: [...sharedTestExclude],
     coverage: sharedCoverageConfig,
   },
 }));

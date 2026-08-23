@@ -25,6 +25,12 @@ export class AppendOnlyLog implements IAppendOnlyLog {
   private readonly hashes: Map<number, string> = new Map();
   private totalBytes: number = 0;
   private lastComputedHash: string = '';
+  /** Memoized cascading prefix hash for the longest prefix hashed so far.
+   *  Extending a previous computation is then O(delta). Never stale: every
+   *  mutation that rewrites history (reset/loadFromSnapshot) or removes a
+   *  tail message (popLastMessage) invalidates it. */
+  private prefixChainHash = '';
+  private prefixChainLen = 0;
   private readonly sessionId: string;
 
   constructor(sessionId: string) {
@@ -140,6 +146,10 @@ export class AppendOnlyLog implements IAppendOnlyLog {
     this.hashes.delete(index);
     this.totalBytes -= Serializer.getByteLength(msg);
     this.lastComputedHash = '';
+    if (this.prefixChainLen > this.messages.length) {
+      this.prefixChainLen = 0;
+      this.prefixChainHash = '';
+    }
     return msg;
   }
 
@@ -170,6 +180,66 @@ export class AppendOnlyLog implements IAppendOnlyLog {
 
     this.lastComputedHash = hash;
     return hash;
+  }
+
+  /**
+   * Compute hash of the prefix containing the first `count` messages.
+   * Memoized: extending the longest previously hashed prefix is O(delta),
+   * so per-turn verification of a growing log stays cheap (5.0.1).
+   */
+  computeHashUpTo(count: number): string {
+    if (count <= 0) return '';
+    if (count > this.messages.length) {
+      throw new AppendOnlyViolationError(
+        `computeHashUpTo out of range: ${count} > ${this.messages.length}`
+      );
+    }
+    if (count === this.messages.length && this.lastComputedHash) {
+      return this.lastComputedHash;
+    }
+
+    let base = 0;
+    let hash = '';
+    if (this.prefixChainLen > 0 && this.prefixChainLen <= count) {
+      base = this.prefixChainLen;
+      hash = this.prefixChainHash;
+    }
+
+    for (let i = base; i < count; i++) {
+      const msgHash = this.hashes.get(i);
+      if (!msgHash) {
+        throw new AppendOnlyViolationError(`Missing hash for message ${i}`);
+      }
+      hash = sha256(hash + msgHash);
+    }
+
+    if (count >= this.prefixChainLen) {
+      this.prefixChainLen = count;
+      this.prefixChainHash = hash;
+    }
+    if (count === this.messages.length) {
+      this.lastComputedHash = hash;
+    }
+    return hash;
+  }
+
+  /**
+   * Truncate the log to its first `count` messages, popping the tail.
+   *
+   * SANCTIONED break of the append-only invariant, used exclusively by worker
+   * log sync reconciliation: a turn cancelled or failed mid-flight leaves a
+   * partial tail in the worker's cached log that the main-thread mirror never
+   * received; the common prefix is hash-verified before the tail is dropped.
+   */
+  truncateTo(count: number): void {
+    if (count < 0 || count > this.messages.length) {
+      throw new AppendOnlyViolationError(
+        `truncateTo out of range: ${count} (length ${this.messages.length})`
+      );
+    }
+    while (this.messages.length > count) {
+      this.popLastMessage();
+    }
   }
 
   /**
@@ -301,6 +371,8 @@ export class AppendOnlyLog implements IAppendOnlyLog {
     this.hashes.clear();
     this.totalBytes = 0;
     this.lastComputedHash = '';
+    this.prefixChainLen = 0;
+    this.prefixChainHash = '';
   }
 
   /**
@@ -347,6 +419,8 @@ export class AppendOnlyLog implements IAppendOnlyLog {
 
     this.totalBytes = computedBytes;
     this.lastComputedHash = '';
+    this.prefixChainLen = 0;
+    this.prefixChainHash = '';
   }
 
   /**

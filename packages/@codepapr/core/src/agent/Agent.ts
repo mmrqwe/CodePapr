@@ -411,13 +411,19 @@ function isImageError(err: unknown): boolean {
  * PR3：provider 上下文溢出检测。确定性错误（流层已不重试），特征为
  * `retriable === false` 且错误文本携带 context 超限签名。用鸭子类型检测
  * （core 不依赖 api 包），仅凭 message/retriable 两个公开字段。
+ *
+ * 各上游的真实文案：
+ * - OpenAI/DeepSeek：context_length_exceeded、maximum context length、
+ *   request_too_large
+ * - Anthropic：`prompt is too long: N tokens > M maximum`（400）
+ * - 通用/中转：context window、"too long ... maximum"
  */
 function isProviderContextOverflowError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const error = err as Record<string, unknown>;
   if (error.retriable === true) return false;
   const msg = typeof error.message === 'string' ? error.message : '';
-  return /context_length_exceeded|request_too_large|maximum context|context window|超出.*上下文|上下文.*超/i.test(
+  return /context_length_exceeded|request_too_large|maximum context|context window|prompt is too long|too long.*maximum|超出.*上下文|上下文.*超/i.test(
     msg
   );
 }

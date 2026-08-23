@@ -251,6 +251,7 @@ export function isValidMessage(msg: unknown): boolean {
 }
 
 export * from './git';
+export * from './staticContentPatterns';
 
 export function isValidToolDefinition(tool: unknown): boolean {
   if (!tool || typeof tool !== 'object') return false;

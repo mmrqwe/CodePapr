@@ -539,7 +539,8 @@ fn dotnet_sdk_download() -> Result<(String, ArchiveKind), String> {
     };
 
     Ok((
-        format!("https://dotnetcli.azureedge.net/dotnet/Sdk/{DOTNET_SDK_VERSION}/dotnet-sdk-{DOTNET_SDK_VERSION}-{os}-{arch}.{ext}"),
+        // dotnetcli.azureedge.net 已被微软弃用，官方迁移至 builds.dotnet.microsoft.com。
+        format!("https://builds.dotnet.microsoft.com/dotnet/Sdk/{DOTNET_SDK_VERSION}/dotnet-sdk-{DOTNET_SDK_VERSION}-{os}-{arch}.{ext}"),
         archive_kind,
     ))
 }

@@ -50,7 +50,7 @@ import {
   collectExecutedTools,
   type ExecutedToolSummary,
 } from '../../utils/agentExecution';
-import { getTodoListContext } from '../../tools/todoListTool';
+import { getTodoListContext } from '../../tools/todoListRegistry';
 import { getActiveCharacterPrompt } from '../charactersStore';
 import { loadMcpToolDefinitions } from '../../tools/mcpTools';
 import { isReasoningPlaceholderEcho } from '@codepapr/api';

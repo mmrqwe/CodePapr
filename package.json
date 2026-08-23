@@ -40,7 +40,7 @@
     "publish:dry-run": "npm run release:prep && node ./scripts/publish-dry-run.mjs",
     "release:desktop": "npm run verify && npm run build:tauri --workspace=@codepapr/ui",
     "format": "node ./scripts/run-module-bin.mjs prettier/bin/prettier.cjs --write packages/**/*.{ts,tsx,json}",
-    "dev": "npm run dev --workspaces --if-present"
+    "dev": "npm run dev --workspace=@codepapr/ui"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -61,7 +61,6 @@
     "yaml-language-server": "^1.23.0"
   },
   "overrides": {
-    "brace-expansion@5.0.6": "5.0.8",
-    "js-yaml": "^4.3.0"
+    "brace-expansion": ">=5.0.8"
   }
 }

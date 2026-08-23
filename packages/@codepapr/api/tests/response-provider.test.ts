@@ -102,11 +102,6 @@ describe('ResponseProvider', () => {
         name: 'get_weather',
         description: 'Get weather',
         parameters: { type: 'object', properties: { city: { type: 'string' } } },
-        function: {
-          name: 'get_weather',
-          description: 'Get weather',
-          parameters: { type: 'object', properties: { city: { type: 'string' } } },
-        },
       },
     ]);
 
@@ -594,5 +589,220 @@ describe('ResponseProvider', () => {
     ]);
     expect(res.choices[0].message.reasoningContent).toBe('先看现有布局');
     expect(res.choices[0].message.content).toBe('已按 Canvas 风格精简');
+  });
+
+  // ── 7.3 截断守卫回归 ──────────────────────────────────────────────
+
+  it('stream: partial content without any completion signal throws retriable error (not silent stop)', async () => {
+    // 网关截断的典型形态：已发出部分内容，然后直接关连接——没有
+    // response.completed，也没有 choices finish_reason。旧实现会放行
+    // 半截内容并以 finishReason='stop' 返回；现在必须抛可重试错误。
+    const sseChunks = [
+      'data: {"type":"response.created","response":{"id":"resp_trunc"}}\n\n',
+      'data: {"type":"response.output_text.delta","delta":"half of the answer"}\n\n',
+    ];
+    // 重试时每次调用都要拿到全新的流，否则第二次读同一条已锁定的流会报
+    // "ReadableStream is locked"，掩盖真实的终止信号缺失错误。
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: createMockStream(sseChunks),
+    }));
+
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      fetchFn: fetchMock as unknown as typeof fetch,
+      streamMaxRetries: 1,
+      streamRetryDelayMs: () => 0,
+    });
+
+    await expect(
+      provider.streamChat(
+        { model: 'gpt-4o', messages: [{ id: '1', role: 'user', content: 'hi', timestamp: 1 }] },
+        () => {},
+      ),
+    ).rejects.toThrow('Stream ended prematurely');
+  });
+
+  it('stream: response.completed with status incomplete maps to length (overrides tool_calls)', async () => {
+    const sseChunks = [
+      'data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"read_file"}}\n\n',
+      'data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"{\\"path\\": \\"src\\"}"}\n\n',
+      'data: {"type":"response.output_text.delta","delta":"partial text"}\n\n',
+      'data: {"type":"response.completed","response":{"id":"resp_inc","status":"incomplete","usage":{"input_tokens":10,"output_tokens":4000,"total_tokens":4010}}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: createMockStream(sseChunks),
+    });
+
+    const res = await new ResponseProvider({
+      apiKey: 'sk-test',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    }).streamChat(
+      {
+        model: 'gpt-4o',
+        messages: [{ id: '1', role: 'user', content: 'hi', timestamp: 1 }],
+        maxTokens: 4000,
+      },
+      () => {},
+    );
+
+    // 截断证据优先：incomplete → length，绝不放行截断的 tool call。
+    expect(res.choices[0].finishReason).toBe('length');
+    expect(res.choices[0].message.content).toBe('partial text');
+  });
+
+  it('stream: done without status degrades to length when output tokens hit max_tokens', async () => {
+    // 部分中转只发 response.done + usage、不带 status/finish_reason：
+    // 与 OpenAIProvider 对齐，以输出 token 达顶作为截断证据。
+    const sseChunks = [
+      'data: {"type":"response.output_text.delta","delta":"answer"}\n\n',
+      'data: {"type":"response.completed","response":{"id":"resp_nostatus","usage":{"input_tokens":10,"output_tokens":2048,"total_tokens":2058}}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: createMockStream(sseChunks),
+    });
+
+    const res = await new ResponseProvider({
+      apiKey: 'sk-test',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    }).streamChat(
+      {
+        model: 'gpt-4o',
+        messages: [{ id: '1', role: 'user', content: 'hi', timestamp: 1 }],
+        maxTokens: 2048,
+      },
+      () => {},
+    );
+
+    expect(res.choices[0].finishReason).toBe('length');
+  });
+
+  it('stream: done without status and under budget is marked unknown (never fake stop)', async () => {
+    const sseChunks = [
+      'data: {"type":"response.output_text.delta","delta":"answer"}\n\n',
+      'data: {"type":"response.completed","response":{"id":"resp_nostatus2","usage":{"input_tokens":10,"output_tokens":12,"total_tokens":22}}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: createMockStream(sseChunks),
+    });
+
+    const res = await new ResponseProvider({
+      apiKey: 'sk-test',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    }).streamChat(
+      { model: 'gpt-4o', messages: [{ id: '1', role: 'user', content: 'hi', timestamp: 1 }] },
+      () => {},
+    );
+
+    expect(res.choices[0].finishReason).toBe('unknown');
+  });
+
+  it('non-stream: status incomplete maps to length even when tool_calls present', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'resp_inc_ns',
+        status: 'incomplete',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'cut off' }],
+          },
+          {
+            type: 'function_call',
+            call_id: 'call_trunc',
+            name: 'write_file',
+            arguments: '{"path":"a.txt","content":"par',
+          },
+        ],
+        usage: { input_tokens: 5, output_tokens: 4096, total_tokens: 4101 },
+      }),
+    });
+
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const res = await provider.chat({
+      model: 'gpt-4o',
+      messages: [{ id: '1', role: 'user', content: 'write a file', timestamp: 1 }],
+      maxTokens: 4096,
+    });
+
+    expect(res.choices[0].finishReason).toBe('length');
+  });
+
+  it('non-stream: failed status throws retriable ProviderRequestError', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'resp_failed',
+        status: 'failed',
+        output: [],
+        error: { message: 'generation exceeded max length', type: 'server_error' },
+      }),
+    });
+
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    await expect(
+      provider.chat({
+        model: 'gpt-4o',
+        messages: [{ id: '1', role: 'user', content: 'hi', timestamp: 1 }],
+      }),
+    ).rejects.toThrow('generation exceeded max length');
+  });
+
+  it('non-stream: missing status is marked unknown instead of fake stop', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'resp_nostatus_ns',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'ok' }],
+          },
+        ],
+      }),
+    });
+
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+
+    const res = await provider.chat({
+      model: 'gpt-4o',
+      messages: [{ id: '1', role: 'user', content: 'hi', timestamp: 1 }],
+    });
+
+    expect(res.choices[0].finishReason).toBe('unknown');
   });
 });

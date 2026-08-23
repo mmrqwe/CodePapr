@@ -1,12 +1,17 @@
 /**
  * UI 层 TodoList 工具桥接：
- *  - 在每个 Agent 会话挂一份 TodoListContext（按 sessionId 索引到 zustand store）
  *  - 注册 `todo` 工具到 ToolRegistry
- *  - 工具 handler 改 store，并把最新 TodoListContext 通过返回值喂回 LLM
+ *  - 工具 handler 改注册表（纯数据，见 todoListRegistry），并把最新
+ *    TodoListContext 通过返回值喂回 LLM
+ *  - 清单变更经注册表监听器推进 agentStore 的 `_taskChecklists`
  *
  * 与 task 工具正交：todo 只改主 Agent 的计划，task 仍然是子代理委派。
  *
  * 持久化：每次修改 TodoList 后，同步到 project.sqlite 以便重启恢复。
+ *
+ * 注意：TodoListContext 的存储仓库已拆到 `todoListRegistry`（无 store 依赖），
+ * worker 侧的压缩管线只依赖注册表读取，避免把整个 agentStore 图谱
+ * （约 860KB）打进 worker 包。
  */
 import {
   buildTodoToolDefinition,
@@ -19,84 +24,20 @@ import {
 } from '@codepapr/core';
 import type { AgentTask, IToolDefinition, TodoListContext } from '@codepapr/types';
 import { useAgentStore } from '../store/agentStore';
-import type { TaskChecklist, TaskChecklistItem, TaskChecklistItemStatus } from '../utils/taskChecklistTypes';
+import {
+  commitTodoListContext,
+  getTodoListContext,
+  setTodoChecklistListener,
+  setTodoListContext,
+} from './todoListRegistry';
 
-/**
- * 把 core 的 TodoListContext 转成现有 TaskChecklist 渲染结构，
- * 让既有 `_taskChecklists` store 和 `TaskChecklist.tsx` 组件无需改动即可显示。
- */
-export function todoContextToChecklist(
-  ctx: TodoListContext,
-  sessionId: string
-): TaskChecklist {
-  const items: TaskChecklistItem[] = ctx.tasks.map((task) => ({
-    id: task.id,
-    title: task.title,
-    prompt: task.description,
-    status: task.status as TaskChecklistItemStatus,
-    summary: task.summary
-      ?? (task.errorLog ? `失败: ${task.errorLog}` : undefined),
-  }));
-
-  return {
-    sessionId,
-    title: ctx.goal,
-    items,
-    status: ctx.status,
-    createdAt: ctx.createdAt,
-    updatedAt: ctx.updatedAt,
-  };
-}
-
-/**
- * 进程级的 TodoListContext 仓库，按 sessionId 索引。
- * 因为 Worker 走 tool-request 桥回主线程执行工具，主线程持有一份足矣。
- */
-const todoContexts = new Map<string, TodoListContext>();
-
-export function getTodoListContext(sessionId: string): TodoListContext | null {
-  return todoContexts.get(sessionId) ?? null;
-}
-
-export function resetTodoListContext(sessionId: string): void {
-  todoContexts.delete(sessionId);
-  pushChecklistToStore(sessionId, null);
-}
-
-/** 清空全部 TodoList 上下文（切换/关闭工作区时调用，防止跨项目累积）。 */
-export function clearAllTodoListContexts(): void {
-  for (const sessionId of todoContexts.keys()) {
-    pushChecklistToStore(sessionId, null);
-  }
-  todoContexts.clear();
-}
-
-/** 获取所有 TodoList 上下文，供持久化使用。 */
-export function getAllTodoListContexts(): ReadonlyMap<string, TodoListContext> {
-  return todoContexts;
-}
-
-/** 从持久化数据恢复 TodoList 上下文。 */
-export function restoreTodoListContexts(contexts: Readonly<Record<string, TodoListContext>>): void {
-  for (const [sessionId, ctx] of Object.entries(contexts)) {
-    if (ctx && ctx.tasks && Array.isArray(ctx.tasks) && ctx.tasks.length > 0) {
-      todoContexts.set(sessionId, ctx as TodoListContext);
-      pushChecklistToStore(sessionId, todoContextToChecklist(ctx as TodoListContext, sessionId));
-    }
-  }
-}
-
-function pushChecklistToStore(sessionId: string, checklist: TaskChecklist | null): void {
+// 主线程侧把清单渲染结构推进 agentStore（worker 环境不加载本模块，
+// 注册表无监听器，行为与旧实现写一份无人消费的 store 副本等价）。
+setTodoChecklistListener((sessionId, checklist) => {
   useAgentStore.setState((s) => ({
     _taskChecklists: { ...s._taskChecklists, [sessionId]: checklist },
   }));
-}
-
-function commit(sessionId: string, ctx: TodoListContext): TodoListContext {
-  todoContexts.set(sessionId, ctx);
-  pushChecklistToStore(sessionId, todoContextToChecklist(ctx, sessionId));
-  return ctx;
-}
+});
 
 interface ToolReturn {
   todoList: TodoListContext;
@@ -105,6 +46,21 @@ interface ToolReturn {
 
 function buildReturn(ctx: TodoListContext): ToolReturn {
   return { todoList: ctx, digest: renderTodoListDigest(ctx) };
+}
+
+function toPatches(rawUpdates: Array<Record<string, unknown>>): TodoUpdatePatch[] {
+  return rawUpdates
+    .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+    .map((item) => ({
+      id: typeof item.id === 'string' ? item.id.trim() : '',
+      status: typeof item.status === 'string' ? (item.status as AgentTask['status']) : undefined,
+      summary: typeof item.summary === 'string' ? item.summary : undefined,
+      errorLog: typeof item.errorLog === 'string' ? item.errorLog : undefined,
+      touchedArtifacts: Array.isArray(item.touchedArtifacts)
+        ? (item.touchedArtifacts.filter((p): p is string => typeof p === 'string'))
+        : undefined,
+    }))
+    .filter((patch) => patch.id);
 }
 
 /**
@@ -136,80 +92,56 @@ export function registerTodoListTools(
     if (hasTasks) {
       // ── 全量覆盖模式 ──
       const rawTasks = args.tasks as Array<Record<string, unknown>>;
-      const previous = todoContexts.get(sessionId) ?? null;
+      const previous = getTodoListContext(sessionId) ?? null;
       const nextCtx = writeTodoList(previous, goal, rawTasks, maxRetries);
-      return buildReturn(commit(sessionId, nextCtx));
+      return buildReturn(commitTodoListContext(sessionId, nextCtx));
     }
 
     // ── 部分更新模式 ──
-    const previous = todoContexts.get(sessionId);
+    const previous = getTodoListContext(sessionId);
     if (!previous) {
-      // 没有已有清单时自动创建一个空的，然后应用更新
+      // 没有已有清单时自动创建一个空的，然后应用更新。
+      // 空清单先推 null（与旧实现一致），首个 updates 落地后再推渲染结构。
       const emptyCtx = createEmptyTodoListContext(goal);
-      todoContexts.set(sessionId, emptyCtx);
-      pushChecklistToStore(sessionId, null);
+      setTodoListContext(sessionId, emptyCtx, 'null');
 
       if (!hasUpdates) {
         return buildReturn(emptyCtx);
       }
 
       const rawUpdates = hasUpdates ? (args.updates as Array<Record<string, unknown>>) : [];
-      const patches: TodoUpdatePatch[] = rawUpdates
-        .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
-        .map((item) => ({
-          id: typeof item.id === 'string' ? item.id.trim() : '',
-          status: typeof item.status === 'string' ? (item.status as AgentTask['status']) : undefined,
-          summary: typeof item.summary === 'string' ? item.summary : undefined,
-          errorLog: typeof item.errorLog === 'string' ? item.errorLog : undefined,
-          touchedArtifacts: Array.isArray(item.touchedArtifacts)
-            ? (item.touchedArtifacts.filter((p): p is string => typeof p === 'string'))
-            : undefined,
-        }))
-        .filter((patch) => patch.id);
-
+      const patches = toPatches(rawUpdates);
       if (patches.length === 0) {
         return buildReturn(emptyCtx);
       }
 
       const nextCtx = updateTodoList(emptyCtx, patches);
-      return buildReturn(commit(sessionId, nextCtx));
+      return buildReturn(commitTodoListContext(sessionId, nextCtx));
     }
 
     if (!hasUpdates) {
       // 无 tasks 也无 updates，仅更新 goal (如果提供)
       if (goal && goal !== previous.goal) {
         const nextCtx = { ...previous, goal, updatedAt: Date.now() };
-        return buildReturn(commit(sessionId, nextCtx));
+        return buildReturn(commitTodoListContext(sessionId, nextCtx));
       }
       return buildReturn(previous);
     }
 
     const rawUpdates = (args.updates as Array<Record<string, unknown>>);
-    const patches: TodoUpdatePatch[] = rawUpdates
-      .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
-      .map((item) => ({
-        id: typeof item.id === 'string' ? item.id.trim() : '',
-        status: typeof item.status === 'string' ? (item.status as AgentTask['status']) : undefined,
-        summary: typeof item.summary === 'string' ? item.summary : undefined,
-        errorLog: typeof item.errorLog === 'string' ? item.errorLog : undefined,
-        touchedArtifacts: Array.isArray(item.touchedArtifacts)
-          ? (item.touchedArtifacts.filter((p): p is string => typeof p === 'string'))
-          : undefined,
-      }))
-      .filter((patch) => patch.id);
-
+    const patches = toPatches(rawUpdates);
     if (patches.length === 0) {
       return buildReturn(previous);
     }
 
     const nextCtx = updateTodoList(previous, patches);
-    return buildReturn(commit(sessionId, nextCtx));
+    return buildReturn(commitTodoListContext(sessionId, nextCtx));
   });
 
   // 如果该会话已有 TodoList（例如 Worker 重启），立刻把现状推回 store
-  const existing = todoContexts.get(sessionId);
+  const existing = getTodoListContext(sessionId);
   if (existing) {
-    pushChecklistToStore(sessionId, todoContextToChecklist(existing, sessionId));
+    commitTodoListContext(sessionId, existing);
   }
 
   return [definition];
@@ -222,11 +154,12 @@ export function registerTodoListTools(
 export function rememberTodoGoal(sessionId: string, goal: string): void {
   const trimmed = goal.trim();
   if (!trimmed) return;
-  const existing = todoContexts.get(sessionId);
+  const existing = getTodoListContext(sessionId);
   if (!existing) {
     return;
   }
   if (!existing.goal.trim()) {
-    todoContexts.set(sessionId, { ...existing, goal: trimmed, updatedAt: Date.now() });
+    // 仅改 goal 不推送渲染结构（与旧实现一致：rememberTodoGoal 不触发 store 写入）
+    setTodoListContext(sessionId, { ...existing, goal: trimmed, updatedAt: Date.now() }, 'none');
   }
 }
