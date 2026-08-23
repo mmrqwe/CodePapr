@@ -805,13 +805,14 @@ fn push_stderr_line(queue: &Arc<Mutex<VecDeque<String>>>, line: String) {
 }
 
 fn spawn_lsp_reader(
-    mut stdout: impl Read + Send + 'static,
+    stdout: impl Read + Send + 'static,
     queue: Arc<Mutex<VecDeque<Value>>>,
     pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
     stdin: Arc<Mutex<ChildStdin>>,
 ) {
     thread::spawn(move || {
-        while let Ok(message) = read_lsp_message(&mut stdout) {
+        let mut buffered_stdout = std::io::BufReader::new(stdout);
+        while let Ok(message) = read_lsp_message(&mut buffered_stdout) {
             let has_method = message.get("method").is_some();
             if let Some(id) = message.get("id").and_then(Value::as_u64) {
                 if has_method {

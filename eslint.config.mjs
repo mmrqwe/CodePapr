@@ -4,7 +4,7 @@ import htmlPlugin from '@html-eslint/eslint-plugin';
 import htmlParser from '@html-eslint/parser';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/coverage/**', '**/target/**', '**/e2e/**', '*.config.js', '*.config.ts', '.opencode/**'] },
+  { ignores: ['**/dist/**', '**/coverage/**', '**/target/**', '**/e2e/**', '*.config.js', '*.config.ts', '.opencode/**', '.cargo-vendor/**', '**/generated/**'] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
