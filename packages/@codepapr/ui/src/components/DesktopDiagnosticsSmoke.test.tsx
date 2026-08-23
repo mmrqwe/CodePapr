@@ -147,9 +147,21 @@ import type {
   ProjectDiagnosticsListEntry,
 } from '../utils/projectDiagnostics';
 
-const externalWorkspacePath = process.env.CODEPAPR_EXTERNAL_WORKSPACE?.trim() ?? '';
-const itIfExternalWorkspace = externalWorkspacePath ? it : it.skip;
+const configuredWorkspacePath = process.env.CODEPAPR_EXTERNAL_WORKSPACE?.trim() ?? '';
+const targetWorkspacePath = configuredWorkspacePath || '/mock/fixture-workspace';
 const PROJECT_PASSED_TEXT = '通过';
+
+const defaultFixtureFiles: Record<string, string> = {
+  'package.json': JSON.stringify({
+    name: 'fixture-app',
+    dependencies: { react: '^18.0.0' },
+    devDependencies: { vite: '^5.0.0', '@vitejs/plugin-react': '^4.0.0' },
+    scripts: { build: 'vite build', check: 'tsc' },
+  }, null, 2),
+  'vite.config.ts': 'export default {};',
+  'src/App.tsx': 'export function App() { return <div>App</div>; }',
+  'src/main.tsx': 'import { App } from "./App";',
+};
 
 function createEmptyProjectSnapshot() {
   return {
@@ -198,6 +210,16 @@ async function runWorkspaceCommand(params: {
   args: string[];
   timeoutSeconds?: number;
 }): Promise<ProjectDiagnosticsCommandResult> {
+  if (!configuredWorkspacePath) {
+    return {
+      command: params.command,
+      args: params.args,
+      status: 0,
+      stdout: 'diagnostics passed',
+      stderr: '',
+      timedOut: false,
+    };
+  }
   const command = process.platform === 'win32' && params.command === 'npm' ? 'npm.cmd' : params.command;
 
   return await new Promise<ProjectDiagnosticsCommandResult>((resolve, reject) => {
@@ -310,7 +332,7 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   loadProjectStateMock.mockResolvedValue(createEmptyProjectSnapshot());
   saveProjectStateMock.mockResolvedValue(undefined);
-  openMock.mockResolvedValue(externalWorkspacePath);
+  openMock.mockResolvedValue(targetWorkspacePath);
   invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     if (command === 'list_workspace_files') {
       return {
@@ -322,16 +344,19 @@ beforeEach(() => {
 
     if (command === 'read_text_file') {
       const relativePath = String(args?.relativePath ?? '');
+      const content = configuredWorkspacePath
+        ? await fsp.readFile(path.join(configuredWorkspacePath, relativePath), 'utf8')
+        : (defaultFixtureFiles[relativePath] ?? '');
       return {
         path: relativePath,
-        content: await fsp.readFile(path.join(externalWorkspacePath, relativePath), 'utf8'),
+        content,
         bytes: 0,
       };
     }
 
     if (command === 'run_workspace_command') {
       return await runWorkspaceCommand({
-        workspacePath: externalWorkspacePath,
+        workspacePath: targetWorkspacePath,
         command: String(args?.command ?? ''),
         args: Array.isArray(args?.args) ? args.args.map((value) => String(value)) : [],
         timeoutSeconds:
@@ -364,6 +389,7 @@ beforeEach(() => {
     if (
       command === 'start_workspace_watcher' ||
       command === 'stop_workspace_watcher' ||
+      command === 'grant_workspace_asset_scope' ||
       command === 'save_session' ||
       command === 'save_message_batch' ||
       command === 'save_project_meta' ||
@@ -446,7 +472,7 @@ afterEach(async () => {
 });
 
 describe('desktop diagnostics smoke', () => {
-  itIfExternalWorkspace(
+  it(
     'selects an external workspace, runs project diagnostics, opens representative files, and keeps local markers from leaking under clean project diagnostics',
     async () => {
       if (!container || !root) {
@@ -484,14 +510,16 @@ describe('desktop diagnostics smoke', () => {
       expect(container.textContent).not.toContain(
         "Cannot find module 'vite' or its corresponding type declarations."
       );
-      expect(
-        invokeMock.mock.calls.some(
-          (call) =>
-            call[0] === 'read_text_file' &&
-            typeof call[1]?.relativePath === 'string' &&
-            call[1].relativePath === 'vite.config.ts'
-        )
-      ).toBe(true);
+      await waitFor(
+        () =>
+          invokeMock.mock.calls.some(
+            (call) =>
+              call[0] === 'read_text_file' &&
+              typeof call[1]?.relativePath === 'string' &&
+              call[1].relativePath === 'vite.config.ts'
+          ),
+        'vite.config.ts should be read via read_text_file'
+      );
 
       await click(findTreeItem(container, 'src'));
       await waitFor(

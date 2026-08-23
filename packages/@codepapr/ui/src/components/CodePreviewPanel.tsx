@@ -1196,7 +1196,7 @@ export function CodePreviewPanel({
                             <div className="space-y-1">
                               {lspMarkersBySeverity[severity].map((marker, index) => (
                                 <div
-                                  key={index}
+                                  key={`${marker.startLineNumber}:${marker.startColumn}-${marker.endLineNumber}:${marker.endColumn}-${index}`}
                                   className="flex items-start gap-2 rounded-md border border-line/50 px-2 py-1.5 text-[11px] leading-snug text-fg-soft hover:border-line-strong hover:bg-base transition-colors cursor-default"
                                 >
                                   <span className="mt-px flex-shrink-0 rounded-full border border-slate-600 px-1.5 py-0 text-[10px] tabular-nums text-fg-muted">

@@ -6,7 +6,7 @@ Day-to-day use: docs/USAGE.en.md.
 
 ### 2.1 Development Machine Requirements
 
-- Node.js 18+
+- Node.js 20.19+
 - npm 9+
 - Rust toolchain and Cargo
 
@@ -244,10 +244,10 @@ Recommended practice:
 
 ### 6.3 Workspace Run Methods
 
-Common CLI launch:
+CLI / Smoke tools launch:
 
 ```bash
-./run-codepapr-cli.command
+npm run smoke:agent-tools
 ```
 
 Common desktop launch:

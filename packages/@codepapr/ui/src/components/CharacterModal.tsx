@@ -266,7 +266,7 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
           return;
         }
         unlistens.push(unlisten);
-      });
+      }).catch(() => undefined);
     };
 
     bind<{ character_id: string; step: string; percent: number; log_line: string }>(

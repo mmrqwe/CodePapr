@@ -14,6 +14,7 @@
   },
   "scripts": {
     "build": "node ../../../scripts/run-tsc-build.mjs",
+    "typecheck": "node ../../../scripts/run-module-bin.mjs typescript/bin/tsc --noEmit",
     "dev": "node ../../../scripts/run-module-bin.mjs typescript/bin/tsc --watch"
   },
   "dependencies": {},

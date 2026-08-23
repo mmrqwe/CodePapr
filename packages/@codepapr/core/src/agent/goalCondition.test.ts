@@ -90,6 +90,18 @@ describe('parseGoalCondition', () => {
     expect(result.clauses[0].args).toEqual(['hello world']);
   });
 
+  it('双引号内的正则反斜杠不被错误剥离（\\d+ 保持 \\d+）', () => {
+    const result = parseGoalCondition('exec:rg "\\d+ passed" src');
+    expect(result.clauses[0].command).toBe('rg');
+    expect(result.clauses[0].args).toEqual(['\\d+ passed', 'src']);
+  });
+
+  it('双引号内转义双引号与反斜杠（\\" -> "，\\\\ -> \\）', () => {
+    const result = parseGoalCondition('exec:echo "a\\"b\\\\c"');
+    expect(result.clauses[0].command).toBe('echo');
+    expect(result.clauses[0].args).toEqual(['a"b\\c']);
+  });
+
   it('空输入抛出 GoalConditionParseError', () => {
     expect(() => parseGoalCondition('')).toThrow(GoalConditionParseError);
     expect(() => parseGoalCondition('   ')).toThrow(GoalConditionParseError);

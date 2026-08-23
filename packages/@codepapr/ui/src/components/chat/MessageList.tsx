@@ -45,7 +45,7 @@ interface MessageListProps {
   hasStreamingMessage: boolean;
   onShowSettings: (v: boolean) => void;
   onSlideWindow: (dir: 'up' | 'down') => void;
-  onToggleSubagentCollapse: (index: number) => void;
+  onToggleSubagentCollapse: (target: number | string) => void;
 }
 
 /**
@@ -131,12 +131,12 @@ export const MessageList = memo(function MessageList({
           )}
         </div>
       )}
-      {!deferMessages && subagentRuns.map((run, idx) => (
-        <div key={idx} className="mx-3 mb-3 rounded-xl border border-info-bg bg-base/60 overflow-hidden">
+      {!deferMessages && subagentRuns.map((run) => (
+        <div key={run.id} className="mx-3 mb-3 rounded-xl border border-info-bg bg-base/60 overflow-hidden">
           <button
             type="button"
             className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-base/50"
-            onClick={() => onToggleSubagentCollapse(idx)}
+            onClick={() => onToggleSubagentCollapse(run.id)}
           >
             <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${run.state === 'running' ? 'animate-pulse bg-info' : 'bg-ok'}`} />
             <span className="flex-1 min-w-0">
@@ -164,7 +164,7 @@ export const MessageList = memo(function MessageList({
               {run.steps.length > 0 && (
                 <div className="space-y-0.5">
                   {run.steps.map((step, i) => (
-                    <div key={i} className="flex items-center gap-2 text-[10px]">
+                    <div key={`${step.name}-${i}`} className="flex items-center gap-2 text-[10px]">
                       <span className={step.status === 'error' ? 'text-danger' : 'text-ok'}>
                         {step.status === 'error' ? '✗' : '✓'}
                       </span>

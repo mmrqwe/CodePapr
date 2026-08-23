@@ -220,7 +220,7 @@ const SlashCommandDropdown = forwardRef<SlashCommandDropdownHandle, SlashCommand
               /{tooltipCmd.name}
             </div>
             {tooltipUsage.split('\n').map((line, i) => (
-              <p key={i} className="leading-relaxed">{line}</p>
+              <p key={`${i}-${line.slice(0, 20)}`} className="leading-relaxed">{line}</p>
             ))}
             {tooltipCmd.agent && (
               <p className="mt-1.5 text-accent">

@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "node ./scripts/run-workspace-tests.mjs",
     "test:coverage": "node ./scripts/run-workspace-tests.mjs --run --coverage",
     "test:e2e:ui": "npm run test:e2e:ui --workspace=@codepapr/ui",
@@ -39,7 +40,7 @@
     "release:prep": "npm run verify && node ./scripts/release-readiness.mjs",
     "publish:dry-run": "npm run release:prep && node ./scripts/publish-dry-run.mjs",
     "release:desktop": "npm run verify && npm run build:tauri --workspace=@codepapr/ui",
-    "format": "node ./scripts/run-module-bin.mjs prettier/bin/prettier.cjs --write packages/**/*.{ts,tsx,json}",
+    "format": "node ./scripts/run-module-bin.mjs prettier/bin/prettier.cjs --write \"packages/**/*.{ts,tsx,json}\"",
     "dev": "npm run dev --workspace=@codepapr/ui"
   },
   "devDependencies": {

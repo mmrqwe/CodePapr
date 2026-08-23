@@ -38,7 +38,7 @@ function truncateBody(body: string): string {
   if (trimmed.length <= 400) {
     return trimmed;
   }
-  return `${trimmed.slice(0, 399)}…`;
+  return `${trimmed.slice(0, 400)}…`;
 }
 
 function collectCatalogItems(body: unknown): unknown[] {
@@ -119,6 +119,10 @@ export async function listModels(options: {
     throw new ListModelsError('invalid', 'API base URL is required');
   }
 
+  if (options.signal?.aborted) {
+    throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+  }
+
   const url = `${baseURL}/models`;
   const fetchFn = options.fetchFn ?? getGlobalFetchFn();
   const timeoutMs = options.timeoutMs ?? LIST_MODELS_TIMEOUT_MS;
@@ -136,7 +140,7 @@ export async function listModels(options: {
     });
   } catch (err) {
     if (options.signal?.aborted) {
-      throw err;
+      throw options.signal.reason ?? err;
     }
     if (controller.signal.aborted && !options.signal?.aborted) {
       throw new ListModelsError('network', 'Request timed out');

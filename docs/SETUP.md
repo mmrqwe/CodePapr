@@ -6,7 +6,7 @@
 
 ### 2.1 开发机要求
 
-- Node.js 18+
+- Node.js 20.19+
 - npm 9+
 - Rust toolchain 和 Cargo
 
@@ -247,10 +247,10 @@ npm run release
 
 ### 6.3 工作区运行方式
 
-CLI 常用启动：
+CLI / 烟测工具启动：
 
 ```bash
-./run-codepapr-cli.command
+npm run smoke:agent-tools
 ```
 
 桌面端常用启动：

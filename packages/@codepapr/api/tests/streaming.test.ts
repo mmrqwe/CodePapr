@@ -65,6 +65,28 @@ describe('safeParseToolArguments JSON 修复（P2-18：字符串感知）', () =
     expect(parsed._parseError).toBeUndefined();
     expect(parsed.a).toBe(1);
   });
+
+  it('rejects non-object root JSON values (string, array, null, number) and marks _parseError', () => {
+    const cases = ['"just a string"', '[1, 2, 3]', 'null', '12345', 'true'];
+    for (const raw of cases) {
+      const parsed = safeParseToolArguments(raw);
+      expect(parsed._parseError).toBe(true);
+      expect(typeof parsed.error).toBe('string');
+    }
+  });
+
+  it('applyStreamingToolCallDeltas cleanly separates multiple calls when index is omitted but id is provided', () => {
+    const states = applyStreamingToolCallDeltas([], [
+      { id: 'call-1', function: { name: 'read_file', arguments: '{"path":' } },
+      { id: 'call-1', function: { arguments: '"a.txt"}' } },
+      { id: 'call-2', function: { name: 'write_file', arguments: '{"path":' } },
+      { id: 'call-2', function: { arguments: '"b.txt"}' } },
+    ]);
+    const calls = finalizeStreamingToolCalls(states);
+    expect(calls).toHaveLength(2);
+    expect(calls?.[0]).toEqual({ id: 'call-1', name: 'read_file', arguments: { path: 'a.txt' } });
+    expect(calls?.[1]).toEqual({ id: 'call-2', name: 'write_file', arguments: { path: 'b.txt' } });
+  });
 });
 
 const encoder = new TextEncoder();

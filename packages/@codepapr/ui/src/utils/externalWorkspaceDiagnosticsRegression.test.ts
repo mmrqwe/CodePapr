@@ -13,10 +13,29 @@ import {
 } from './projectDiagnostics';
 import { summarizeProjectFileDiagnostics } from './projectFileDiagnostics';
 
-const externalWorkspacePath = process.env.CODEPAPR_EXTERNAL_WORKSPACE?.trim() ?? '';
-const itIfExternalWorkspace = externalWorkspacePath ? it : it.skip;
+const configuredWorkspacePath = process.env.CODEPAPR_EXTERNAL_WORKSPACE?.trim() ?? '';
+const targetWorkspacePath = configuredWorkspacePath || '/mock/fixture-workspace';
+
+const defaultFixtureFiles: Record<string, string> = {
+  'package.json': JSON.stringify({
+    name: 'fixture-app',
+    dependencies: { react: '^18.0.0' },
+    devDependencies: { vite: '^5.0.0', '@vitejs/plugin-react': '^4.0.0' },
+    scripts: { build: 'vite build', check: 'tsc' },
+  }, null, 2),
+  'vite.config.ts': 'export default {};',
+  'src/App.tsx': 'export function App() { return <div>App</div>; }',
+  'src/main.tsx': 'import { App } from "./App";',
+};
 
 async function listTopLevelEntries(workspacePath: string): Promise<ProjectDiagnosticsListEntry[]> {
+  if (!configuredWorkspacePath) {
+    return [
+      { path: 'package.json', name: 'package.json', isDir: false, bytes: 100 },
+      { path: 'vite.config.ts', name: 'vite.config.ts', isDir: false, bytes: 100 },
+      { path: 'src', name: 'src', isDir: true, bytes: 0 },
+    ];
+  }
   const children = await fsp.readdir(workspacePath, { withFileTypes: true });
   return Promise.all(
     children.map(async (entry) => {
@@ -38,6 +57,16 @@ async function runWorkspaceCommand(params: {
   args: string[];
   timeoutSeconds?: number;
 }): Promise<ProjectDiagnosticsCommandResult> {
+  if (!configuredWorkspacePath) {
+    return {
+      command: params.command,
+      args: params.args,
+      status: 0,
+      stdout: 'diagnostics check passed',
+      stderr: '',
+      timedOut: false,
+    };
+  }
   const command = process.platform === 'win32' && params.command === 'npm' ? 'npm.cmd' : params.command;
 
   return await new Promise<ProjectDiagnosticsCommandResult>((resolve, reject) => {
@@ -81,26 +110,29 @@ async function runWorkspaceCommand(params: {
 }
 
 describe('external workspace diagnostics regression', () => {
-  itIfExternalWorkspace(
+  it(
     'keeps project diagnostics clean for representative files when the external workspace build passes',
     async () => {
       const invoke = async <T>(command: string, args?: Record<string, unknown>): Promise<T> => {
         if (command === 'list_workspace_files') {
           return {
-            entries: await listTopLevelEntries(externalWorkspacePath),
+            entries: await listTopLevelEntries(targetWorkspacePath),
           } as T;
         }
 
         if (command === 'read_text_file') {
           const relativePath = String(args?.relativePath ?? '');
+          const content = configuredWorkspacePath
+            ? await fsp.readFile(path.join(configuredWorkspacePath, relativePath), 'utf8')
+            : (defaultFixtureFiles[relativePath] ?? '');
           return {
-            content: await fsp.readFile(path.join(externalWorkspacePath, relativePath), 'utf8'),
+            content,
           } as T;
         }
 
         if (command === 'run_workspace_command') {
           return (await runWorkspaceCommand({
-            workspacePath: externalWorkspacePath,
+            workspacePath: targetWorkspacePath,
             command: String(args?.command ?? ''),
             args: Array.isArray(args?.args)
               ? args.args.map((value) => String(value))
@@ -113,7 +145,7 @@ describe('external workspace diagnostics regression', () => {
         throw new Error(`unexpected invoke command: ${command}`);
       };
 
-      const report = await runProjectDiagnostics(externalWorkspacePath, invoke);
+      const report = await runProjectDiagnostics(targetWorkspacePath, invoke);
 
       expect(report.available).toBe(true);
       expect(report.overallStatus).toBe('passed');
@@ -121,7 +153,7 @@ describe('external workspace diagnostics regression', () => {
 
       for (const filePath of ['vite.config.ts', 'src/App.tsx', 'src/main.tsx', 'package.json']) {
         const summary = summarizeProjectFileDiagnostics({
-          workspacePath: externalWorkspacePath,
+          workspacePath: targetWorkspacePath,
           selectedPath: filePath,
           report,
         });
@@ -129,10 +161,9 @@ describe('external workspace diagnostics regression', () => {
         expect(summary.total, `${filePath} should stay clean in project diagnostics`).toBe(0);
       }
 
-      const packageJsonContent = await fsp.readFile(
-        path.join(externalWorkspacePath, 'package.json'),
-        'utf8'
-      );
+      const packageJsonContent = configuredWorkspacePath
+        ? await fsp.readFile(path.join(configuredWorkspacePath, 'package.json'), 'utf8')
+        : (defaultFixtureFiles['package.json'] ?? '');
       const declaredModuleNames = parseDeclaredModuleNames(packageJsonContent);
       const remainingMarkers = filterDeclaredModuleResolutionDiagnostics(
         [

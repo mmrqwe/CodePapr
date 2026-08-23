@@ -75,9 +75,10 @@ pub async fn connect_sse(
     .map_err(|_| format!("Timed out waiting for SSE endpoint on '{}'", server.name))?
     .map_err(|err| format!("Failed to initialize MCP sse server '{}': {err}", server.name))?;
 
-    let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel::<ClientJsonRpcMessage>();
-    let (incoming_tx, incoming_rx) = mpsc::unbounded_channel::<ServerJsonRpcMessage>();
-    let (shutdown_tx, mut shutdown_rx) = mpsc::unbounded_channel::<()>();
+    const MCP_CHANNEL_CAPACITY: usize = 256;
+    let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<ClientJsonRpcMessage>(MCP_CHANNEL_CAPACITY);
+    let (incoming_tx, incoming_rx) = mpsc::channel::<ServerJsonRpcMessage>(MCP_CHANNEL_CAPACITY);
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
     let post_http = http.clone();
     let post_headers = headers.clone();
@@ -114,7 +115,7 @@ pub async fn connect_sse(
             while let Some(event) = pop_sse_event(&mut buffer) {
                 if event.event == "message" || event.event.is_empty() {
                     if let Ok(message) = serde_json::from_str::<ServerJsonRpcMessage>(&event.data) {
-                        if incoming_for_sse.send(message).is_err() {
+                        if incoming_for_sse.send(message).await.is_err() {
                             return;
                         }
                     }
@@ -141,9 +142,9 @@ pub async fn connect_sse(
 }
 
 struct SseTransport {
-    tx: mpsc::UnboundedSender<ClientJsonRpcMessage>,
-    rx: mpsc::UnboundedReceiver<ServerJsonRpcMessage>,
-    shutdown: mpsc::UnboundedSender<()>,
+    tx: mpsc::Sender<ClientJsonRpcMessage>,
+    rx: mpsc::Receiver<ServerJsonRpcMessage>,
+    shutdown: mpsc::Sender<()>,
 }
 
 impl Transport<RoleClient> for SseTransport {
@@ -155,7 +156,7 @@ impl Transport<RoleClient> for SseTransport {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
         let tx = self.tx.clone();
         async move {
-            tx.send(item).map_err(|_| {
+            tx.send(item).await.map_err(|_| {
                 io::Error::new(io::ErrorKind::BrokenPipe, "MCP sse send channel closed")
             })
         }
@@ -168,7 +169,7 @@ impl Transport<RoleClient> for SseTransport {
     fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
         let shutdown = self.shutdown.clone();
         async move {
-            let _ = shutdown.send(());
+            let _ = shutdown.send(()).await;
             Ok(())
         }
     }

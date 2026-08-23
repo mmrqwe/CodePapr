@@ -195,7 +195,7 @@ function StackedBar({ segments, height = 12, unit = '' }: { segments: { color: s
       <div className="flex h-full">
         {segments.map((seg, i) => (
           <div
-            key={i}
+            key={`${seg.color}-${seg.label ?? i}`}
             style={{
               width: total > 0 ? `${(seg.width / total) * 100}%` : '0%',
               backgroundColor: seg.color,

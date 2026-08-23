@@ -99,9 +99,15 @@ export function resetSubagentProgress(): void {
   notify();
 }
 
-export function toggleSubagentCollapse(index: number): void {
-  if (index >= 0 && index < runs.length) {
-    runs[index].collapsed = !runs[index].collapsed;
+export function toggleSubagentCollapse(target: number | string): void {
+  const targetRun =
+    typeof target === 'string'
+      ? findRun(target)
+      : target >= 0 && target < runs.length
+        ? runs[target]
+        : undefined;
+  if (targetRun) {
+    targetRun.collapsed = !targetRun.collapsed;
     notify();
   }
 }

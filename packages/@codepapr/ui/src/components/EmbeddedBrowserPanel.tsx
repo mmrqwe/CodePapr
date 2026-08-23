@@ -112,7 +112,7 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
           unlisten = fn;
         }
       }
-    );
+    ).catch(() => undefined);
 
     const onResize = () => void syncBounds();
     window.addEventListener('resize', onResize);

@@ -45,55 +45,88 @@ export class GoalConditionParseError extends Error {
 /**
  * 将命令行字符串拆分为 command + args。
  * 支持引号包裹的参数（单引号和双引号）。
+ *
+ * 转义语义对齐 POSIX shell：
+ * - 单引号内完全不转义（字面量）；
+ * - 双引号内仅针对 \" \\ \$ \` 转义；其它字符前缀的反斜杠（如 "\d+"、"\s"）保留字面反斜杠；
+ * - 无引号时 \ 转义其后的任意紧跟字符。
  */
 function tokenizeCommand(line: string): { command: string; args: string[] } {
   const tokens: string[] = [];
   let current = '';
   let quote: 'single' | 'double' | null = null;
-  let escaped = false;
+  let i = 0;
 
-  for (const ch of line) {
-    if (escaped) {
-      current += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === '\\' && quote !== 'single') {
-      escaped = true;
-      continue;
-    }
+  while (i < line.length) {
+    const ch = line[i]!;
+
     if (quote === 'single') {
       if (ch === "'") {
         quote = null;
       } else {
         current += ch;
       }
+      i++;
       continue;
     }
+
     if (quote === 'double') {
       if (ch === '"') {
         quote = null;
+        i++;
+      } else if (ch === '\\') {
+        const next = line[i + 1];
+        if (next === '"' || next === '\\' || next === '$' || next === '`') {
+          current += next;
+          i += 2;
+        } else {
+          // 双引号内普通字符前的反斜杠保留（例如 "\d+" 保持 \d+，不被吞为 d+）
+          current += ch;
+          i++;
+        }
       } else {
         current += ch;
+        i++;
       }
       continue;
     }
+
+    // 无引号状态
+    if (ch === '\\') {
+      const next = line[i + 1];
+      if (next !== undefined) {
+        current += next;
+        i += 2;
+      } else {
+        current += ch;
+        i++;
+      }
+      continue;
+    }
+
     if (ch === "'") {
       quote = 'single';
+      i++;
       continue;
     }
+
     if (ch === '"') {
       quote = 'double';
+      i++;
       continue;
     }
+
     if (/\s/.test(ch)) {
       if (current) {
         tokens.push(current);
         current = '';
       }
+      i++;
       continue;
     }
+
     current += ch;
+    i++;
   }
 
   if (current) {

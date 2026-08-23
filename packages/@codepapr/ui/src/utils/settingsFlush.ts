@@ -27,5 +27,5 @@ export function registerSettingsFlushListener(): void {
       }
       await flushCharactersState().catch(() => undefined);
     })();
-  });
+  }).catch(() => undefined);
 }

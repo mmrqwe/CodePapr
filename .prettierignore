@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+generated
+Release
+packages/@codepapr/ui/src-tauri/target
+packages/@codepapr/ui/src-tauri/gen
+.cargo-vendor
+package-lock.json
+Cargo.lock

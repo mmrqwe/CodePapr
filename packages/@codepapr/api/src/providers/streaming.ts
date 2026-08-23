@@ -16,6 +16,10 @@ interface StreamingToolCallState {
   argumentsText: string;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function safeParseToolArguments(
   rawArguments: string
 ): Record<string, unknown> {
@@ -24,25 +28,40 @@ export function safeParseToolArguments(
     return {};
   }
 
+  const formatParseError = (reason: string): Record<string, unknown> => {
+    const preview =
+      trimmed.length > 500 ? trimmed.slice(0, 500) + '…' : trimmed;
+    return {
+      _parseError: true,
+      error: reason,
+      _raw: preview,
+    };
+  };
+
   try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
+    const parsed = JSON.parse(trimmed);
+    if (!isPlainObject(parsed)) {
+      return formatParseError(
+        `JSON 根节点非对象结构 (解析为 ${Array.isArray(parsed) ? '数组' : typeof parsed})`
+      );
+    }
+    return parsed;
   } catch (firstError) {
     const repaired = attemptJsonRepair(trimmed);
     if (repaired) {
       try {
-        return JSON.parse(repaired) as Record<string, unknown>;
+        const parsed = JSON.parse(repaired);
+        if (isPlainObject(parsed)) {
+          return parsed;
+        }
       } catch {
         // 修复未能恢复可解析的 JSON，继续抛出原始错误
       }
     }
 
-    const preview =
-      trimmed.length > 500 ? trimmed.slice(0, 500) + '…' : trimmed;
-    return {
-      _parseError: true,
-      error: `JSON 解析失败: ${(firstError as SyntaxError).message}`,
-      _raw: preview,
-    };
+    return formatParseError(
+      `JSON 解析失败: ${(firstError as SyntaxError).message}`
+    );
   }
 }
 
@@ -450,7 +469,16 @@ export function applyStreamingToolCallDeltas(
   deltas: StreamingToolCallDelta[]
 ): StreamingToolCallState[] {
   for (const delta of deltas) {
-    const index = delta.index ?? 0;
+    let index: number;
+    if (typeof delta.index === 'number') {
+      index = delta.index;
+    } else if (delta.id) {
+      const existing = states.findIndex((s) => s && s.id === delta.id);
+      index = existing !== -1 ? existing : states.length;
+    } else {
+      index = states.length > 0 ? states.length - 1 : 0;
+    }
+
     const current = states[index] ?? {
       id: delta.id ?? `tool-call-${index}`,
       name: '',
