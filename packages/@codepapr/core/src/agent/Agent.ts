@@ -404,7 +404,9 @@ function isImageError(err: unknown): boolean {
   const error = err as Record<string, unknown>;
   if (error.status !== 400 && error.status !== '400') return false;
   const msg = typeof error.message === 'string' ? error.message : '';
-  return /image|dimension|pixel/i.test(msg);
+  return /image|dimension|pixel|multimodal|vision|expected a string|content is an array|array of content parts|image_url/i.test(
+    msg
+  );
 }
 
 /**

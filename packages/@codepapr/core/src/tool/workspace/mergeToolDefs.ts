@@ -298,11 +298,11 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 21. read_image ────
   {
     name: 'read_image',
-    description: '读取项目中的图片文件（PNG、JPEG、WebP、GIF），返回 base64 编码的图片数据供多模态模型识别分析。支持 maxBytes 限制。',
+    description: '读取项目中的图片文件（PNG、JPEG、WebP、GIF、SVG、ICO、AVIF 等），返回 base64 编码的图片数据供多模态模型识别分析。支持 maxBytes 限制。如需查看网页/Canvas/游戏等前端渲染画面，请使用 browser(action: "open") 打开页面，再用 browser(action: "screenshot") 截屏后再读取。',
     parameters: {
       type: 'object',
       properties: {
-        relativePath: { type: 'string', description: '图片文件相对路径。' },
+        relativePath: { type: 'string', description: '图片文件相对路径（支持 .CodePapr/tmp/ 下的截图或项目图片文件）。' },
         maxBytes: { type: 'number', description: '最大读取字节数，默认 5000000（5MB）。' },
       },
       required: ['relativePath'],

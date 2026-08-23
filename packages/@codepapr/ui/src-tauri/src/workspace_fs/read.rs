@@ -419,6 +419,11 @@ const IMAGE_EXTENSIONS: &[(&str, &str)] = &[
     ("gif", "image/gif"),
     ("bmp", "image/bmp"),
     ("svg", "image/svg+xml"),
+    ("ico", "image/x-icon"),
+    ("avif", "image/avif"),
+    ("jfif", "image/jpeg"),
+    ("tiff", "image/tiff"),
+    ("tif", "image/tiff"),
 ];
 
 fn detect_media_type(path: &std::path::Path) -> Option<&'static str> {
@@ -457,7 +462,7 @@ pub(crate) fn read_image_file_impl(
     }
 
     let media_type = detect_media_type(&target)
-        .ok_or_else(|| "不支持的文件格式，仅支持 PNG、JPEG、WebP、GIF、BMP、SVG".to_string())?
+        .ok_or_else(|| "不支持的文件格式，仅支持 PNG、JPEG、WebP、GIF、BMP、SVG、ICO、AVIF、TIFF".to_string())?
         .to_string();
 
     let metadata = fs::metadata(&target)

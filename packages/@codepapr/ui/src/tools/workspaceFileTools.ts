@@ -85,6 +85,32 @@ function assertWriteVerified(verified: ReadFileResult, expected: string, relativ
   }
 }
 
+function extractFilePath(args: Record<string, unknown>, paramName = 'relativePath'): string {
+  const value =
+    args.relativePath ??
+    args.path ??
+    args.filePath ??
+    args.file_path ??
+    args.imagePath ??
+    args.image_path ??
+    args.file ??
+    args.src;
+  return asString(value, paramName);
+}
+
+function extractOptionalFilePath(args: Record<string, unknown>): string | undefined {
+  const value =
+    args.relativePath ??
+    args.path ??
+    args.filePath ??
+    args.file_path ??
+    args.imagePath ??
+    args.image_path ??
+    args.file ??
+    args.src;
+  return asOptionalString(value);
+}
+
 export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
   const {
     registry,
@@ -111,7 +137,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
 
   registry.register(toolByName('workspace_list_files'), async (args: Record<string, unknown>, context) => {
     const parsed: ListFilesArgs = {
-      relativePath: asOptionalString(args.relativePath),
+      relativePath: extractOptionalFilePath(args),
       maxDepth: asOptionalNumber(args.maxDepth),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'list', context?.signal);
@@ -157,7 +183,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
 
   registry.register(toolByName('workspace_read_file'), async (args: Record<string, unknown>, context) => {
     const parsed: ReadFileArgs = {
-      relativePath: asString(args.relativePath, 'relativePath'),
+      relativePath: extractFilePath(args, 'relativePath'),
       maxBytes: asOptionalNumber(args.maxBytes),
       startLine: asOptionalNumber(args.startLine),
       endLine: asOptionalNumber(args.endLine),
@@ -245,7 +271,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
 
   registry.register(toolByName('workspace_read_image'), async (args: Record<string, unknown>, context) => {
     const parsed: ReadImageFileArgs = {
-      relativePath: asString(args.relativePath, 'relativePath'),
+      relativePath: extractFilePath(args, 'relativePath'),
       maxBytes: asOptionalNumber(args.maxBytes),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'read', context?.signal);
@@ -269,7 +295,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
 
   registry.register(toolByName('workspace_write_file'), async (args: Record<string, unknown>, context) => {
     const parsed: WriteFileArgs = {
-      relativePath: asString(args.relativePath, 'relativePath'),
+      relativePath: extractFilePath(args, 'relativePath'),
       content: asString(args.content, 'content'),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'write', context?.signal);
@@ -331,7 +357,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
 
   registry.register(toolByName('workspace_apply_patch'), async (args: Record<string, unknown>, context) => {
     const parsed: ApplyPatchArgs = {
-      relativePath: asString(args.relativePath, 'relativePath'),
+      relativePath: extractFilePath(args, 'relativePath'),
       search: asString(args.search, 'search'),
       replace: asString(args.replace, 'replace'),
       replaceAll: asOptionalBoolean(args.replaceAll, 'replaceAll'),
@@ -422,7 +448,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
   registry.register(toolByName('workspace_apply_diff'), async (args: Record<string, unknown>, context) => {
     const parsed: ApplyDiffArgs = {
       patches: asPatchArray(args.patches).map((patch) => ({
-        relativePath: asString(patch.relativePath, 'relativePath'),
+        relativePath: extractFilePath(patch, 'relativePath'),
         search: asString(patch.search, 'search'),
         replace: asString(patch.replace, 'replace'),
         replaceAll: asOptionalBoolean(patch.replaceAll, 'replaceAll'),

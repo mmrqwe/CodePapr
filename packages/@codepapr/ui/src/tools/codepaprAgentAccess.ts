@@ -9,7 +9,15 @@
 export type CodePaprAgentOp = 'read' | 'write' | 'list' | 'execute';
 
 const CODEPAPR_SEGMENT = '.codepapr';
-const SCRATCH_PREFIXES = new Set(['tmp', 'tool-output', 'downloads']);
+const SCRATCH_PREFIXES = new Set([
+  'tmp',
+  'tool-output',
+  'downloads',
+  'screenshots',
+  'images',
+  'assets',
+  'fixtures',
+]);
 
 function splitPath(path: string): string[] {
   return path

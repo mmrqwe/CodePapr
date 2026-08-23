@@ -102,6 +102,29 @@ describe('registerWorkspaceTools (domain split)', () => {
     expect(names(build({ multimodalEnabled: true }))).toContain('read_image');
   });
 
+  it('supports path alias when executing workspace_read_image', async () => {
+    invokeMock.mockImplementationOnce(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_image_file') {
+        expect(args?.relativePath).toBe('assets/logo.png');
+        return {
+          path: 'assets/logo.png',
+          mediaType: 'image/png',
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+          bytes: 68,
+        };
+      }
+      return {};
+    });
+    const registry = build({ multimodalEnabled: true });
+    // Execute with `path` parameter instead of `relativePath`
+    const result = (await registry.execute('read_image', {
+      path: 'assets/logo.png',
+    })) as { path: string; mediaType: string; bytes: number; __images: Array<{ mediaType: string; data: string }> };
+    expect(result.path).toBe('assets/logo.png');
+    expect(result.mediaType).toBe('image/png');
+    expect(result.__images?.[0]?.data).toContain('iVBORw0KGgoAAAANSUhEUg');
+  });
+
   it('keeps hidden fine-grained tools executable (handler survives hideFromLlm)', async () => {
     const registry = build();
     // hideFromLlm 只从 getAll() 移除定义，不删 handler——子代理仍可执行。

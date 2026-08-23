@@ -1281,10 +1281,10 @@ function buildToolConstraints(
   if (hasTool(toolNames, 'read_image')) {
     common.push(
       lang === 'en'
-        ? '- [read_image] Read image files (PNG/JPEG/WebP/GIF) as base64 for multimodal vision analysis. Use maxBytes to limit size (default 5MB).'
+        ? '- [read_image] Read image files (PNG/JPEG/WebP/GIF/SVG/ICO/AVIF) as base64 for vision analysis. Use maxBytes to limit size (default 5MB). For web/canvas/game UI, use `browser(action: "open")` + `browser(action: "screenshot")` first.'
         : lang === 'zh-TW'
-        ? '- [read_image] 讀取圖片檔案（PNG/JPEG/WebP/GIF）為 base64 編碼，供多模態模型識別分析。使用 maxBytes 限制大小（預設 5MB）。'
-        : '- [read_image] 读取图片文件（PNG/JPEG/WebP/GIF）为 base64 编码，供多模态模型识别分析。使用 maxBytes 限制大小（默认 5MB）。'
+        ? '- [read_image] 讀取圖片檔案（PNG/JPEG/WebP/GIF/SVG/ICO/AVIF）為 base64 編碼，供多模態模型識別分析。使用 maxBytes 限制大小（預設 5MB）。若要查看網頁/Canvas/遊戲畫面，請先用 `browser(action: "open")` 打開並用 `browser(action: "screenshot")` 截圖。'
+        : '- [read_image] 读取图片文件（PNG/JPEG/WebP/GIF/SVG/ICO/AVIF）为 base64 编码，供多模态模型识别分析。使用 maxBytes 限制大小（默认 5MB）。若需查看网页/Canvas/游戏渲染画面，请先用 `browser(action: "open")` 打开并用 `browser(action: "screenshot")` 截图。'
     );
   }
   if ((hasTool(toolNames, 'memory_write') || hasTool(toolNames, 'write')) && mode === 'agent') {

@@ -21,6 +21,29 @@ function legacySlotVision(settings: Settings, slot: 'primary' | 'fast'): boolean
   return settings.multimodalModelTier === slot;
 }
 
+/**
+ * Known pure-text models that do not accept multimodal/vision inputs in their API.
+ * Even if multimodal is accidentally toggled on in profiles/settings, they should
+ * not receive raw image payloads directly.
+ */
+export function isKnownTextOnlyModel(modelName: string | undefined): boolean {
+  if (!modelName) return false;
+  const lower = modelName.trim().toLowerCase();
+  if (lower.includes('deepseek')) return true;
+  if (
+    lower === 'o1-mini' ||
+    lower === 'o3-mini' ||
+    lower.startsWith('gpt-3.5') ||
+    lower.startsWith('text-embedding')
+  ) {
+    return true;
+  }
+  if (lower.startsWith('qwen') && !lower.includes('-vl') && !lower.includes('vision')) {
+    return true;
+  }
+  return false;
+}
+
 /** Fast slot is actually available as a routing target. */
 export function isFastSlotAvailable(settings: Settings): boolean {
   return settings.fastModelEnabled === true && trim(settings.fastModel).length > 0;
@@ -33,6 +56,10 @@ export function isFastSlotAvailable(settings: Settings): boolean {
  */
 export function fastSlotSupportsVision(settings: Settings): boolean {
   if (!isFastSlotAvailable(settings)) return false;
+  const fastModel = settings.modelProfiles?.length
+    ? findProfile(settings, settings.fastProfileId)?.model || settings.fastModel
+    : settings.fastModel;
+  if (isKnownTextOnlyModel(fastModel)) return false;
   if (settings.modelProfiles?.length) {
     const fast = findProfile(settings, settings.fastProfileId);
     return profileVision(fast) === true;
@@ -41,6 +68,10 @@ export function fastSlotSupportsVision(settings: Settings): boolean {
 }
 
 export function primarySlotSupportsVision(settings: Settings): boolean {
+  const primaryModel = settings.modelProfiles?.length
+    ? (findProfile(settings, settings.primaryProfileId) || settings.modelProfiles[0])?.model || settings.model
+    : settings.model;
+  if (isKnownTextOnlyModel(primaryModel)) return false;
   if (settings.modelProfiles?.length) {
     const primary =
       findProfile(settings, settings.primaryProfileId) || settings.modelProfiles[0];
@@ -52,6 +83,10 @@ export function primarySlotSupportsVision(settings: Settings): boolean {
 
 export function mentorSlotSupportsVision(settings: Settings): boolean {
   if (!settings.mentorEnabled || !trim(settings.mentorModel)) return false;
+  const mentorModel = settings.modelProfiles?.length
+    ? findProfile(settings, settings.mentorProfileId)?.model || settings.mentorModel
+    : settings.mentorModel;
+  if (isKnownTextOnlyModel(mentorModel)) return false;
   if (settings.modelProfiles?.length) {
     return profileVision(findProfile(settings, settings.mentorProfileId)) === true;
   }
@@ -83,6 +118,7 @@ export function slotSupportsVision(settings: Settings, slot: VisionSlot): boolea
 
 /** The running model itself can take image inputs. */
 export function modelSupportsVision(settings: Settings, currentModel: string): boolean {
+  if (isKnownTextOnlyModel(currentModel)) return false;
   return slotSupportsVision(settings, inferVisionSlot(settings, currentModel));
 }
 

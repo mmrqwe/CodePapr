@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelProfile, Settings } from '../store/internals/types';
 import {
   fastSlotSupportsVision,
+  isKnownTextOnlyModel,
   modelSupportsVision,
   resolveVisionInputAction,
   shouldExposeReadImage,
@@ -135,5 +136,34 @@ describe('visionRouting', () => {
     expect(modelSupportsVision(s, 'fast-model')).toBe(false);
     expect(fastSlotSupportsVision(s)).toBe(false);
     expect(shouldExposeReadImage(s, 'fast-model')).toBe(false);
+  });
+
+  it('correctly identifies known text-only models and prevents raw vision payload', () => {
+    expect(isKnownTextOnlyModel('deepseek-v4-pro')).toBe(true);
+    expect(isKnownTextOnlyModel('deepseek-chat')).toBe(true);
+    expect(isKnownTextOnlyModel('deepseek-reasoner')).toBe(true);
+    expect(isKnownTextOnlyModel('o1-mini')).toBe(true);
+    expect(isKnownTextOnlyModel('o3-mini')).toBe(true);
+    expect(isKnownTextOnlyModel('gpt-3.5-turbo')).toBe(true);
+    expect(isKnownTextOnlyModel('qwen-2.5-coder-32b')).toBe(true);
+    expect(isKnownTextOnlyModel('qwen-2.5-vl-72b')).toBe(false);
+    expect(isKnownTextOnlyModel('claude-3-7-sonnet')).toBe(false);
+    expect(isKnownTextOnlyModel('gpt-4o')).toBe(false);
+
+    const s = settings({
+      model: 'deepseek-v4-pro',
+      fastModel: 'claude-3-7-sonnet',
+      modelProfiles: [
+        profile({ id: 'p-primary', model: 'deepseek-v4-pro', multimodalEnabled: true }),
+        profile({ id: 'p-fast', model: 'claude-3-7-sonnet', multimodalEnabled: true }),
+      ],
+    });
+    // Even if multimodalEnabled was true in profile, DeepSeek is recognized as text-only
+    expect(modelSupportsVision(s, 'deepseek-v4-pro')).toBe(false);
+    // Fast vision is available via Claude
+    expect(fastSlotSupportsVision(s)).toBe(true);
+    // Should offload to fast model rather than sending raw image to DeepSeek
+    expect(shouldOffloadVision(s, 'deepseek-v4-pro')).toBe(true);
+    expect(resolveVisionInputAction(s, 'deepseek-v4-pro')).toBe('offload');
   });
 });
