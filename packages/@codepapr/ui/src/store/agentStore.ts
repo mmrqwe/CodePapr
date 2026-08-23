@@ -420,6 +420,47 @@ function pushRestoreUndo(
   return next.slice(next.length - MAX_RESTORE_UNDOS);
 }
 
+export function createWorkspaceResetPatch(path: string = '') {
+  return {
+    workspacePath: path,
+    workspaceMutationVersion: 0,
+    projectGraphLoading: false,
+    projectGraphPhase: null,
+    sessions: [],
+    archivedSessions: [],
+    activeSessionId: null,
+    messages: [],
+    sessionMessages: {},
+    skillEnabledById: {},
+    conversationStats: createEmptyConversationStats(),
+    sessionConversationStats: {},
+    sessionMessagesLoading: false,
+    projectDiagnosticsReport: null,
+    isLoading: false,
+    loadingSessionId: null,
+    _agent: null,
+    _agentModel: null,
+    _agentPromptKey: null,
+    _agentSessionId: null,
+    _appAgent: null,
+    _sessionInputState: {},
+    _editHistory: new EditHistory(),
+    _projectRulesSection: '',
+    _skillDefinitions: [],
+    _agentDefinitions: [...BUILTIN_AGENTS],
+    _taskChecklists: {},
+    _pendingRestoreUndos: [],
+    _messageCheckpoints: {},
+    _gitReady: false,
+    _gitReadyError: null,
+    _checkpointError: null,
+    _persistenceError: null,
+    _checkpointSeq: 0,
+    _turnSeq: 0,
+    _sessionLru: [],
+  };
+}
+
 export const useAgentStore = create<AgentState & AgentActions>()((set, get) => ({
       settings: DEFAULT_SETTINGS,
       workspacePath: '',
@@ -570,41 +611,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           if (s.workspacePath === path) {
             return { workspacePath: path, _agent: null, _appAgent: null, workspaceMutationVersion: 0 };
           }
-          return {
-            workspacePath: path,
-            workspaceMutationVersion: 0,
-            sessions: [],
-            activeSessionId: null,
-            messages: [],
-            sessionMessages: {},
-            skillEnabledById: {},
-            conversationStats: createEmptyConversationStats(),
-            sessionConversationStats: {},
-            sessionMessagesLoading: false,
-      projectDiagnosticsReport: null,
-      projectGraphLoading: false,
-      projectGraphPhase: null,
-      _agent: null,
-      _agentModel: null,
-      _agentPromptKey: null,
-      _agentSessionId: null,
-      _appAgent: null,
-      _sessionInputState: {},
-      _editHistory: new EditHistory(),
-      _projectRulesSection: '',
-      _skillDefinitions: [],
-      _agentDefinitions: [...BUILTIN_AGENTS],
-      _taskChecklists: {},
-      _pendingRestoreUndos: [],
-      _messageCheckpoints: {},
-      _gitReady: false,
-      _gitReadyError: null,
-      _checkpointError: null,
-      _persistenceError: null,
-      _checkpointSeq: 0,
-      _turnSeq: 0,
-      _sessionLru: [],
-          };
+          return createWorkspaceResetPatch(path);
         });
         if (path) {
           void grantWorkspaceAssetScope(path);
@@ -624,44 +631,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         openWorkspaceSeq += 1;
         disposeWorkspaceAgents(get);
         clearAllTodoListContexts();
-        set({
-          workspacePath: '',
-          workspaceMutationVersion: 0,
-          projectGraphLoading: false,
-          projectGraphPhase: null,
-          sessions: [],
-          archivedSessions: [],
-          activeSessionId: null,
-          messages: [],
-          sessionMessages: {},
-          skillEnabledById: {},
-          conversationStats: createEmptyConversationStats(),
-          sessionConversationStats: {},
-          sessionMessagesLoading: false,
-          projectDiagnosticsReport: null,
-          isLoading: false,
-          loadingSessionId: null,
-          _agent: null,
-          _agentModel: null,
-          _agentPromptKey: null,
-          _agentSessionId: null,
-          _appAgent: null,
-          _sessionInputState: {},
-          _editHistory: new EditHistory(),
-          _projectRulesSection: '',
-          _skillDefinitions: [],
-          _agentDefinitions: [...BUILTIN_AGENTS],
-          _taskChecklists: {},
-          _pendingRestoreUndos: [],
-          _messageCheckpoints: {},
-          _gitReady: false,
-          _gitReadyError: null,
-          _checkpointError: null,
-      _persistenceError: null,
-          _checkpointSeq: 0,
-          _turnSeq: 0,
-          _sessionLru: [],
-        });
+        set(createWorkspaceResetPatch(''));
         syncActiveCharacterFromSession(null);
         if (previousPath) {
           void stopWorkspaceLsp(previousPath);

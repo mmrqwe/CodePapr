@@ -506,6 +506,15 @@ function normalizeMaxToolRounds(value: number | undefined): number {
   return Math.max(1, Math.floor(value));
 }
 
+function safeStringifyOutput(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export class Agent {
   private session: Session;
   private provider: ILLMProvider;
@@ -782,11 +791,19 @@ export class Agent {
      *  不进 log）。 */
     contextInsertions?: RequestContextInsertion[]
   ): Promise<IAgentResponse> {
-    const effectiveSignal = signal ?? (() => {
-      const controller = new AbortController();
-      this.abortController = controller;
-      return controller.signal;
-    })();
+    const controller = new AbortController();
+    this.abortController = controller;
+    const onExternalAbort = (): void => {
+      controller.abort(signal?.reason);
+    };
+    if (signal) {
+      if (signal.aborted) {
+        controller.abort(signal.reason);
+      } else {
+        signal.addEventListener('abort', onExternalAbort, { once: true });
+      }
+    }
+    const effectiveSignal = controller.signal;
     const userMsg = MessageFactory.user(userInput, images, userMessageId);
     // PR5（ADR-009 B3）：turn-scoped 插入挂在 Agent 字段上（不进 log），
     // 本回合所有 request build 复用；replaceLog（mid-loop 压缩）不清除。
@@ -1368,7 +1385,7 @@ export class Agent {
           toolName: call.name,
           success,
           error: errorMessage,
-          output: typeof contextResult === 'string' ? contextResult : JSON.stringify(contextResult),
+          output: safeStringifyOutput(contextResult),
           contextContent: toolMsg.content,
           contextSummary:
             typeof toolMsg.metadata?.[TOOL_SUMMARY_METADATA_KEY] === 'string'
@@ -1431,6 +1448,9 @@ export class Agent {
       }
     }
     } finally {
+      if (signal) {
+        signal.removeEventListener('abort', onExternalAbort);
+      }
       // 错误路径同样要复位：旧实现抛错时跳过这两步，后续 cancel() 会 abort
       // 一个陈旧的 controller，scratch 也会一直停在「回合进行中」。
       this.session.scratch.markRoundEnd();

@@ -31,17 +31,31 @@ const guardedFetch: typeof fetch = (input, init) => {
 setGlobalFetchFn(guardedFetch);
 
 let editMenu: Menu | null = null;
+let editMenuInitPromise: Promise<Menu> | null = null;
 
-async function initEditMenu() {
-  editMenu = await Menu.new({
-    items: [
-      await PredefinedMenuItem.new({ item: 'Cut' }),
-      await PredefinedMenuItem.new({ item: 'Copy' }),
-      await PredefinedMenuItem.new({ item: 'Paste' }),
-      await PredefinedMenuItem.new({ item: 'Separator' }),
-      await PredefinedMenuItem.new({ item: 'SelectAll' }),
-    ],
-  });
+async function getOrCreateEditMenu(): Promise<Menu> {
+  if (editMenu) {
+    return editMenu;
+  }
+  if (!editMenuInitPromise) {
+    editMenuInitPromise = (async () => {
+      const menu = await Menu.new({
+        items: [
+          await PredefinedMenuItem.new({ item: 'Cut' }),
+          await PredefinedMenuItem.new({ item: 'Copy' }),
+          await PredefinedMenuItem.new({ item: 'Paste' }),
+          await PredefinedMenuItem.new({ item: 'Separator' }),
+          await PredefinedMenuItem.new({ item: 'SelectAll' }),
+        ],
+      });
+      editMenu = menu;
+      return menu;
+    })().catch((err) => {
+      editMenuInitPromise = null;
+      throw err;
+    });
+  }
+  return editMenuInitPromise;
 }
 
 window.addEventListener('contextmenu', async (e) => {
@@ -53,8 +67,12 @@ window.addEventListener('contextmenu', async (e) => {
 
   if (isEditable) {
     e.preventDefault();
-    if (!editMenu) await initEditMenu();
-    await editMenu?.popup(new LogicalPosition(e.clientX, e.clientY));
+    try {
+      const menu = await getOrCreateEditMenu();
+      await menu.popup(new LogicalPosition(e.clientX, e.clientY));
+    } catch {
+      // 忽略菜单创建/弹窗异常
+    }
   } else {
     e.preventDefault();
   }

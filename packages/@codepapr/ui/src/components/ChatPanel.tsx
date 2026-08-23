@@ -314,8 +314,17 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   const { feedStream: ttsFeedStream, stop: ttsStop, skip: ttsSkip, isPlaying: ttsIsPlaying, lastError: ttsError, clearError: ttsClearError, serverStatus: ttsServerStatus, serverModelVersion: ttsServerModelVersion, serverHalfPrecision: ttsServerHalfPrecision, serverDevice: ttsServerDevice, installed: ttsInstalled, refreshInstalled: ttsRefreshInstalled, startServer: ttsStartServer, replayText: ttsReplayText, setVoiceConfig: ttsSetVoiceConfig, setTextLanguage: ttsSetTextLanguage, setVoiceModel: ttsSetVoiceModel, setFineTunedModel: ttsSetFineTunedModel, preloadModel: ttsPreloadModel, setPlaybackMode: ttsSetPlaybackMode, setSampleSteps: ttsSetSampleSteps, setSpeed: ttsSetSpeed, setSentencesPerChunk: ttsSetSentencesPerChunk, setInteractionMode: ttsSetInteractionMode, volume: ttsVolume, setVolume: ttsSetVolume, serverLog: ttsServerLog, clearServerLog: ttsClearServerLog } = useTtsPlayer();
   const [showInstaller, setShowInstaller] = useState(false);
   const [ttsStarting, setTtsStarting] = useState(false);
+  const ttsStartingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showTtsLog, setShowTtsLog] = useState(false);
   const prevFtPathRef = useRef('');
+
+  useEffect(() => {
+    return () => {
+      if (ttsStartingTimeoutRef.current) {
+        clearTimeout(ttsStartingTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleTtsClick = useCallback(async () => {
     // If a start is already in progress, do nothing — the backend has its
@@ -354,12 +363,22 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     // Safety: clear the "starting" UI flag eventually so the button isn't
     // permanently disabled if events get lost. The `starting` server status
     // owned by the hook is the source of truth for status display.
-    setTimeout(() => setTtsStarting(false), 120_000);
+    if (ttsStartingTimeoutRef.current) {
+      clearTimeout(ttsStartingTimeoutRef.current);
+    }
+    ttsStartingTimeoutRef.current = setTimeout(() => {
+      setTtsStarting(false);
+      ttsStartingTimeoutRef.current = null;
+    }, 120_000);
   }, [ttsRefreshInstalled, ttsServerStatus, ttsStartServer, ttsStarting, showTtsLog, ttsIsPlaying, ttsStop]);
 
   // Clear the local "starting" flag whenever the hook reports a terminal state.
   useEffect(() => {
     if (ttsServerStatus === 'running' || ttsServerStatus === 'error' || ttsServerStatus === 'stopped') {
+      if (ttsStartingTimeoutRef.current) {
+        clearTimeout(ttsStartingTimeoutRef.current);
+        ttsStartingTimeoutRef.current = null;
+      }
       setTtsStarting(false);
     }
   }, [ttsServerStatus]);
@@ -644,6 +663,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
         if (!id) continue;
         const height = el.getBoundingClientRect().height;
         if (height > 0) {
+          if (heightCacheRef.current.size > 5000) {
+            const firstKey = heightCacheRef.current.keys().next().value;
+            if (firstKey) heightCacheRef.current.delete(firstKey);
+          }
           heightCacheRef.current.set(id, height);
         }
       }
@@ -1843,7 +1866,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
                         ) : (
                           ttsServerLog.map((entry, i) => (
                             <div
-                              key={i}
+                              key={`${entry.ts}-${i}-${entry.stream}`}
                               className={`text-[10px] leading-snug ${
                                 entry.stream === 'stderr'
                                   ? 'text-warn'

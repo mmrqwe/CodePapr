@@ -571,7 +571,7 @@ export function CodingWorkbench({
       } else {
         unlisten = cleanup;
       }
-    });
+    }).catch(() => undefined);
 
     void refreshFromWatcher();
 
