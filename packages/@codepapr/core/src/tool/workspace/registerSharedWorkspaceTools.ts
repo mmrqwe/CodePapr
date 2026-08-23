@@ -42,7 +42,6 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
 
   // ──── 文件系统 ────
   registry.register(findTool('read'), forward(registry, 'workspace_read_file'));
-  registry.register(findTool('read_image'), forward(registry, 'workspace_read_image'));
   registry.register(findTool('write'), forward(registry, 'workspace_write_file'));
   registry.register(findTool('edit'), async (args) => {
     return await registry.execute('workspace_apply_patch', args);
