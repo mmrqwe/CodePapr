@@ -37,6 +37,8 @@ import { useThemeStore } from './store/themeStore';
 import { getBuiltinTheme } from './theme/themes';
 import type { ReviewScope } from './utils/codeReview';
 import { getTranslation } from './utils/i18n';
+import { findPreviewProcessForPort, processPreviewUrl } from './utils/loopbackPreview';
+import { usePermissionStore } from './store/permissionStore';
 import type { PreviewLocation } from './utils/projectDiagnosticLocations';
 import { cacheGet, cacheSet } from './utils/cacheStorage';
 
@@ -204,11 +206,12 @@ export default function App() {
     }))
   );
   const activePreviewSession = usePreviewStore((state) => state.activePreviewSession);
-  const browserPageSession = useBrowserViewStore((state) => state.pageSession);
   const browserPanelOpen = useBrowserViewStore((state) => state.panelOpen);
   const browserEngine = useBrowserViewStore((state) => state.engine);
   const openBrowserPanel = useBrowserViewStore((state) => state.openPanel);
   const openedAppId = useAppRuntimeStore((state) => state.openedAppId);
+  const pendingPermission = usePermissionStore((state) => state.pendingRequest);
+  const pendingMcpConfirm = useMcpConfirmStore((state) => state.pendingConfirm);
   const dockedPluginId = useAppRuntimeStore((state) =>
     selectDockedPluginId({
       apps: state.apps,
@@ -246,6 +249,21 @@ export default function App() {
   const [selectedDiagnosticLocation, setSelectedDiagnosticLocation] = useState<PreviewLocation | null>(null);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const selectedFileName = selectedPath ? basename(selectedPath) : null;
+  const nativeLayerBlocked = Boolean(
+    showSettings
+      || (showCharacters && settings.experimentalCharacters)
+      || showAbout
+      || showProjectSwitcher
+      || showStats
+      || showProjectConfig
+      || showSkillMarket
+      || showCodeReview
+      || openedAppId
+      || activePreviewSession
+      || pendingPermission
+      || pendingMcpConfirm
+      || (settingsLoaded && !isApiConfigured(settings) && !onboardingDismissed && !showSettings),
+  );
 
   useEffect(() => {
     void loadSettings();
@@ -479,22 +497,16 @@ export default function App() {
           // backend (matched by its preview URL / port) so start/stop/delete and
           // running-state stay accurate after a reload.
           try {
-            const procs = await invoke<Array<{ pid: number; preview_url?: string }>>(
+            const procs = await invoke<Array<{ pid: number; previewUrl?: string; preview_url?: string }>>(
               'list_background_processes',
               { workspacePath },
             );
-            const runningByUrl = new Map<string, number>();
-            for (const proc of procs) {
-              if (proc.preview_url) runningByUrl.set(proc.preview_url, proc.pid);
-            }
             for (const app of discovered) {
               if (useAgentStore.getState().workspacePath !== workspacePath) return;
-              if (!app.port) continue;
-              const url = `http://127.0.0.1:${app.port}/`;
-              const pid = runningByUrl.get(url) ?? runningByUrl.get(`http://localhost:${app.port}/`);
-              if (pid !== undefined) {
-                useAppRuntimeStore.getState().setAppRunning(app.app_id, pid, url);
-              }
+              const match = findPreviewProcessForPort(procs, app.port);
+              if (!match) continue;
+              const url = processPreviewUrl(match) ?? `http://127.0.0.1:${app.port}/`;
+              useAppRuntimeStore.getState().setAppRunning(app.app_id, match.pid, url);
             }
           } catch {
             // 对账失败不影响应用列表恢复
@@ -779,7 +791,7 @@ export default function App() {
                   ) : (
                    <div className="flex items-center justify-end gap-2 border-b border-line px-4 min-h-[60px]">
                     <div className="flex items-center gap-2">
-                      {browserPageSession && browserEngine === 'embedded' && workspacePath && (
+                      {browserEngine === 'embedded' && workspacePath && (
                         <button
                           type="button"
                           onClick={() => openBrowserPanel()}
@@ -840,7 +852,11 @@ export default function App() {
               inset-0 只覆盖右侧主 pane，盖不住左侧栏。 */}
           <div className="h-full w-full overflow-hidden rounded-2xl border border-line bg-base p-4 shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
             <Suspense fallback={null}>
-              <EmbeddedBrowserPanel workspacePath={workspacePath} lang={settings.lang} />
+              <EmbeddedBrowserPanel
+                workspacePath={workspacePath}
+                lang={settings.lang}
+                nativeLayerBlocked={nativeLayerBlocked}
+              />
             </Suspense>
           </div>
         </div>

@@ -19,6 +19,7 @@ import {
 import { isPluginApp, parsePaprKind, parsePluginSurfaceArg, pluginIsEnabled, readAppManifest, resolvePaprEntryFile, shouldRevealOnPublish } from '../papr/pluginSurface';
 import { postAppEvent } from '../papr/appChannelHub';
 import { type WorkspaceToolContext } from './workspaceToolContext';
+import { findPreviewProcessForPort, processPreviewUrl } from '../utils/loopbackPreview';
 
 /** app_render 禁止携带的写文件/清单字段：这些必须用 write/edit/patch 落盘。 */
 const APP_RENDER_WRITE_ARG_KEYS = [
@@ -410,19 +411,16 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     } catch { /* best-effort */ }
 
     // Ground truth for running backends: the Rust process registry (survives
-    // webview reloads). Keyed by preview URL so we can match an app by its port.
-    const runningByUrl = new Map<string, number>();
+    // webview reloads). Match by loopback port so 127.0.0.1 and localhost agree.
+    let procs: Array<{ pid: number; previewUrl?: string; preview_url?: string }> = [];
     try {
-      const procs = await invoke<Array<{ pid: number; preview_url?: string }>>('list_background_processes', { workspacePath: workspace() });
-      for (const proc of procs) {
-        if (proc.preview_url) runningByUrl.set(proc.preview_url, proc.pid);
-      }
+      procs = await invoke('list_background_processes', { workspacePath: workspace() });
     } catch { /* best-effort */ }
-    const urlForPort = (port?: number | null): string | null => (port ? `http://localhost:${port}/` : null);
 
     const fromStore = storeApps.map((app) => {
-      const regUrl = urlForPort(app.port);
-      const regRunning = regUrl !== null && runningByUrl.has(regUrl);
+      const match = findPreviewProcessForPort(procs, app.port);
+      const regRunning = match !== undefined;
+      const regUrl = match ? processPreviewUrl(match) ?? null : null;
       const plugin = isPluginApp(app);
       const chrome = useAppRuntimeStore.getState().pluginChrome[app.appId];
       return {
@@ -439,8 +437,9 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       };
     });
     const fromDisk = diskApps.map((d) => {
-      const regUrl = urlForPort(d.port);
-      const regRunning = regUrl !== null && runningByUrl.has(regUrl);
+      const match = findPreviewProcessForPort(procs, d.port);
+      const regRunning = match !== undefined;
+      const regUrl = match ? processPreviewUrl(match) ?? null : null;
       const diskManifest = readAppManifest({ manifestJson: d.manifest_json ?? undefined });
       const plugin = diskManifest?.kind === 'plugin';
       return {

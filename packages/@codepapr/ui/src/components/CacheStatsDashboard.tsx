@@ -135,14 +135,7 @@ function ModelStatsBlock({ title, stats, pricing, t, showCost = true, footnote, 
           <div className="mb-3">
             <p className="mb-2 text-[11px] font-medium text-fg-muted">{t.tokenUsage}</p>
             <StatRow label={t.cacheRead} value={totalCacheRead.toLocaleString()} color="text-green-400" />
-            {totalCacheCreation === 0 ? (
-              <StatRow label={t.cacheMissInput} value={totalInput.toLocaleString()} color="text-yellow-400" />
-            ) : (
-              <>
-                <StatRow label={t.cacheCreated} value={totalCacheCreation.toLocaleString()} color="text-yellow-400" />
-                <StatRow label={t.newInput} value={totalInput.toLocaleString()} />
-              </>
-            )}
+            <StatRow label={t.cacheMissInput} value={totalCacheMissInput.toLocaleString()} color="text-yellow-400" />
             <StatRow label={t.output} value={totalOutput.toLocaleString()} />
           </div>
 

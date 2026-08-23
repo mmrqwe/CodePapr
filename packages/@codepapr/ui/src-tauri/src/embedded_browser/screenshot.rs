@@ -1,6 +1,6 @@
 //! 内置浏览器截图：macOS WKWebView.takeSnapshot + NSBitmapImageRep 编码。
 //!
-//! 其他平台暂无实现（返回错误），后续可补 WebView2 CapturePreview。
+//! CodePaprMac 仅支持 macOS；其他平台返回明确错误，不做 WebView2/webkit2gtk 移植。
 
 use std::time::Duration;
 

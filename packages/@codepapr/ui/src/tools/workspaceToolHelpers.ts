@@ -490,6 +490,7 @@ export interface StopBackgroundProcessResult {
 
 export interface StopAllBackgroundProcessesResult {
   stopped: number;
+  failed?: number;
 }
 
 export interface BrowserPreviewStateResult {

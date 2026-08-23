@@ -1045,25 +1045,28 @@ pub(crate) fn stop_background_process(
         });
     };
 
-    let still_running = match process.child.try_wait() {
-        Ok(Some(_)) => false,
-        Ok(None) => true,
-        Err(_) => true,
-    };
-
-    if still_running {
+    if child_is_running(&mut process.child) {
         let _ = kill_process_tree(&mut process.child);
         wait_for_child_exit(&mut process.child, Duration::from_secs(3));
     }
 
+    if child_is_running(&mut process.child) {
+        // kill 失败时写回注册表，避免进程从 UI 消失却仍在运行。
+        let _ = with_background_processes(|processes| {
+            processes.entry(pid).or_insert(process);
+            Ok(())
+        });
+        return Ok(StopBackgroundProcessResult {
+            pid,
+            stopped: false,
+            reason: Some("kill-failed".to_string()),
+        });
+    }
+
     Ok(StopBackgroundProcessResult {
         pid,
-        stopped: still_running,
-        reason: if still_running {
-            Some("kill-failed".to_string())
-        } else {
-            None
-        },
+        stopped: true,
+        reason: None,
     })
 }
 
@@ -1108,20 +1111,42 @@ pub(crate) fn stop_all_background_processes(
     })?;
 
     let mut stopped = 0usize;
+    let mut failed = Vec::new();
     for mut process in removed {
-        let still_running = match process.child.try_wait() {
-            Ok(Some(_)) => false,
-            Ok(None) => true,
-            Err(_) => true,
-        };
-        if still_running {
+        if child_is_running(&mut process.child) {
             let _ = kill_process_tree(&mut process.child);
             wait_for_child_exit(&mut process.child, Duration::from_secs(3));
+        }
+        if child_is_running(&mut process.child) {
+            failed.push(process);
+        } else {
             stopped += 1;
         }
     }
 
-    Ok(StopAllBackgroundProcessesResult { stopped })
+    let failed_count = failed.len();
+    if !failed.is_empty() {
+        let _ = with_background_processes(|processes| {
+            for process in failed {
+                let pid = process.child.id();
+                processes.entry(pid).or_insert(process);
+            }
+            Ok(())
+        });
+    }
+
+    Ok(StopAllBackgroundProcessesResult {
+        stopped,
+        failed: failed_count,
+    })
+}
+
+fn child_is_running(child: &mut Child) -> bool {
+    match child.try_wait() {
+        Ok(Some(_)) => false,
+        Ok(None) => true,
+        Err(_) => true,
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -1313,5 +1338,88 @@ mod tests {
             let _ = entry.child.kill();
             let _ = entry.child.wait();
         }
+    }
+
+    /// 回归：停止仍存活的进程后必须报告 stopped=true，且不得带 kill-failed。
+    /// 旧实现把「杀之前仍在运行」写成 stopped，kill 失败时 UI 永远看不到警告。
+    #[test]
+    fn stop_live_process_reports_stopped_without_kill_failed() {
+        let child = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("sleep should spawn");
+        let pid = child.id();
+        background_processes()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(pid, make_entry(child));
+
+        let result = stop_background_process(pid, Some("test".into()))
+            .expect("stop should not error");
+        assert!(result.stopped, "live process must report stopped after kill");
+        assert_eq!(result.reason, None, "successful stop must not report kill-failed");
+
+        if let Some(mut leftover) = background_processes()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&pid)
+        {
+            let _ = leftover.child.kill();
+            let _ = leftover.child.wait();
+        }
+    }
+
+    #[test]
+    fn stop_unknown_pid_reports_not_found() {
+        let result = stop_background_process(u32::MAX, Some("test".into()))
+            .expect("stop should not error");
+        assert!(!result.stopped);
+        assert_eq!(result.reason.as_deref(), Some("not-found"));
+    }
+
+    #[test]
+    fn stop_all_live_process_counts_stopped() {
+        let dir = std::env::temp_dir().join(format!(
+            "codepapr-stop-all-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let workspace = std::fs::canonicalize(&dir)
+            .expect("workspace dir should canonicalize")
+            .to_string_lossy()
+            .to_string();
+
+        let child = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("sleep should spawn");
+        let pid = child.id();
+        let mut entry = make_entry(child);
+        entry.workspace_path = workspace.clone();
+        background_processes()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(pid, entry);
+
+        let result = stop_all_background_processes(Some(workspace), Some("test".into()))
+            .expect("stop-all should not error");
+        assert_eq!(result.failed, 0, "sleep should be killable");
+        assert!(result.stopped >= 1, "stop-all must count the killed process");
+
+        if let Some(mut leftover) = background_processes()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&pid)
+        {
+            let _ = leftover.child.kill();
+            let _ = leftover.child.wait();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

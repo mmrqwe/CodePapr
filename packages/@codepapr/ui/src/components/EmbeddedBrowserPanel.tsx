@@ -15,6 +15,8 @@ interface EmbeddedBrowserStateEvent {
 interface EmbeddedBrowserPanelProps {
   workspacePath: string;
   lang?: Lang;
+  /** 其他 HTML 弹层盖住面板时隐藏原生 WebView（它不受 CSS z-index 约束）。 */
+  nativeLayerBlocked?: boolean;
 }
 
 /** N19：无 scheme 的地址默认补全协议。环回地址（localhost/127.x/[::1]）
@@ -33,11 +35,21 @@ export function normalizeEmbeddedBrowserUrl(raw: string): string {
   return `${isLoopback ? 'http' : 'https'}://${trimmed}`;
 }
 
-export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPanelProps) {
+export function EmbeddedBrowserPanel({
+  workspacePath,
+  lang,
+  nativeLayerBlocked = false,
+}: EmbeddedBrowserPanelProps) {
   const t = getTranslation(lang);
   const pageSession = useBrowserViewStore((state) => state.pageSession);
   const closePanel = useBrowserViewStore((state) => state.closePanel);
   const setPageSession = useBrowserViewStore((state) => state.setPageSession);
+
+  const handleClose = useCallback(() => {
+    closePanel();
+    setPageSession(null);
+    void invoke('close_browser_page', { workspacePath }).catch(() => undefined);
+  }, [closePanel, setPageSession, workspacePath]);
 
   const placeholderRef = useRef<HTMLDivElement | null>(null);
   const [addressInput, setAddressInput] = useState('');
@@ -71,13 +83,21 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
   // 重建后的 WebView 会一直隐藏（占位区空白）。每次动作成功后补一次
   // show + 重新定位（幂等）。
   const ensureVisible = useCallback(async () => {
+    if (nativeLayerBlocked) {
+      try {
+        await invoke('embedded_browser_hide', { workspacePath });
+      } catch {
+        // 无会话时 hide 会失败，属正常情况。
+      }
+      return;
+    }
     try {
       await invoke('embedded_browser_show', { workspacePath });
     } catch {
       // 无会话时 show 会失败，属正常情况。
     }
     await syncBounds();
-  }, [workspacePath, syncBounds]);
+  }, [workspacePath, syncBounds, nativeLayerBlocked]);
 
   // 打开面板：显示原生 WebView 并持续跟随布局变化。
   useEffect(() => {
@@ -85,6 +105,14 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
     let unlisten: UnlistenFn | null = null;
 
     const show = async () => {
+      if (nativeLayerBlocked) {
+        try {
+          await invoke('embedded_browser_hide', { workspacePath });
+        } catch {
+          // 无会话时 hide 会失败，属正常情况。
+        }
+        return;
+      }
       try {
         await invoke('embedded_browser_show', { workspacePath });
       } catch {
@@ -116,17 +144,21 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
 
     const onResize = () => void syncBounds();
     window.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('scroll', onResize);
     const observer = new ResizeObserver(() => void syncBounds());
     if (placeholderRef.current) observer.observe(placeholderRef.current);
 
     return () => {
       disposed = true;
       window.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('scroll', onResize);
       observer.disconnect();
       if (unlisten) unlisten();
       void invoke('embedded_browser_hide', { workspacePath }).catch(() => undefined);
     };
-  }, [workspacePath, syncBounds, setPageSession]);
+  }, [workspacePath, syncBounds, setPageSession, nativeLayerBlocked]);
 
   // 地址栏跟随当前页面 URL。
   useEffect(() => {
@@ -276,7 +308,7 @@ export function EmbeddedBrowserPanel({ workspacePath, lang }: EmbeddedBrowserPan
           </button>
           <button
             type="button"
-            onClick={closePanel}
+            onClick={handleClose}
             className="rounded-md border border-danger-bg px-2 py-1 text-[10px] font-medium text-danger transition-colors hover:border-danger-bg hover:text-danger"
           >
             {t.embeddedBrowserClose}

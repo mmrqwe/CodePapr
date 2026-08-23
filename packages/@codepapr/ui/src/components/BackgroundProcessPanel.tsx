@@ -5,6 +5,7 @@ import { usePreviewStore } from '../store/previewStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
+import { previewUrlMatchesPort } from '../utils/loopbackPreview';
 
 interface BackgroundProcessEntry {
   pid: number;
@@ -25,6 +26,7 @@ interface StopBackgroundProcessResult {
 
 interface StopAllBackgroundProcessesResult {
   stopped: number;
+  failed?: number;
 }
 
 const AUTO_REFRESH_MS = 5000;
@@ -76,10 +78,10 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
       : null;
 
   const apps = useAppRuntimeStore((state) => state.apps);
-  // previewUrl 与 app 的端口一一对应（http://localhost:<port>/）；命中即该进程是 app 后端
+  // previewUrl 与 app 端口对应；localhost / 127.0.0.1 / ::1 视为同一环回主机
   const findOwnerApp = useCallback((previewUrl?: string | null) => {
     if (!previewUrl) return undefined;
-    return apps.find((app) => app.port && previewUrl === `http://localhost:${app.port}/`);
+    return apps.find((app) => previewUrlMatchesPort(previewUrl, app.port));
   }, [apps]);
 
   const refreshProcesses = useCallback(async (silent: boolean = false) => {
@@ -167,7 +169,7 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
     }
     setIsStoppingAll(true);
     try {
-      await invoke<StopAllBackgroundProcessesResult>('stop_all_background_processes', {
+      const result = await invoke<StopAllBackgroundProcessesResult>('stop_all_background_processes', {
         workspacePath,
         source: 'background-process-panel-stop-all',
       });
@@ -175,6 +177,9 @@ export function BackgroundProcessPanel({ workspacePath, lang }: BackgroundProces
         clearPreviewSessionByPid(activePreviewPid);
       }
       await refreshProcesses(true);
+      if (result.failed && result.failed > 0) {
+        setError(t.backgroundProcessesStopAllFailed.replace('{count}', String(result.failed)));
+      }
     } catch (err) {
       setError(errorMessage(err));
     } finally {

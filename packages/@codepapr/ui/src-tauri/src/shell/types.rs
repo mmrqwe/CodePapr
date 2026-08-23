@@ -52,6 +52,8 @@ pub(crate) struct StopBackgroundProcessResult {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StopAllBackgroundProcessesResult {
     pub(crate) stopped: usize,
+    /// kill 后仍存活的进程数；这些条目会重新写回注册表以便重试。
+    pub(crate) failed: usize,
 }
 
 /// 已退出后台进程的勘验信息：退出码/信号 + 进程被回收前捕获的输出尾部。
