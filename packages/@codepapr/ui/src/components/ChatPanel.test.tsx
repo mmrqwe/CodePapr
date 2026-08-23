@@ -1666,6 +1666,90 @@ describe('ChatPanel', () => {
       expect(callArgs?.[0]).toContain('rust+tauri');
       expect(callArgs?.[2]).toBe('plan');
     });
+
+    function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+      const proto =
+        el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    it('allows entering custom thoughts when options do not satisfy user', async () => {
+      const sendSpy = makeSendSpy();
+      setPlanQuestion(sendSpy, [
+        {
+          id: 'plan-q',
+          role: 'assistant',
+          workMode: 'plan',
+          content: '',
+          timestamp: 3,
+          question: {
+            question: '你希望系统采用什么技术栈？',
+            header: '技术栈',
+            options: [{ label: 'rust+tauri' }, { label: 'react+vite' }],
+            multiple: false,
+          },
+        },
+      ]);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      // 点击展开「其它想法」
+      await clickText('其它想法');
+
+      const input = container.querySelector('input[type="text"]') as HTMLInputElement;
+      expect(input).not.toBeNull();
+
+      await act(async () => {
+        setInputValue(input, '我想用 Next.js + Tailwind');
+      });
+
+      // 点击提交回答
+      await clickText('提交回答');
+
+      const callArgs = sendSpy.mock.calls[0];
+      expect(callArgs?.[0]).toContain('你希望系统采用什么技术栈？');
+      expect(callArgs?.[0]).toContain('我想用 Next.js + Tailwind');
+      expect(callArgs?.[2]).toBe('plan');
+    });
+
+    it('renders direct custom input for open-ended questions without options', async () => {
+      const sendSpy = makeSendSpy();
+      setPlanQuestion(sendSpy, [
+        {
+          id: 'plan-q',
+          role: 'assistant',
+          workMode: 'plan',
+          content: '',
+          timestamp: 3,
+          question: {
+            question: '请详细描述您期望的用户交互流程？',
+            header: '交互流程',
+            multiple: false,
+          },
+        },
+      ]);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      const input = container.querySelector('input[type="text"]') as HTMLInputElement;
+      expect(input).not.toBeNull();
+
+      await act(async () => {
+        setInputValue(input, '用户先登录，然后进入仪表盘');
+      });
+
+      await clickText('提交回答');
+
+      const callArgs = sendSpy.mock.calls[0];
+      expect(callArgs?.[0]).toContain('请详细描述您期望的用户交互流程？');
+      expect(callArgs?.[0]).toContain('用户先登录，然后进入仪表盘');
+      expect(callArgs?.[2]).toBe('plan');
+    });
   });
 
   it('N16：会话消息加载失败时显示提示横幅，重试成功后消失', async () => {

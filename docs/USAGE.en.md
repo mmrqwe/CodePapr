@@ -26,7 +26,7 @@
 
 In Plan mode, when requirements are ambiguous, the Agent will call the `question` tool to ask you instead of guessing.
 
-Ask / Plan are read-only modes: mutating tools (write/edit/patch/bash/git/app_*, etc.) are **blocked at the tool-registration layer** — neither exposed to the model nor executable — preventing accidental file changes by construction, not by prompt alone.
+Ask is a read-only mode: mutating tools (write/edit/patch/bash/git/app_*, etc.) are **blocked at the tool-registration layer** — neither exposed to the model nor executable — preventing accidental file changes by construction, not by prompt alone. Plan mode enables the `question` interactive decision tool to clarify requirements before execution.
 
 ## Papr App Development
 

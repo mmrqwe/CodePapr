@@ -322,7 +322,6 @@
     <ul class="nav-links">
       <li><a href="#modes">工作模式</a></li>
       <li><a href="#features">特性</a></li>
-      <li><a href="#portfolio">作品集</a></li>
       <li><a href="#commands">命令</a></li>
       <li><a href="#architecture">架构</a></li>
       <li><a href="tutorial.html">教程</a></li>
@@ -344,13 +343,13 @@
 
 <section class="hero">
   <div class="container">
-    <div class="status"><span class="live"></span>开源 · Tauri 2 · 30 工具集成 · MCP 支持 · 角色扮演 · 语音克隆 · 缓存优先 · Code Review</div>
-    <h1>CodePapr — <span class="gradient">氛围编程，优先缓存</span></h1>
-    <p>本地编码 Agent 工作台。读项目、改文件、跑命令、预览结果。DeepSeek 前缀缓存。可选角色与本地语音克隆。</p>
+    <div class="status"><span class="live"></span>开源 · Tauri 2 · 30 核心工具 · MCP 支持 · 角色定制 · 语音合成 · 缓存优化 · Code Review</div>
+    <h1>CodePapr — <span class="gradient">本地优先 Coding Agent 桌面工作台</span></h1>
+    <p>在本地工作区自主搜索代码、精准修改、执行命令与验证测试。深度适配 DeepSeek 前缀缓存与多模型路由。</p>
     <div class="hero-actions">
       <a href="#" onclick="showComingSoon(event)" class="btn btn-primary">
         <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        获取更新
+        GitHub
       </a>
       <a href="#modes" class="btn btn-secondary">了解更多 &rarr;</a>
     </div>
@@ -463,49 +462,7 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-violet"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></div>
-        <div><h4>本地语音克隆（TTS）</h4><p>GPT-SoVITS，几秒参考音频即可克隆。默认 WebSocket 流式，首字约 1–2 秒。</p></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="section" id="portfolio">
-  <div class="container">
-    <div class="section-header reveal">
-      <div class="section-label"><span class="dot"></span> 作品集</div>
-      <h2>由 CodePapr 从零构建</h2>
-      <p>以下项目均由 CodePapr 独立完成设计、编码与内容整理</p>
-    </div>
-    <div class="modes" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
-      <div class="mode-card ask reveal">
-        <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
-        <h3>Claymore 大剑</h3>
-        <p>动画大剑爱好者整理站点 — 角色介绍、剧情梳理、同好交流</p>
-        <span class="tag">案例展示</span>
-      </div>
-      <div class="mode-card plan reveal">
-        <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
-        <h3>Dallas 独行侠</h3>
-        <p>达拉斯独行侠 NBA 球迷信息站 — 球队历史、球员数据、赛季追踪</p>
-        <span class="tag">案例展示</span>
-      </div>
-      <div class="mode-card agent reveal">
-        <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
-        <h3>The Boys 黑袍</h3>
-        <p>黑袍纠察队剧迷整理站点 — 角色档案、分集解析、世界观梳理</p>
-        <span class="tag">案例展示</span>
-      </div>
-      <div class="mode-card ask reveal">
-        <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/><circle cx="12" cy="12" r="10"/></svg></div>
-        <h3>NewYork 夺冠</h3>
-        <p>纽约球队夺冠纪念站 — 冠军历程、关键比赛、荣耀时刻</p>
-        <span class="tag">案例展示</span>
-      </div>
-      <div class="mode-card plan reveal">
-        <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg></div>
-        <h3>CodePapr成长指数</h3>
-        <p>股票指数显示案例 — 仅供学习，切勿当真</p>
-        <span class="tag">案例展示</span>
+        <div><h4>本地语音合成（TTS）</h4><p>基于 GPT-SoVITS，几秒参考音频即可克隆声音。支持流式合成与多语言。</p></div>
       </div>
     </div>
   </div>
@@ -580,14 +537,14 @@
 
 <section class="cta-section">
   <div class="container reveal">
-    <h2>本地跑起来</h2>
-    <p>开源。桌面端。</p>
+    <h2>本地运行与体验</h2>
+    <p>开源 · 本地优先 · 桌面工作台</p>
     <div class="cta-actions">
       <a href="#" onclick="showComingSoon(event)" class="btn btn-primary">
         <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        关注我们
+        GitHub
       </a>
-      <a href="tutorial.html" class="btn btn-secondary">阅读教程 &rarr;</a>
+      <a href="tutorial.html" class="btn btn-secondary">阅读完整教程 &rarr;</a>
     </div>
   </div>
 </section>
@@ -632,9 +589,9 @@
 <div class="modal-overlay" id="comingSoonModal" onclick="closeComingSoon(event)">
   <div class="modal-card" onclick="event.stopPropagation()">
     <div class="modal-icon">🚀</div>
-    <h2>敬请期待</h2>
-    <p>CodePapr 正在紧锣密鼓地完善中，即将正式发布。感谢你的关注！</p>
-    <button class="modal-close" onclick="closeComingSoon()">我知道了</button>
+    <h2>即将发布</h2>
+    <p>CodePapr 正在完善中，即将正式发布。感谢关注！</p>
+    <button class="modal-close" onclick="closeComingSoon()">确定</button>
   </div>
 </div>
 

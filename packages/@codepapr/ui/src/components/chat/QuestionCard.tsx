@@ -26,6 +26,8 @@ export function QuestionCard({
   const hasOptions = question.options && question.options.length > 0;
   const multiple = hasOptions && question.multiple === true;
   const [selected, setSelected] = useState<string[]>([]);
+  const [customText, setCustomText] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
 
   useEffect(() => {
     if (!multiple) {
@@ -33,14 +35,19 @@ export function QuestionCard({
     }
   }, [multiple]);
 
-  const submitSelection = (options: QuestionOption[]) => {
+  const submitSelection = (options: QuestionOption[], customAnswer?: string) => {
     if (answered || disabled) {
+      return;
+    }
+    const textToSubmit = customAnswer ?? customText;
+    if (options.length === 0 && !textToSubmit.trim()) {
       return;
     }
     onAnswer(
       buildQuestionAnswerAction({
         question,
         selected: options,
+        customText: textToSubmit.trim() || undefined,
         lang,
         sourceMessageId,
       })
@@ -65,6 +72,19 @@ export function QuestionCard({
   const selectedOptions = (question.options ?? []).filter((option) =>
     selected.includes(option.label)
   );
+
+  const handleCustomSubmit = () => {
+    if (answered || disabled) return;
+    if (!customText.trim() && (!multiple || selected.length === 0)) return;
+    submitSelection(selectedOptions, customText);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handleCustomSubmit();
+    }
+  };
 
   return (
     <div className="mb-3">
@@ -119,11 +139,67 @@ export function QuestionCard({
                 </button>
               );
             })}
-            {multiple && (
+
+            {!answered && (
+              <div className="mt-2.5 pt-1">
+                {showCustomInput || multiple ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs text-fg-muted">
+                      <span>{t.planCustomInputOptionalHint}</span>
+                      {!multiple && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCustomInput(false);
+                            setCustomText('');
+                          }}
+                          className="text-[11px] text-fg-dim hover:text-fg-muted"
+                        >
+                          {t.planCustomInputCancel}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={customText}
+                        disabled={disabled || answered}
+                        onChange={(e) => setCustomText(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder={t.planCustomInputPlaceholder}
+                        className="flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs text-fg placeholder:text-fg-dim focus:border-accent focus:outline-none disabled:opacity-50"
+                      />
+                      {!multiple && (
+                        <button
+                          type="button"
+                          disabled={disabled || answered || !customText.trim()}
+                          onClick={handleCustomSubmit}
+                          className="rounded-lg border border-info-bg bg-info-bg px-3 py-1.5 text-xs font-semibold text-info transition-colors hover:border-info-bg hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {t.planCustomInputSubmit}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={disabled || answered}
+                    onClick={() => setShowCustomInput(true)}
+                    className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-info transition-colors"
+                  >
+                    <span>+</span>
+                    <span>{t.planCustomInputToggle}</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {multiple && !answered && (
               <button
                 type="button"
-                disabled={disabled || answered || selected.length === 0}
-                onClick={() => submitSelection(selectedOptions)}
+                disabled={disabled || answered || (selected.length === 0 && !customText.trim())}
+                onClick={handleCustomSubmit}
                 className="w-full rounded-xl border border-info-bg bg-info-bg px-3 py-2 text-sm font-semibold text-info transition-colors hover:border-info-bg hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t.planConfirmSelection}
@@ -131,9 +207,31 @@ export function QuestionCard({
             )}
           </div>
         ) : (
-          <p className="text-xs text-fg-muted">
-            {answered ? t.planQuestionAnswered : t.planQuestionFreeTextHint}
-          </p>
+          <div className="space-y-2">
+            {!answered ? (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={customText}
+                  disabled={disabled || answered}
+                  onChange={(e) => setCustomText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={t.planCustomInputPlaceholder}
+                  className="flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs text-fg placeholder:text-fg-dim focus:border-accent focus:outline-none disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  disabled={disabled || answered || !customText.trim()}
+                  onClick={handleCustomSubmit}
+                  className="rounded-lg border border-info-bg bg-info-bg px-3 py-1.5 text-xs font-semibold text-info transition-colors hover:border-info-bg hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t.planCustomInputSubmit}
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-fg-muted">{t.planQuestionAnswered}</p>
+            )}
+          </div>
         )}
       </div>
     </div>

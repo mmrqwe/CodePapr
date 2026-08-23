@@ -112,7 +112,7 @@ Type `/` to bring up the command palette:
 
 **Fast model (faster, cheaper):** `/search` `/lint` `/clean` `/commit` `/summary`
 
-**Local (zero tokens):** `/help` `/commands` `/compact`
+**Local (zero tokens):** `/help` `/commands` `/undo`
 
 **Autonomous loop (dual-model Worker+Verifier):** `/goal exec:<verify command>` — Launches an autonomous loop where the Worker executes and the Verifier validates against an objective condition, continuing until the condition passes or limits are exhausted. Examples: `/goal exec:npm test`, `/goal fix auth tests | exec:npm test match:"\\d+ passed"`
 
@@ -135,8 +135,8 @@ See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter refer
 
 | Agent | Purpose | Model | Tools |
 |-------|---------|-------|-------|
-| **explore** | Read-only code analysis | fast | read, read_image, list, lsp, diagnostics, grep |
-| **scout** | Web search + download | fast | web_search, web_fetch, web_download, browser, read_image |
+| **explore** | Read-only code analysis | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
+| **scout** | Web search + download | fast | websearch, webfetch, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable model | None |
 | **verifier** *(internal)* | Goal acceptance — read-only audit of the Worker's work (`/goal`) | `verifierModelTier` (fast/primary/mentor) | read, grep, glob, list |
 | **compactor** *(internal)* | Context compaction — generates recoverable checkpoints | `compactionModel` tier (fast/primary) | None |

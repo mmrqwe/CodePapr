@@ -555,8 +555,8 @@
             <div class="addr">MAIN</div>
             <div class="name">主代理 Main Agent <small>全量读写执行</small><span class="cchip c-mix">全功能</span><span class="exp"></span></div>
           </div>
-          <div class="desc">拥有除 <code>graph</code> 外的所有读写/执行工具。项目大纲浏览使用 <code>list</code>，符号定位使用 <code>lsp</code>，全局依赖与深层架构分析通过 <code>task</code> 委派给 Explore 子代理。在 Ask/Plan 只读模式下自动拦截文件写入与 Shell 执行。</div>
-          <div class="more"><div class="mbox">从 LLM 工具定义中软隐藏 <code>graph</code>（保留底层注册供 UI 面板与子代理调用）。只读模式下通过 <code>MUTATING_TOOL_NAMES</code> 统一拦截写操作。</div></div>
+          <div class="desc">拥有除 <code>graph</code> 外的所有读写/执行工具。项目大纲浏览使用 <code>list</code>，符号定位使用 <code>lsp</code>，全局依赖与深层架构分析通过 <code>task</code> 委派给 Explore 子代理。在 Ask 只读模式下自动拦截文件写入与 Shell 执行；在 Plan 模式下开放 <code>question</code> 决策工具。</div>
+          <div class="more"><div class="mbox">从 LLM 工具定义中软隐藏 <code>graph</code>（保留底层注册供 UI 面板与子代理调用）。Ask 模式下通过 <code>MUTATING_TOOL_NAMES</code> 统一拦截写操作。</div></div>
         </div>
 
         <div class="sublabel"><b>子代理</b> 独立 Session · 白名单过滤</div>
@@ -645,10 +645,10 @@
       <div class="railcard reveal">
         <h4>运行模式权限白名单</h4>
         <div class="modelist">
-          <b>只读模式 (Ask/Plan)</b><br>
-          <span class="mk">read grep list lsp diagnostics</span> read_image skill memory_search todo local_time<br><br>
-          <b>联网只读</b><br>
-          <span class="mk">+ websearch webfetch</span><br><br>
+          <b>只读模式 (Ask)</b><br>
+          <span class="mk">read grep list glob lsp diagnostics</span> read_image skill memory_search todo local_time<br><br>
+          <b>规划模式 (Plan)</b><br>
+          <span class="mk">+ question</span> 方案交互与决策确认<br><br>
           <b>全功能模式 (Agent/App)</b><br>
           <span class="mk">+ write edit patch bash git memory_write/forget app_*</span>
         </div>

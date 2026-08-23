@@ -356,7 +356,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 22. question ────
   {
     name: 'question',
-    description: '向用户提出明确的问题以收集需求、确认决策或消除歧义。仅在 Plan 模式下使用，当需求不明确或需要用户做关键选择时调用。如果不需要用户选择，不传 options 则用户可自由输入文本回答。',
+    description: '向用户提出明确的问题以收集需求、确认决策或消除歧义。仅在 Plan 模式下使用，当需求不明确或需要用户做关键选择时调用。可以提供预定义选项供用户选择，用户也可输入自定义想法；如果不提供 options 则为开放式文本回答。',
     parameters: {
       type: 'object',
       properties: {
@@ -364,7 +364,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
         header: { type: 'string', description: '简短标题（最多30字符），用于在UI中标识此问题。' },
         options: {
           type: 'array',
-          description: '可选的预定义选项。如果提供，用户只能从这些选项中选择（单选或多选）；如果不提供，用户可自由输入文本回答。',
+          description: '可选的预定义选项。如果提供，用户可点击选择或输入自定义想法；如果不提供，用户直接输入自定义文本回答。',
           items: {
             type: 'object',
             properties: {

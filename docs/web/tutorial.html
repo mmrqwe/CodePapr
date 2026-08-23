@@ -448,7 +448,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         <table>
           <thead><tr><th>组件</th><th>最低版本</th><th>用途</th></tr></thead>
           <tbody>
-            <tr><td>Node.js</td><td>18+</td><td>运行时和包管理</td></tr>
+            <tr><td>Node.js</td><td>20.19+</td><td>运行时和包管理</td></tr>
             <tr><td>npm</td><td>9+</td><td>依赖管理</td></tr>
             <tr><td>Rust toolchain + Cargo</td><td>stable</td><td>桌面端编译（debug/release/publish）</td></tr>
             <tr><td>.NET SDK</td><td>-</td><td>C# Roslyn analyzer（release 构建需要）</td></tr>
@@ -460,7 +460,8 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         </div>
 
         <h3>标准安装</h3>
-        <pre><code><span class="hl-comment"># 克隆仓库后</span>
+        <pre><code><span class="hl-comment"># 克隆仓库后（含子模块）</span>
+<span class="hl-keyword">git</span> submodule update --init --recursive
 <span class="hl-keyword">npm</span> install
 <span class="hl-keyword">npm</span> run build</code></pre>
 
@@ -639,12 +640,12 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
 
         <h3><span class="badge badge-plan">Plan</span> 规划模式</h3>
-        <p><strong>适合：</strong>大改动前先出执行方案、想看影响文件和验证路径、把复杂任务拆成清晰步骤。</p>
+        <p><strong>适合：</strong>大改动前先出执行方案、确认影响文件和验证路径、把复杂任务拆成清晰步骤。</p>
         <p><strong>特点：</strong></p>
         <ul>
-          <li>默认先给任务清单</li>
-          <li>会给影响文件、执行顺序、验证方式和风险</li>
-          <li>只读（与 Ask 一样在工具层屏蔽变更类工具），适合先规划，再切到 Agent 执行</li>
+          <li>优先给出任务清单与实施方案</li>
+          <li>分析影响文件、执行顺序、验证方式和潜在风险</li>
+          <li>遇到需求歧义时，调用 <code>question</code> 工具向用户提问确认决策</li>
         </ul>
 
         <h3><span class="badge badge-agent">Agent</span> 执行模式</h3>

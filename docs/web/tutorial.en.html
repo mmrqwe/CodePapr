@@ -448,7 +448,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         <table>
           <thead><tr><th>Component</th><th>Minimum Version</th><th>Purpose</th></tr></thead>
           <tbody>
-            <tr><td>Node.js</td><td>18+</td><td>Runtime and package management</td></tr>
+            <tr><td>Node.js</td><td>20.19+</td><td>Runtime and package management</td></tr>
             <tr><td>npm</td><td>9+</td><td>Dependency management</td></tr>
             <tr><td>Rust toolchain + Cargo</td><td>stable</td><td>Desktop build (debug/release/publish)</td></tr>
             <tr><td>.NET SDK</td><td>-</td><td>C# Roslyn analyzer (required for release builds)</td></tr>
@@ -460,7 +460,8 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         </div>
 
         <h3>Standard Installation</h3>
-        <pre><code><span class="hl-comment"># After cloning the repository</span>
+        <pre><code><span class="hl-comment"># After cloning the repository (including submodules)</span>
+<span class="hl-keyword">git</span> submodule update --init --recursive
 <span class="hl-keyword">npm</span> install
 <span class="hl-keyword">npm</span> run build</code></pre>
 
@@ -639,12 +640,12 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
 
         <h3><span class="badge badge-plan">Plan</span> Planning Mode</h3>
-        <p><strong>Best for:</strong> Producing execution plans before large changes, seeing affected files and verification paths, breaking complex tasks into clear steps.</p>
+        <p><strong>Best for:</strong> Producing execution plans before large changes, confirming affected files and verification paths, breaking complex tasks into clear steps.</p>
         <p><strong>Characteristics:</strong></p>
         <ul>
-          <li>Provides a task checklist by default</li>
-          <li>Shows affected files, execution order, verification methods, and risks</li>
-          <li>Read-only (mutating tools blocked at the tool layer, like Ask); best for planning first, then switching to Agent for execution</li>
+          <li>Provides a task checklist and implementation strategy first</li>
+          <li>Analyzes affected files, execution order, verification methods, and potential risks</li>
+          <li>When requirements are ambiguous, invokes the <code>question</code> tool to clarify decisions with the user</li>
         </ul>
 
         <h3><span class="badge badge-agent">Agent</span> Execution Mode</h3>

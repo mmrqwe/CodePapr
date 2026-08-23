@@ -1344,10 +1344,10 @@ function buildToolConstraints(
   if (hasTool(toolNames, 'question') && mode === 'plan') {
     special.push(
       lang === 'en'
-        ? '- [question] When requirements are ambiguous, call `question` with clear question and optional options. Wait for user response.'
+        ? '- [question] When requirements are ambiguous, call `question` with a clear question and optional options. Users can choose from options or enter their own custom thoughts. Wait for user response.'
         : lang === 'zh-TW'
-        ? '- [question] 需求模糊時調用 `question` 提出明確問題。等待用戶回應。'
-        : '- [question] 需求模糊时调用 `question` 提出明确问题。等待用户回应。'
+        ? '- [question] 需求模糊時調用 `question` 提出明確問題（可附帶 options 供選擇，用戶可選或輸入自訂想法）。等待用戶回應。'
+        : '- [question] 需求模糊时调用 `question` 提出明确问题（可附带 options 供选择，用户可选或输入自定义想法）。等待用户回应。'
     );
   }
   if (special.length > 0) {

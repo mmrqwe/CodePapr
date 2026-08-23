@@ -26,7 +26,7 @@
 
 Plan 模式下，当需求模糊时 Agent 会调用 `question` 工具向你提问，而不是猜测。
 
-Ask / Plan 是只读模式：变更类工具（write/edit/patch/bash/git/app_* 等）会在**工具注册层被直接屏蔽**——既不下发给模型，也无法执行，从机制上杜绝误改文件，而非仅靠提示词约束。
+Ask 是只读模式：变更类工具（write/edit/patch/bash/git/app_* 等）会在**工具注册层被直接屏蔽**——既不下发给模型，也无法执行，从机制上杜绝误改文件，而非仅靠提示词约束。Plan 模式下开放 `question` 交互决策工具，先规划再执行。
 
 ## Papr App 开发
 

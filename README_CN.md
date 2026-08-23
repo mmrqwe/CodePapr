@@ -67,10 +67,13 @@ CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主
 ### 安装
 
 ```bash
+git submodule update --init --recursive   # 首次克隆：拉取 .cargo-vendor 下的 tree-sitter 语法解析库
 npm install
 npm run build
 npm run verify
 ```
+
+> 桌面端构建依赖 `.cargo-vendor/*` 下的 9 个 tree-sitter 语法子模块。克隆时需带 `--recurse-submodules` 或执行上述子模块初始化命令，否则 Cargo 构建会报依赖路径缺失错误（`npm run debug`/`release`/`publish` 脚本也会自动检测并尝试初始化）。
 
 ### 启动桌面端
 
@@ -109,7 +112,7 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 
 **快速模型（更快、更便宜）：** `/search` `/lint` `/clean` `/commit` `/summary`
 
-**本地（零 token）：** `/help` `/commands` `/compact`
+**本地（零 token）：** `/help` `/commands` `/undo`
 
 **自主循环（双模型 Worker+Verifier）：** `/goal exec:<验证命令>` — 启动自主循环，Worker 执行 + Verifier 验收 + 客观条件判定，直到验证条件通过或限制耗尽。示例：`/goal exec:npm test`、`/goal 修复 auth 测试 | exec:npm test match:"\\d+ passed"`
 
@@ -132,8 +135,8 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 
 | Agent | 用途 | 模型 | 工具 |
 |-------|------|------|------|
-| **explore** | 只读代码分析 | fast | read, read_image, list, lsp, diagnostics, grep |
-| **scout** | 网页搜索 + 下载 | fast | web_search, web_fetch, web_download, browser, read_image |
+| **explore** | 只读代码分析 | fast | read, read_image, list, graph, glob, lsp, diagnostics, grep |
+| **scout** | 网页搜索 + 下载 | fast | websearch, webfetch, browser, read_image |
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
 | **verifier**（内部） | Goal 验收——只读核实 Worker 是否真正达成目标（`/goal`） | `verifierModelTier` 档位（fast/primary/mentor） | read, grep, glob, list |
 | **compactor**（内部） | 上下文压缩——生成可恢复检查点 | `compactionModel` 档位（fast/primary） | 无 |

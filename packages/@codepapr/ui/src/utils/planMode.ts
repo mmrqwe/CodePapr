@@ -233,40 +233,84 @@ export function parseDecisionOptionCards(content: string): ParsedDecisionCards {
  */
 export function buildQuestionAnswerAction(params: {
   question: QuestionData;
-  selected: QuestionOption[];
+  selected?: QuestionOption[];
+  customText?: string;
   lang: Lang | undefined;
   sourceMessageId?: string;
 }): PlanFollowUpAction {
-  const { question, selected, lang, sourceMessageId } = params;
+  const { question, selected = [], customText, lang, sourceMessageId } = params;
   const labels = selected.map((option) => option.label).filter(Boolean);
+  const trimmedCustom = customText?.trim() || '';
   const joined = labels.join('、');
   const joinedEn = labels.join('", "');
 
+  const hasOptions = labels.length > 0;
+  const hasCustom = trimmedCustom.length > 0;
+
   switch (lang ?? 'zh-CN') {
-    case 'zh-TW':
+    case 'zh-TW': {
+      let label = '';
+      let prompt = '';
+      if (hasOptions && hasCustom) {
+        label = `選擇了「${joined}」，補充：「${trimmedCustom}」`;
+        prompt = `用戶對問題「${question.question}」的回答：選擇了「${joined}」，並補充了想法：「${trimmedCustom}」。請基於這些輸入繼續收斂最終 Plan；如果仍存在會影響實施方向的關鍵分歧，再提出新的問題。不要開始執行。`;
+      } else if (hasCustom) {
+        label = `自訂回答：「${trimmedCustom}」`;
+        prompt = `用戶對問題「${question.question}」的自訂回答：「${trimmedCustom}」。請基於該回答繼續收斂最終 Plan；如果仍存在會影響實施方向的關鍵分歧，再提出新的問題。不要開始執行。`;
+      } else {
+        label = `選擇了「${joined}」`;
+        prompt = `用戶對問題「${question.question}」的回答：選擇了「${joined}」。請基於這個選擇繼續收斂最終 Plan；如果仍存在會影響實施方向的關鍵分歧，再提出新的問題。不要開始執行。`;
+      }
       return {
-        id: `question-${question.question}-${joined}`,
-        label: `選擇了「${joined}」`,
-        prompt: `用戶對問題「${question.question}」的回答：選擇了「${joined}」。請基於這個選擇繼續收斂最終 Plan；如果仍存在會影響實施方向的關鍵分歧，再提出新的問題。不要開始執行。`,
+        id: `question-${question.question}-${joined}-${trimmedCustom}`,
+        label,
+        prompt,
         mode: 'plan',
         sourceMessageId,
       };
-    case 'en':
+    }
+    case 'en': {
+      let label = '';
+      let prompt = '';
+      if (hasOptions && hasCustom) {
+        label = `Chose "${joinedEn}" with note: "${trimmedCustom}"`;
+        prompt = `Answer to question "${question.question}": chose "${joinedEn}", and added custom note: "${trimmedCustom}". Continue refining the final plan based on this input; if another decision still materially changes implementation direction, ask again. Do not start execution.`;
+      } else if (hasCustom) {
+        label = `Custom answer: "${trimmedCustom}"`;
+        prompt = `Custom answer to question "${question.question}": "${trimmedCustom}". Continue refining the final plan based on this answer; if another decision still materially changes implementation direction, ask again. Do not start execution.`;
+      } else {
+        label = labels.length > 1 ? `Chose "${joinedEn}"` : `Chose "${joinedEn}"`;
+        prompt = `Answer to question "${question.question}": chose "${joinedEn}". Continue refining the final plan based on that choice; if another decision still materially changes implementation direction, ask again. Do not start execution.`;
+      }
       return {
-        id: `question-${question.question}-${joinedEn}`,
-        label: labels.length > 1 ? `Chose "${joinedEn}"` : `Chose "${joinedEn}"`,
-        prompt: `Answer to question "${question.question}": chose "${joinedEn}". Continue refining the final plan based on that choice; if another decision still materially changes implementation direction, ask again. Do not start execution.`,
+        id: `question-${question.question}-${joinedEn}-${trimmedCustom}`,
+        label,
+        prompt,
         mode: 'plan',
         sourceMessageId,
       };
+    }
     case 'zh-CN':
-    default:
+    default: {
+      let label = '';
+      let prompt = '';
+      if (hasOptions && hasCustom) {
+        label = `选择了「${joined}」，补充：「${trimmedCustom}」`;
+        prompt = `用户对问题「${question.question}」的回答：选择了「${joined}」，并补充了想法：「${trimmedCustom}」。请基于这些输入继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的问题。不要开始执行。`;
+      } else if (hasCustom) {
+        label = `自定义回答：「${trimmedCustom}」`;
+        prompt = `用户对问题「${question.question}」的自定义回答：「${trimmedCustom}」。请基于该回答继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的问题。不要开始执行。`;
+      } else {
+        label = `选择了「${joined}」`;
+        prompt = `用户对问题「${question.question}」的回答：选择了「${joined}」。请基于这个选择继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的问题。不要开始执行。`;
+      }
       return {
-        id: `question-${question.question}-${joined}`,
-        label: `选择了「${joined}」`,
-        prompt: `用户对问题「${question.question}」的回答：选择了「${joined}」。请基于这个选择继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的问题。不要开始执行。`,
+        id: `question-${question.question}-${joined}-${trimmedCustom}`,
+        label,
+        prompt,
         mode: 'plan',
         sourceMessageId,
       };
+    }
   }
 }

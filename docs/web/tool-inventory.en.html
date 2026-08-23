@@ -555,8 +555,8 @@
             <div class="addr">MAIN</div>
             <div class="name">Main Agent <small>Full Capabilities</small><span class="cchip c-mix">All-in-One</span><span class="exp"></span></div>
           </div>
-          <div class="desc">Holds all reading, writing, and execution tools except <code>graph</code>. Uses <code>list</code> for project directory outlines, <code>lsp</code> for symbol navigation, and delegates deep dependency or architectural queries to Explore via <code>task</code>. Mutating tools are intercepted in Ask/Plan read-only modes.</div>
-          <div class="more"><div class="mbox"><code>graph</code> is soft-hidden from the LLM prompt (registered internally for UI panels and Explore). Read-only modes enforce write guards via <code>MUTATING_TOOL_NAMES</code>.</div></div>
+          <div class="desc">Holds all reading, writing, and execution tools except <code>graph</code>. Uses <code>list</code> for project directory outlines, <code>lsp</code> for symbol navigation, and delegates deep dependency or architectural queries to Explore via <code>task</code>. Mutating tools are intercepted in Ask read-only mode; <code>question</code> is enabled in Plan mode.</div>
+          <div class="more"><div class="mbox"><code>graph</code> is soft-hidden from the LLM prompt (registered internally for UI panels and Explore). Ask mode enforces write guards via <code>MUTATING_TOOL_NAMES</code>.</div></div>
         </div>
 
         <div class="sublabel"><b>Subagents</b> Isolated Sessions · Whitelist Filtered</div>
@@ -645,10 +645,10 @@
       <div class="railcard reveal">
         <h4>Mode Whitelists</h4>
         <div class="modelist">
-          <b>Read-Only (Ask/Plan)</b><br>
-          <span class="mk">read grep list lsp diagnostics</span> read_image skill memory_search todo local_time<br><br>
-          <b>Web Read-Only</b><br>
-          <span class="mk">+ websearch webfetch</span><br><br>
+          <b>Read-Only (Ask)</b><br>
+          <span class="mk">read grep list glob lsp diagnostics</span> read_image skill memory_search todo local_time<br><br>
+          <b>Planning (Plan)</b><br>
+          <span class="mk">+ question</span> Interactive decisions<br><br>
           <b>Full Capability (Agent/App)</b><br>
           <span class="mk">+ write edit patch bash git memory_write/forget app_*</span>
         </div>

@@ -167,4 +167,55 @@ describe('buildQuestionAnswerAction', () => {
 
     expect(action.sourceMessageId).toBe('msg-42');
   });
+
+  it('supports custom text answers when user inputs custom thoughts', () => {
+    const action = buildQuestionAnswerAction({
+      question: {
+        question: '你希望系统采用什么技术栈？',
+        header: '技术栈',
+        options: [{ label: 'rust+tauri' }, { label: 'react+vite' }],
+      },
+      customText: '我想要使用 SvelteKit + Electron',
+      lang: 'zh-CN',
+    });
+
+    expect(action.label).toBe('自定义回答：「我想要使用 SvelteKit + Electron」');
+    expect(action.prompt).toContain('用户对问题「你希望系统采用什么技术栈？」的自定义回答：「我想要使用 SvelteKit + Electron」');
+    expect(action.prompt).toContain('不要开始执行');
+  });
+
+  it('supports selected options combined with custom note/thoughts', () => {
+    const action = buildQuestionAnswerAction({
+      question: {
+        question: '需要哪些功能？',
+        header: '功能',
+        options: [{ label: '暗黑模式' }, { label: '国际化' }],
+      },
+      selected: [{ label: '暗黑模式' }],
+      customText: '另外需要支持自定义主题色',
+      lang: 'zh-CN',
+    });
+
+    expect(action.label).toContain('选择了「暗黑模式」，补充：「另外需要支持自定义主题色」');
+    expect(action.prompt).toContain('选择了「暗黑模式」，并补充了想法：「另外需要支持自定义主题色」');
+    expect(action.prompt).toContain('不要开始执行');
+  });
+
+  it('supports custom text answers in en and zh-TW', () => {
+    const actionEn = buildQuestionAnswerAction({
+      question: { question: 'Which DB?', header: 'DB' },
+      customText: 'Use PostgreSQL with Prisma',
+      lang: 'en',
+    });
+    expect(actionEn.label).toBe('Custom answer: "Use PostgreSQL with Prisma"');
+    expect(actionEn.prompt).toContain('Custom answer to question "Which DB?": "Use PostgreSQL with Prisma"');
+
+    const actionTw = buildQuestionAnswerAction({
+      question: { question: '資料庫選擇？', header: 'DB' },
+      customText: '使用 SQLite 即可',
+      lang: 'zh-TW',
+    });
+    expect(actionTw.label).toBe('自訂回答：「使用 SQLite 即可」');
+    expect(actionTw.prompt).toContain('用戶對問題「資料庫選擇？」的自訂回答：「使用 SQLite 即可」');
+  });
 });
