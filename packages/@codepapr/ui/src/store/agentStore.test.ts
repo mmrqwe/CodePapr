@@ -4157,6 +4157,19 @@ describe('useAgentStore.closeWorkspace', () => {
     expect(state._checkpointSeq).toBe(0);
   });
 
+  it('closeWorkspace 清空进程级子代理进度，避免跨项目把 Mentor 折叠块带进新对话', async () => {
+    const { startSubagentProgress, completeSubagentProgress, getSubagentRuns } = await import(
+      '../utils/subagentProgress'
+    );
+    const runId = startSubagentProgress('mentor', '架构评审', undefined, 's1');
+    completeSubagentProgress(runId, 'done');
+    expect(getSubagentRuns()).toHaveLength(1);
+
+    useAgentStore.getState().closeWorkspace();
+
+    expect(getSubagentRuns()).toEqual([]);
+  });
+
   it('openWorkspace 两步化：切换到新项目后 projectGraphLoading 不卡在 true', async () => {
     // 模拟前一项目正在加载 projectGraph 的状态
     useAgentStore.setState({

@@ -52,6 +52,7 @@ import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPr
 import { warmupLspForWorkspace, stopWorkspaceLsp } from '../utils/lspWarmup';
 import { grantWorkspaceAssetScope } from '../utils/workspaceAssetScope';
 import { restoreTodoListContexts, clearAllTodoListContexts, resetTodoListContext } from '../tools/todoListRegistry';
+import { resetSubagentProgress } from '../utils/subagentProgress';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
 import {
   loadSkillDefinitions,
@@ -608,6 +609,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       setWorkspacePath: (path) => {
         disposeWorkspaceAgents(get);
         clearAllTodoListContexts();
+        if (get().workspacePath !== path) {
+          // 子代理折叠块是进程级单例，不在 store 里；切项目必须清掉，
+          // 否则 ChatPanel 不卸载，旧项目的「Mentor 思考完成」会挂在新对话上。
+          resetSubagentProgress();
+        }
         set((s) => {
           if (s.workspacePath === path) {
             return { workspacePath: path, _agent: null, _appAgent: null, workspaceMutationVersion: 0 };
@@ -632,6 +638,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         openWorkspaceSeq += 1;
         disposeWorkspaceAgents(get);
         clearAllTodoListContexts();
+        resetSubagentProgress();
         set(createWorkspaceResetPatch(''));
         syncActiveCharacterFromSession(null);
         if (previousPath) {

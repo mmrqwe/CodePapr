@@ -2065,7 +2065,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 temperature: route.temperature,
                 maxTokens: route.maxTokens,
                 systemPrompt: runtimeSystemPrompt,
-              }
+              },
+              activeSessionId ?? undefined,
             );
 
             const goalRunner = new GoalRunner({

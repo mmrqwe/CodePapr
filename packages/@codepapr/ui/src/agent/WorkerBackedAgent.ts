@@ -905,7 +905,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
     if (message.type === 'subagent-progress') {
       if (message.action === 'start' && message.agent) {
-        startSubagentProgress(message.agent, message.prompt, message.runId);
+        startSubagentProgress(message.agent, message.prompt, message.runId, this.config.sessionId);
       } else if (message.action === 'step' && message.step) {
         pushSubagentStep(message.runId, message.step);
       } else if (message.action === 'complete') {

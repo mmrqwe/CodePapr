@@ -279,6 +279,7 @@ export function buildUiTaskToolContext(
   overrides: Partial<
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
+  sessionId?: string,
 ): UiTaskToolContext | undefined {
   if (!runtime.agentDefinitions || runtime.agentDefinitions.length === 0) {
     return undefined;
@@ -321,6 +322,7 @@ export function buildUiTaskToolContext(
 
   return {
     workspacePath,
+    sessionId,
     provider,
     providerName,
     baseModel,
@@ -416,7 +418,7 @@ export function buildAgentSessionParts(
 
   registerMcpTools(toolRegistry, settings.mcp, runtime.mcpToolDefinitions ?? [], runtime.mcpToolMappings);
 
-  const uiTaskToolContext = buildUiTaskToolContext(settings, workspacePath, runtime, overrides);
+  const uiTaskToolContext = buildUiTaskToolContext(settings, workspacePath, runtime, overrides, sessionId);
   if (uiTaskToolContext) {
     registerUiTaskTool(toolRegistry, uiTaskToolContext);
   }

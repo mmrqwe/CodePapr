@@ -5,6 +5,7 @@ import {
   clearSubagentProgress,
   resetSubagentProgress,
   getSubagentRuns,
+  getSubagentRunsForSession,
   pushSubagentStep,
 } from './subagentProgress';
 
@@ -47,5 +48,18 @@ describe('subagentProgress runId 隔离', () => {
     expect(runs[1]?.agent).toBe('scout');
     expect(runs[1]?.steps.map((step) => step.name)).toEqual(['websearch']);
     expect(runs[1]?.state).toBe('running');
+  });
+});
+
+describe('subagentProgress 会话隔离', () => {
+  it('getSubagentRunsForSession 只返回带匹配 sessionId 的条目', () => {
+    startSubagentProgress('mentor', 'old', undefined, 'session-a');
+    startSubagentProgress('explore', 'new', undefined, 'session-b');
+    startSubagentProgress('scout', 'untagged');
+
+    expect(getSubagentRunsForSession('session-a').map((run) => run.agent)).toEqual(['mentor']);
+    expect(getSubagentRunsForSession('session-b').map((run) => run.agent)).toEqual(['explore']);
+    expect(getSubagentRunsForSession(null)).toEqual([]);
+    expect(getSubagentRuns()).toHaveLength(3);
   });
 });

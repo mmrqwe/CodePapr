@@ -28,6 +28,8 @@ import { startSubagentProgress, pushSubagentStep, completeSubagentProgress } fro
 
 export interface UiTaskToolContext {
   workspacePath: string;
+  /** 主会话 ID：子代理进度条按会话过滤，避免切对话/切项目后串台。 */
+  sessionId?: string;
   provider: ILLMProvider;
   providerName: 'deepseek' | 'openai' | 'claude' | 'response';
   baseModel: string;
@@ -91,7 +93,7 @@ export async function runSubagent(
   abortSignal?: AbortSignal,
   maxWallClockMs?: number
 ): Promise<SubagentSessionResult> {
-  const runId = startSubagentProgress(definition.name, prompt);
+  const runId = startSubagentProgress(definition.name, prompt, undefined, context.sessionId);
 
   const exec = resolveSubagentExecution({
     definition,

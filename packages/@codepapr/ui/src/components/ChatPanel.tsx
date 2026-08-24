@@ -56,7 +56,7 @@ import AtMentionDropdown, {
   buildMentionItems,
 } from './AtMentionDropdown';
 import { useShallow } from 'zustand/react/shallow';
-import { subscribeSubagentProgress, getSubagentRuns, toggleSubagentCollapse, type SubAgentRun } from '../utils/subagentProgress';
+import { subscribeSubagentProgress, getSubagentRunsForSession, toggleSubagentCollapse, type SubAgentRun } from '../utils/subagentProgress';
 import { ConversationRoundsIndicator } from './ConversationRoundsIndicator';
 import { toast } from '../store/toastStore';
 import type { PlanFollowUpAction } from '../utils/planMode';
@@ -227,9 +227,11 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   }, [mode]);
 
   const [subagentRuns, setSubagentRuns] = useState<SubAgentRun[]>([]);
-  useEffect(() => subscribeSubagentProgress(() => {
-    setSubagentRuns(getSubagentRuns());
-  }), []);
+  useEffect(() => {
+    const sync = () => setSubagentRuns(getSubagentRunsForSession(activeSessionId));
+    sync();
+    return subscribeSubagentProgress(sync);
+  }, [activeSessionId]);
   const [resetConfirmMsgId, setResetConfirmMsgId] = useState<string | null>(null);
   const [resetInFlight, setResetInFlight] = useState(false);
   const [retryMessagesLoading, setRetryMessagesLoading] = useState(false);
