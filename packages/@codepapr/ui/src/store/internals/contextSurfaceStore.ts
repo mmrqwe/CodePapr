@@ -119,6 +119,17 @@ export function forgetContextSurface(workspacePath: string, sessionId: string): 
   surfaceCache.delete(cacheKey(workspacePath, sessionId));
 }
 
+/** 切走工作区时丢掉该路径下全部 surface 内存缓存，避免读旧覆新。 */
+export function forgetContextSurfacesForWorkspace(workspacePath: string): void {
+  if (!workspacePath) return;
+  const prefix = `${workspacePath}\u0000`;
+  for (const key of surfaceCache.keys()) {
+    if (key.startsWith(prefix)) {
+      surfaceCache.delete(key);
+    }
+  }
+}
+
 /**
  * 普通保存维护：把当前 model-visible 投影写回 surface。
  * - 无 surface：创建 generation 0（legacy 引导）；

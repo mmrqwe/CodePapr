@@ -116,6 +116,11 @@ export function drainReRecallAuditIds(sessionId: string): string[] {
   return ids ? [...ids] : [];
 }
 
+/** 切工作区：丢掉未归档的 re-recall 审计 id，避免写进新项目账本。 */
+export function clearAllReRecallAuditIds(): void {
+  reRecallAuditIds.clear();
+}
+
 interface MemoryToolContext {
   signal?: AbortSignal;
   userMessageId?: string;

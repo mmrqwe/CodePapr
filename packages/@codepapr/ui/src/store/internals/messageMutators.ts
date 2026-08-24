@@ -115,6 +115,10 @@ export function updateAssistantMessage(
   updater: (message: UIMessage) => UIMessage
 ): void {
   set((s) => {
+    // 切工作区后旧回合的流式事件不得改写新项目当前对话。
+    if (!s.sessions.some((session) => session.id === sessionId)) {
+      return {};
+    }
     const currentSessionMessages = s.sessionMessages[sessionId] ?? s.messages;
     let changed = false;
     const nextMessages = currentSessionMessages.map((message) => {

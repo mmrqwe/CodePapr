@@ -218,6 +218,19 @@ function scheduleBackgroundProjectDiagnostics(params: {
   }, params.delayMs ?? BACKGROUND_DIAGNOSTICS_DELAY_MS);
 }
 
+/** 切工作区：作废在飞的诊断/修复定时器，避免回调写到新项目上。 */
+export function cancelBackgroundWorkspaceWork(): void {
+  backgroundDiagnosticsRunId += 1;
+  if (backgroundDiagnosticsTimer) {
+    clearTimeout(backgroundDiagnosticsTimer);
+    backgroundDiagnosticsTimer = null;
+  }
+  if (mutationVersionTimer) {
+    clearTimeout(mutationVersionTimer);
+    mutationVersionTimer = null;
+  }
+}
+
 export function handleWorkspaceMutation(params: {
   get: StoreGet;
   set: StoreSet;

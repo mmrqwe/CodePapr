@@ -11,6 +11,7 @@ interface McpConfirmStoreState {
   pendingConfirm: McpConfirmRequest | null;
   requestConfirm: (request: McpConfirmRequest) => Promise<boolean>;
   respondToConfirm: (approved: boolean) => void;
+  cancelPendingConfirms: () => void;
 }
 
 const pendingQueue: PendingMcpConfirm[] = [];
@@ -40,4 +41,19 @@ export const useMcpConfirmStore = create<McpConfirmStoreState>((set) => ({
     syncPending(set);
     entry.resolve(approved);
   },
+
+  cancelPendingConfirms: () => {
+    cancelPendingMcpConfirms();
+  },
 }));
+
+/** 切工作区/销毁回合：拒绝全部排队中的 MCP 确认，避免弹窗留在新项目上。 */
+export function cancelPendingMcpConfirms(): void {
+  const removed = pendingQueue.splice(0);
+  useMcpConfirmStore.setState({ pendingConfirm: null });
+  for (const entry of removed) {
+    if (entry.responding) continue;
+    entry.responding = true;
+    entry.resolve(false);
+  }
+}

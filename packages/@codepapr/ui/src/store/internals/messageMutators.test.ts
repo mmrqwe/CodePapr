@@ -234,6 +234,25 @@ describe('session-scoped message mutators', () => {
     expect(state.sessionMessages['visible']?.[0]?.content).toBe('changed');
   });
 
+  it('updateAssistantMessage ignores sessions that are no longer in the live list', () => {
+    const harness = createHarness({
+      activeSessionId: 'visible',
+      sessions: liveSessions(['visible']),
+      messages: [message('v1', { content: 'visible' })],
+      sessionMessages: { visible: [message('v1', { content: 'visible' })] },
+    });
+
+    updateAssistantMessage(harness.set, 'stale-project-session', 'v1', (m) => ({
+      ...m,
+      content: 'leaked',
+    }));
+
+    const state = harness.get();
+    expect(state.messages[0]?.content).toBe('visible');
+    expect(state.sessionMessages['visible']?.[0]?.content).toBe('visible');
+    expect(state.sessionMessages['stale-project-session']).toBeUndefined();
+  });
+
   it('appendSessionMessages does not leak background session messages into the mirror', () => {
     const harness = createHarness({
       activeSessionId: 'visible',

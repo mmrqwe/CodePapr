@@ -51,8 +51,7 @@ import { nextCheckpointSequence } from '../utils/workspaceGitPanel';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 import { warmupLspForWorkspace, stopWorkspaceLsp } from '../utils/lspWarmup';
 import { grantWorkspaceAssetScope } from '../utils/workspaceAssetScope';
-import { restoreTodoListContexts, clearAllTodoListContexts, resetTodoListContext } from '../tools/todoListRegistry';
-import { resetSubagentProgress } from '../utils/subagentProgress';
+import { restoreTodoListContexts, resetTodoListContext } from '../tools/todoListRegistry';
 import { loadMcpToolDefinitions } from '../tools/mcpTools';
 import {
   loadSkillDefinitions,
@@ -99,7 +98,8 @@ import {
 } from './internals/agentFactory';
 import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
-import { createSendMessage, invalidateAgentHandle } from './internals/sendMessage';
+import { createSendMessage, invalidateAgentHandle, clearSessionBootstrapCache, resetSendMessageWorkspaceGuards } from './internals/sendMessage';
+import { resetWorkspaceEphemeralState } from './internals/workspaceEphemeralReset';
 import { loadMemoryBootstrapSection } from './internals/memoryLedgerStore';
 import { buildPruneOptions } from '../agent/compactionHandler';
 import { finalizeCancelledToolInvocations } from './internals/messageMutators';
@@ -608,11 +608,11 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
       setWorkspacePath: (path) => {
         disposeWorkspaceAgents(get);
-        clearAllTodoListContexts();
-        if (get().workspacePath !== path) {
-          // 子代理折叠块是进程级单例，不在 store 里；切项目必须清掉，
-          // 否则 ChatPanel 不卸载，旧项目的「Mentor 思考完成」会挂在新对话上。
-          resetSubagentProgress();
+        const previousPath = get().workspacePath;
+        if (previousPath !== path) {
+          resetWorkspaceEphemeralState(previousPath);
+          clearSessionBootstrapCache();
+          resetSendMessageWorkspaceGuards();
         }
         set((s) => {
           if (s.workspacePath === path) {
@@ -637,8 +637,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const previousPath = get().workspacePath;
         openWorkspaceSeq += 1;
         disposeWorkspaceAgents(get);
-        clearAllTodoListContexts();
-        resetSubagentProgress();
+        resetWorkspaceEphemeralState(previousPath);
+        clearSessionBootstrapCache();
+        resetSendMessageWorkspaceGuards();
         set(createWorkspaceResetPatch(''));
         syncActiveCharacterFromSession(null);
         if (previousPath) {

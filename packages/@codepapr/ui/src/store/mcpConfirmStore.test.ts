@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useMcpConfirmStore } from './mcpConfirmStore';
+import { useMcpConfirmStore, cancelPendingMcpConfirms } from './mcpConfirmStore';
 import type { McpConfirmRequest } from '../tools/mcpTools';
 
 function makeRequest(id: string): McpConfirmRequest {
@@ -14,7 +14,7 @@ function makeRequest(id: string): McpConfirmRequest {
 
 describe('useMcpConfirmStore', () => {
   beforeEach(() => {
-    useMcpConfirmStore.setState({ pendingConfirm: null });
+    cancelPendingMcpConfirms();
   });
 
   it('approves a pending request and resolves the promise with true', async () => {
@@ -62,6 +62,18 @@ describe('useMcpConfirmStore', () => {
 
   it('ignores responses when no request is pending', () => {
     expect(() => useMcpConfirmStore.getState().respondToConfirm(true)).not.toThrow();
+    expect(useMcpConfirmStore.getState().pendingConfirm).toBeNull();
+  });
+
+  it('cancelPendingMcpConfirms rejects the queue and clears the dialog', async () => {
+    const first = useMcpConfirmStore.getState().requestConfirm(makeRequest('r1'));
+    const second = useMcpConfirmStore.getState().requestConfirm(makeRequest('r2'));
+    expect(useMcpConfirmStore.getState().pendingConfirm?.requestId).toBe('r1');
+
+    cancelPendingMcpConfirms();
+
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(false);
     expect(useMcpConfirmStore.getState().pendingConfirm).toBeNull();
   });
 });

@@ -234,6 +234,17 @@ function evictSessionBootstrapCache(): void {
   }
 }
 
+/** 切工作区：丢掉按 sessionId 索引的 bootstrap，避免把旧项目 memory 拼进新会话。 */
+export function clearSessionBootstrapCache(): void {
+  sessionBootstrapCache.clear();
+}
+
+/** 切工作区：放下在飞守卫。旧回合的 finally 也会再清一次，幂等。 */
+export function resetSendMessageWorkspaceGuards(): void {
+  memoryBootstrapInFlight = false;
+  compactCheckpointInFlight = false;
+}
+
 function resolveSessionBootstrap(
   sessionId: string | null,
   signature: string,
@@ -366,7 +377,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
          *  成功/取消/出错路径都必须执行，否则审计行永久停留 active。
          *  幂等：归档后置空，重复调用无副作用。 */
         const archiveTurnRecalls = (sessionId: string | null): void => {
-          const ws = get().workspacePath;
+          const ws = turnWorkspacePath || get().workspacePath;
           if (!ws) return;
           if (recallRecordId) {
             void archiveMemoryRecall(ws, recallRecordId).catch(() => undefined);
@@ -650,25 +661,39 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (checkpointResult && 'message' in checkpointResult) {
               if (checkpointResult.cacheStats && compactSessionId) {
                 const cpTier: 'primary' | 'fast' = checkpointResult.modelTier === 'primary' ? 'primary' : 'fast';
-                set((s) => ({
-                  conversationStats:
-                    s.activeSessionId === compactSessionId
-                      ? addConversationStats(s.conversationStats, cpTier, checkpointResult.cacheStats!)
-                      : s.conversationStats,
-                  sessionConversationStats: {
-                    ...s.sessionConversationStats,
-                    [compactSessionId]: addConversationStats(
-                      getSessionConversationStats(s.sessionConversationStats, compactSessionId),
-                      cpTier,
-                      checkpointResult.cacheStats!
-                    ),
-                  },
-                }));
+                set((s) => {
+                  if (
+                    s.workspacePath !== workspaceForSlash
+                    || !s.sessions.some((session) => session.id === compactSessionId)
+                  ) {
+                    return {};
+                  }
+                  return {
+                    conversationStats:
+                      s.activeSessionId === compactSessionId
+                        ? addConversationStats(s.conversationStats, cpTier, checkpointResult.cacheStats!)
+                        : s.conversationStats,
+                    sessionConversationStats: {
+                      ...s.sessionConversationStats,
+                      [compactSessionId]: addConversationStats(
+                        getSessionConversationStats(s.sessionConversationStats, compactSessionId),
+                        cpTier,
+                        checkpointResult.cacheStats!
+                      ),
+                    },
+                  };
+                });
               }
               if (compactSessionId) {
                 let compactApplied = false;
                 let compactNextMessages: UIMessage[] | null = null;
                 set((s) => {
+                  if (
+                    s.workspacePath !== workspaceForSlash
+                    || !s.sessions.some((session) => session.id === compactSessionId)
+                  ) {
+                    return {};
+                  }
                   // 必须在 updater 内读最新消息：/compact 不置 isLoading，压缩
                   // 模型调用期间用户可继续发消息，用 await 前捕获的 sessionMsgs
                   // 写回会把 await 期间产生的消息整个覆盖丢失。insertIndex 由

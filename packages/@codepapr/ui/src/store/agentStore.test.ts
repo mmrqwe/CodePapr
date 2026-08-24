@@ -184,6 +184,9 @@ import { useGoalStore } from './goalStore';
 import { parseGoalCondition } from '@codepapr/core';
 import { shouldDeferIdleWatchdog } from './internals/sendMessage';
 import { cancelExternalAccessRequests, usePermissionStore } from './permissionStore';
+import { useMcpConfirmStore } from './mcpConfirmStore';
+import { usePreviewStore } from './previewStore';
+import { useBrowserViewStore } from './browserViewStore';
 import { buildEffectiveContextMessages } from '../utils/contextCompaction';
 import { AgentDestroyedError, WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { SESSION_MESSAGE_CACHE_LIMIT } from './internals/defaults';
@@ -4157,7 +4160,7 @@ describe('useAgentStore.closeWorkspace', () => {
     expect(state._checkpointSeq).toBe(0);
   });
 
-  it('closeWorkspace 清空进程级子代理进度，避免跨项目把 Mentor 折叠块带进新对话', async () => {
+  it('closeWorkspace 清空进程级 UI 状态，避免跨项目把折叠块/Goal/确认框带进新对话', async () => {
     const { startSubagentProgress, completeSubagentProgress, getSubagentRuns } = await import(
       '../utils/subagentProgress'
     );
@@ -4165,9 +4168,37 @@ describe('useAgentStore.closeWorkspace', () => {
     completeSubagentProgress(runId, 'done');
     expect(getSubagentRuns()).toHaveLength(1);
 
+    useGoalStore.getState().setGoalActive(parseGoalCondition('exec:npm test'), '跨项目 goal');
+    const mcpPending = useMcpConfirmStore.getState().requestConfirm({
+      requestId: 'mcp-old',
+      serverId: 'filesystem',
+      serverName: 'Filesystem',
+      toolName: 'write_file',
+      arguments: { path: '/tmp/x' },
+    });
+    usePreviewStore.getState().openPreviewSession({
+      pid: 1,
+      url: 'http://localhost:3000',
+      title: 'old',
+      workspacePath: '/tmp/codepapr-close-test',
+    });
+    useBrowserViewStore.getState().setPageSession({
+      url: 'https://example.com',
+      title: 'old-page',
+      workspacePath: '/tmp/codepapr-close-test',
+      startedAt: 1,
+    });
+    useBrowserViewStore.getState().openPanel();
+
     useAgentStore.getState().closeWorkspace();
 
     expect(getSubagentRuns()).toEqual([]);
+    expect(useGoalStore.getState().isGoalActive).toBe(false);
+    expect(useMcpConfirmStore.getState().pendingConfirm).toBeNull();
+    await expect(mcpPending).resolves.toBe(false);
+    expect(usePreviewStore.getState().activePreviewSession).toBeNull();
+    expect(useBrowserViewStore.getState().pageSession).toBeNull();
+    expect(useBrowserViewStore.getState().panelOpen).toBe(false);
   });
 
   it('openWorkspace 两步化：切换到新项目后 projectGraphLoading 不卡在 true', async () => {
