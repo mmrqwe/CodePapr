@@ -2,7 +2,10 @@ use std::{
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     thread,
 };
 
@@ -38,9 +41,14 @@ const PIP_INDEXES: &[&str] = &[
 ];
 
 static CANCELLED: AtomicBool = AtomicBool::new(false);
+static ACTIVE_PID: Mutex<Option<u32>> = Mutex::new(None);
 
 pub(crate) fn cancel() {
     CANCELLED.store(true, Ordering::SeqCst);
+    let pid = ACTIVE_PID.lock().ok().and_then(|mut guard| guard.take());
+    if let Some(pid) = pid {
+        crate::shell::process_tree::kill_process_group_by_pid(pid);
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -96,11 +104,17 @@ fn run_and_stream(
     step_id: &str,
     label: &str,
 ) -> Result<(), String> {
+    crate::shell::process_tree::prepare_new_process_group(&mut cmd);
+    crate::shell::process_tree::prepare_parent_death_signal(&mut cmd);
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start: {e}"))?;
+    let child_pid = child.id();
+    if let Ok(mut guard) = ACTIVE_PID.lock() {
+        *guard = Some(child_pid);
+    }
 
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
@@ -140,13 +154,27 @@ fn run_and_stream(
     // Poll for cancellation while waiting for the process to exit.
     loop {
         if CANCELLED.load(Ordering::SeqCst) {
-            let _ = child.kill();
+            let _ = crate::shell::process_tree::kill_process_tree(&mut child);
+            crate::shell::process_tree::wait_for_child_exit(
+                &mut child,
+                crate::shared::child_reap_timeout(),
+            );
             let _ = stdout_handle.join();
             let _ = stderr_handle.join();
+            if let Ok(mut guard) = ACTIVE_PID.lock() {
+                if *guard == Some(child_pid) {
+                    *guard = None;
+                }
+            }
             return Err("Cancelled".to_string());
         }
         match child.try_wait() {
             Ok(Some(status)) => {
+                if let Ok(mut guard) = ACTIVE_PID.lock() {
+                    if *guard == Some(child_pid) {
+                        *guard = None;
+                    }
+                }
                 let _ = stdout_handle.join();
                 let _ = stderr_handle.join();
                 if status.success() {
@@ -156,13 +184,23 @@ fn run_and_stream(
                 }
             }
             Ok(None) => thread::sleep(std::time::Duration::from_millis(100)),
-            Err(e) => return Err(format!("Process error: {e}")),
+            Err(e) => {
+                if let Ok(mut guard) = ACTIVE_PID.lock() {
+                    if *guard == Some(child_pid) {
+                        *guard = None;
+                    }
+                }
+                return Err(format!("Process error: {e}"));
+            }
         }
     }
 }
 
 pub(crate) fn install(app: AppHandle, source: Option<String>) {
     CANCELLED.store(false, Ordering::SeqCst);
+    if let Ok(mut guard) = ACTIVE_PID.lock() {
+        *guard = None;
+    }
 
     let model_source = source.as_deref().unwrap_or("hf-mirror");
 

@@ -125,6 +125,9 @@ impl GptSovitsServer {
         // Suppress tokenizers parallelism warning.
         cmd.env("TOKENIZERS_PARALLELISM", "false");
 
+        crate::shell::process_tree::prepare_new_process_group(&mut cmd);
+        crate::shell::process_tree::prepare_parent_death_signal(&mut cmd);
+
         // Set LD_LIBRARY_PATH for ffmpeg shared libs if available.
         for lib_dir in &[
             "/opt/homebrew/opt/ffmpeg@6/lib",
@@ -209,29 +212,25 @@ impl GptSovitsServer {
             return Ok(());
         };
 
-        let _ = child_ref.kill();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            match child_ref.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => {
-                    if Instant::now() > deadline {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(_) => break,
-            }
-        }
+        let _ = crate::shell::process_tree::kill_process_tree(child_ref);
+        crate::shell::process_tree::wait_for_child_exit(
+            child_ref,
+            crate::shared::child_reap_timeout(),
+        );
 
         if let Some(mut orphan) = child.take() {
-            // 3s 内未退出（如 D 状态，SIGKILL 也杀不掉）：二次 kill 后交给
-            // 独立收割线程异步 wait()，本函数立即返回、锁已释放——绝不无限
-            // wait()（旧实现永久阻塞且持锁，stop() 与 watchdog 双双卡死）。
-            let _ = orphan.kill();
-            std::thread::spawn(move || {
-                let _ = orphan.wait();
-            });
+            // 仍未退出（如 D 状态）：用户停止时交给独立线程 wait，避免本函数阻塞；
+            // 宿主退出路径绝不能再 spawn——`process::exit` 会立刻杀掉该线程，
+            // 孤儿 Python 会在 macOS 上让 Dock 显示「正在后台运行」。
+            let still_running = matches!(orphan.try_wait(), Ok(None) | Err(_));
+            if still_running {
+                let _ = orphan.kill();
+                if !crate::shared::is_fast_child_reap() {
+                    std::thread::spawn(move || {
+                        let _ = orphan.wait();
+                    });
+                }
+            }
         }
 
         self.python_path = None;

@@ -142,7 +142,7 @@ pub(crate) fn kill_process_group_by_pid(pid: u32) {
     let target: libc::pid_t = if group_leader == pid { -pid } else { pid };
 
     let _ = unsafe { libc::kill(target, libc::SIGTERM) };
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + crate::shared::child_reap_timeout();
     loop {
         if unsafe { libc::kill(pid, 0) } != 0 {
             break;
@@ -192,7 +192,8 @@ pub(crate) fn wait_for_child_exit(child: &mut Child, timeout: Duration) {
 /// 杀掉子进程及其全部后代，并等待其退出。
 ///
 /// Unix：先对进程组发 SIGTERM，给进程优雅退出的机会（后端服务可借此落日志、
-/// 刷 WAL，也便于事后勘验「是谁停的」）；3 秒内未退出再 SIGKILL。子进程由
+/// 刷 WAL，也便于事后勘验「是谁停的」）；默认 3 秒内未退出再 SIGKILL（宿主
+/// 退出路径见 `child_reap_timeout`，缩短以免卡住 `process::exit`）。子进程由
 /// `prepare_new_process_group` 以独立进程组启动，pid == pgid，用
 /// `kill(-pid, SIG)` 作用于整组。防御性地先用 getpgid 确认组确实归子进程
 /// 所有（绝不误杀自身所在进程组），否则退回只对子进程本身发信号。
@@ -215,7 +216,7 @@ pub(crate) fn kill_process_tree(child: &mut Child) -> std::io::Result<()> {
         };
 
         let _ = unsafe { libc::kill(target, libc::SIGTERM) };
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + crate::shared::child_reap_timeout();
         loop {
             match child.try_wait() {
                 Ok(Some(_)) => return Ok(()),
@@ -254,5 +255,33 @@ pub(crate) fn kill_process_tree(child: &mut Child) -> std::io::Result<()> {
             return Ok(());
         }
         child.kill()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+
+    #[test]
+    fn kill_process_tree_reaps_sleep_child() {
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        prepare_new_process_group(&mut cmd);
+        let mut child = cmd.spawn().expect("spawn sleep");
+        let started = Instant::now();
+        kill_process_tree(&mut child).expect("kill process tree");
+        wait_for_child_exit(&mut child, Duration::from_millis(500));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "reaping sleep must not wait the full graceful timeout"
+        );
+        assert!(
+            matches!(child.try_wait(), Ok(Some(_))),
+            "sleep child must be reaped"
+        );
     }
 }

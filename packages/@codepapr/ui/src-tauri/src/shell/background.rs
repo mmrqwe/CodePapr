@@ -1,6 +1,6 @@
 use crate::shared::{
-    canonical_workspace, ensure_path_accessible, expanded_path, normalize_workspace_filter,
-    parse_browser_url, run_blocking_workspace_task, unix_millis,
+    canonical_workspace, child_reap_timeout, ensure_path_accessible, expanded_path,
+    normalize_workspace_filter, parse_browser_url, run_blocking_workspace_task, unix_millis,
 };
 use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
 use crate::shell::process_tree::{
@@ -566,7 +566,7 @@ fn decode_command_output(bytes: &[u8]) -> String {
 /// 直接返回 Err 会留下僵尸进程直到宿主退出。先杀进程树再有界等待。
 fn reap_child_quietly(child: &mut Child) {
     let _ = kill_process_tree(child);
-    wait_for_child_exit(child, Duration::from_secs(3));
+    wait_for_child_exit(child, child_reap_timeout());
 }
 
 fn collect_command_output_with_cancel(
@@ -1047,7 +1047,7 @@ pub(crate) fn stop_background_process(
 
     if child_is_running(&mut process.child) {
         let _ = kill_process_tree(&mut process.child);
-        wait_for_child_exit(&mut process.child, Duration::from_secs(3));
+        wait_for_child_exit(&mut process.child, child_reap_timeout());
     }
 
     if child_is_running(&mut process.child) {
@@ -1115,7 +1115,7 @@ pub(crate) fn stop_all_background_processes(
     for mut process in removed {
         if child_is_running(&mut process.child) {
             let _ = kill_process_tree(&mut process.child);
-            wait_for_child_exit(&mut process.child, Duration::from_secs(3));
+            wait_for_child_exit(&mut process.child, child_reap_timeout());
         }
         if child_is_running(&mut process.child) {
             failed.push(process);

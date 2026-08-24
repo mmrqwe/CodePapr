@@ -20,7 +20,9 @@ pub(crate) use paths::{
     relative_string, resolve_existing_path, sanitize_workspace_path_input, path_is_same,
     path_is_same_or_child, write_file_rejecting_symlink, PathLocationInput,
 };
-pub(crate) use runtime::run_blocking_workspace_task;
+pub(crate) use runtime::{
+    child_reap_timeout, enter_fast_child_reap, is_fast_child_reap, run_blocking_workspace_task,
+};
 pub(crate) use strings::parse_browser_url;
 pub(crate) use sync::{lock, read, write};
 pub(crate) use time::unix_millis;

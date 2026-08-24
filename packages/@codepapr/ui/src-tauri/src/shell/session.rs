@@ -1,4 +1,6 @@
-use crate::shared::{canonical_workspace, normalize_workspace_filter, unix_millis};
+use crate::shared::{
+    canonical_workspace, child_reap_timeout, normalize_workspace_filter, unix_millis,
+};
 use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
 use crate::shell::guard::{
     build_shell_command_line, create_shell_session_id, detect_default_shell,
@@ -18,7 +20,6 @@ use std::{
     process::Stdio,
     sync::{atomic::AtomicU64, Arc, Mutex, OnceLock},
     thread,
-    time::Duration,
 };
 
 #[cfg(windows)]
@@ -308,7 +309,7 @@ pub(crate) fn close_shell_session(session_id: String) -> Result<ShellCloseSessio
 
     if still_running {
         let _ = kill_process_tree(&mut session.child);
-        wait_for_child_exit(&mut session.child, Duration::from_secs(3));
+        wait_for_child_exit(&mut session.child, child_reap_timeout());
     }
 
     Ok(ShellCloseSessionResult {
@@ -325,6 +326,6 @@ pub(crate) fn stop_all_shell_sessions() {
     };
     for mut session in drained {
         let _ = kill_process_tree(&mut session.child);
-        wait_for_child_exit(&mut session.child, Duration::from_secs(3));
+        wait_for_child_exit(&mut session.child, child_reap_timeout());
     }
 }

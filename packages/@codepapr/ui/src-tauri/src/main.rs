@@ -35,7 +35,10 @@ mod test_helpers;
 
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     thread,
 };
 #[cfg(target_os = "macos")]
@@ -469,54 +472,79 @@ fn main() {
             power::allow_idle_sleep
         ])
         .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                // 先发出退出请求，再做清理：exit(0) 走 ExitRequested→Exit，
-                // 窗口销毁路径（Destroyed→ExitRequested→ControlFlow::Exit）本身也能退出。
-                // 清理绝不在这里执行：CDP close 可达 120s/页、child.wait 无限等待，
-                // 同步跑会卡死关窗（macOS 彩虹圈）。清理统一交给下方
-                // RunEvent::Exit 分支的独立线程，且只执行一次。
-                if window.app_handle().windows().len() <= 1 {
-                    // 退出前给前端最后一次持久化机会：emit 事件后前端会把
-                    // 在途/最新的设置与角色卡状态重新落库。两段式有界等待：
-                    // ① 短探测：等前端发起保存请求（save_app_settings 入口计数）；
-                    // ② 若确有请求，再等其处理完成（完成纪元推进）。
-                    // 没有任何待保存内容时 ① 即超时返回，不再像旧实现那样
-                    // 每次退出都白白卡满 2 秒。
-                    const FLUSH_BUDGET: std::time::Duration = std::time::Duration::from_millis(2000);
-                    let _ = window.emit("codepapr:flush-settings", ());
-                    let requests_before = db::settings_save_requests();
-                    let epoch_before = db::settings_save_epoch();
-                    let deadline = std::time::Instant::now() + FLUSH_BUDGET;
-                    if db::wait_for_settings_save_requests(
-                        requests_before,
-                        std::time::Duration::from_millis(500),
-                    ) {
-                        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                        db::wait_for_settings_save_epoch(epoch_before, remaining);
-                    }
-                    window.app_handle().exit(0);
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // macOS：关最后一个窗口默认不退出 NSApp，Dock 会显示「正在后台运行」。
+                // 内置浏览器 add_child 可能让窗口/webview 计数看起来 > 1，不能靠
+                // windows().len() 判断。主窗口关闭 = 退出应用。
+                if window.label() != "main" {
+                    return;
                 }
+                // 先拦住原生关窗：flush 期间窗口还在，前端才能把设置落库；
+                // 真正退出走 exit(0) → ExitRequested → Exit。
+                api.prevent_close();
+                request_quit_after_settings_flush(window.app_handle());
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_handle, event| {
-            // CloseRequested covers normal window close; Exit also fires on
-            // programmatic exit / last-window-close paths, so reap backend
-            // processes here too (idempotent) to avoid orphaned servers.
-            // 清理必须在独立线程执行：tao 的 run() 在 run_return 返回后才
-            // process::exit，RunEvent::Exit 回调若阻塞（CDP close 可达 120s/页、
-            // child.wait 无限等待），进程会永远残留在后台并触发 macOS
-            // "正在后台运行"通知。
-            if matches!(event, tauri::RunEvent::Exit) {
-                std::thread::spawn(run_shutdown_cleanup);
+        .run(|handle, event| {
+            match event {
+                tauri::RunEvent::Exit => {
+                    // 必须同步收割：tao 的 run() 在 Exit 回调返回后立刻 process::exit。
+                    // 旧实现 thread::spawn 后立即返回，清理线程被杀掉，LSP / TTS /
+                    // Chrome / npm / MCP 子进程在 macOS 上成为孤儿，系统就显示
+                    // 「正在后台运行」。Linux 有 PR_SET_PDEATHSIG，Windows 有
+                    // Job Object；macOS 没有等价机制。
+                    crate::shared::enter_fast_child_reap();
+                    run_shutdown_cleanup();
+                }
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::Destroyed,
+                    ..
+                } if label == "main" => {
+                    // CloseRequested 漏调 exit 时的兜底（例如 prevent_close 失败）。
+                    handle.exit(0);
+                }
+                _ => {}
             }
         });
 }
 
-/// 关闭/退出时的尽力而为清理。每个子调用都应是有界等待（见各模块超时封装）；
-/// 该函数由调用方放在独立线程执行，绝不阻塞主线程的退出链路。
+fn request_quit_after_settings_flush(app: &tauri::AppHandle) {
+    static EXITING: AtomicBool = AtomicBool::new(false);
+    if EXITING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    // 退出前给前端最后一次持久化机会：emit 事件后前端会把
+    // 在途/最新的设置与角色卡状态重新落库。两段式有界等待：
+    // ① 短探测：等前端发起保存请求（save_app_settings 入口计数）；
+    // ② 若确有请求，再等其处理完成（完成纪元推进）。
+    // 没有任何待保存内容时 ① 即超时返回，不再像旧实现那样
+    // 每次退出都白白卡满 2 秒。
+    const FLUSH_BUDGET: std::time::Duration = std::time::Duration::from_millis(2000);
+    let _ = app.emit("codepapr:flush-settings", ());
+    let requests_before = db::settings_save_requests();
+    let epoch_before = db::settings_save_epoch();
+    let deadline = std::time::Instant::now() + FLUSH_BUDGET;
+    if db::wait_for_settings_save_requests(
+        requests_before,
+        std::time::Duration::from_millis(500),
+    ) {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        db::wait_for_settings_save_epoch(epoch_before, remaining);
+    }
+    app.exit(0);
+}
+
+/// 关闭/退出时的尽力而为清理。每个子调用都是有界等待（宿主退出时见
+/// `enter_fast_child_reap`）；必须在 `RunEvent::Exit` 上同步执行完毕，
+/// 才能赶在 `process::exit` 之前杀掉子进程。
 fn run_shutdown_cleanup() {
+    static DONE: AtomicBool = AtomicBool::new(false);
+    if DONE.swap(true, Ordering::SeqCst) {
+        return;
+    }
     lsp::stop_all_servers();
     tts::tts_server_stop_internal();
     tts::finetune::cancel();

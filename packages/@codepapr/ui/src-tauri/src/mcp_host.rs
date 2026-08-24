@@ -1174,6 +1174,10 @@ async fn prune_closed_clients() -> Vec<String> {
 }
 
 pub async fn disconnect_all() -> Result<usize, String> {
+    disconnect_all_with_timeout(Duration::from_secs(2)).await
+}
+
+async fn disconnect_all_with_timeout(timeout: Duration) -> Result<usize, String> {
     let mut guard = clients().lock().await;
     let clients_to_close: Vec<_> = guard.drain().map(|(_, client)| client).collect();
     drop(guard);
@@ -1181,24 +1185,26 @@ pub async fn disconnect_all() -> Result<usize, String> {
     let mut closed = 0;
     for client in clients_to_close {
         let mut locked = client.lock().await;
-        let _ = locked.close_with_timeout(Duration::from_secs(2)).await;
+        let _ = locked.close_with_timeout(timeout).await;
         closed += 1;
     }
     Ok(closed)
 }
 
 pub fn disconnect_all_blocking() {
-    // 由主线程的窗口关闭回调调用，该线程不在 tokio runtime 上下文里：
+    // 由退出路径调用，该线程不在 tokio runtime 上下文里：
     // 旧实现 Handle::try_current() 在此必然失败而静默 return，MCP stdio
     // 子进程退出时从不被关闭。改用一次性 current-thread runtime 阻塞执行——
     // 无论本线程是否已有 runtime 都安全（独立实例，不构成嵌套 block_on）。
+    // 宿主退出时用短超时：stdio 子进程随后会被 SIGKILL，不必每人等 2s。
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
     else {
         return;
     };
-    let _ = runtime.block_on(disconnect_all());
+    let timeout = crate::shared::child_reap_timeout();
+    let _ = runtime.block_on(disconnect_all_with_timeout(timeout));
 }
 
 /** Test connection to a single server: connect, list tools, return summary.

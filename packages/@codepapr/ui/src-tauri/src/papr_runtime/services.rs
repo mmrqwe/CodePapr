@@ -770,7 +770,7 @@ fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, 
                 let _ = crate::shell::process_tree::kill_process_tree(&mut process.child);
                 crate::shell::process_tree::wait_for_child_exit(
                     &mut process.child,
-                    std::time::Duration::from_secs(3),
+                    crate::shared::child_reap_timeout(),
                 );
                 stopped += 1;
             }

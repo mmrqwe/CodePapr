@@ -24,7 +24,7 @@ use crate::lsp_managed_tools::{
     collect_lsp_inventory, dotnet_binary, ensure_managed_language_server, managed_lsp_commands,
     LspInventory, ManagedLspCommand, ManagedLspProgress,
 };
-use crate::shared::{read, run_blocking_workspace_task, write};
+use crate::shared::{child_reap_timeout, read, run_blocking_workspace_task, write};
 
 const LSP_STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 // 常规语义请求（hover/definition/references/rename/...）单独用更长的超时：大型项目里
@@ -236,7 +236,7 @@ impl Drop for ManagedLspServer {
         let _ = crate::shell::process_tree::kill_process_tree(&mut self.child);
         crate::shell::process_tree::wait_for_child_exit(
             &mut self.child,
-            std::time::Duration::from_secs(3),
+            child_reap_timeout(),
         );
     }
 }
@@ -1006,7 +1006,7 @@ fn force_stop_server_process(server: &mut ManagedLspServer) {
     // 进程树击杀：只杀直接子进程会让 LSP 派生的工作进程
     // （pyright node worker、csharp-ls→dotnet、JDTLS 等）变孤儿。
     let _ = crate::shell::process_tree::kill_process_tree(&mut server.child);
-    crate::shell::process_tree::wait_for_child_exit(&mut server.child, std::time::Duration::from_secs(3));
+    crate::shell::process_tree::wait_for_child_exit(&mut server.child, child_reap_timeout());
 }
 
 fn resolve_lsp_command_candidates(

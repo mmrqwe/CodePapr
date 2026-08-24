@@ -1,15 +1,36 @@
 use std::{
     io::{BufRead, BufReader}, path::PathBuf,
-    process::{Command, Stdio}, sync::atomic::{AtomicBool, Ordering}, thread,
+    process::{Command, Stdio},
+    sync::{atomic::{AtomicBool, Ordering}, Mutex},
+    thread,
 };
 use tauri::{AppHandle, Emitter};
 use crate::tts::{default_gpt_sovits_path, voices_dir};
 use crate::tts::installer::VENV_DIR_NAME;
 
 static CANCELLED: AtomicBool = AtomicBool::new(false);
+static ACTIVE_PID: Mutex<Option<u32>> = Mutex::new(None);
+
+fn remember_child_pid(pid: u32) {
+    if let Ok(mut guard) = ACTIVE_PID.lock() {
+        *guard = Some(pid);
+    }
+}
+
+fn clear_child_pid(pid: u32) {
+    if let Ok(mut guard) = ACTIVE_PID.lock() {
+        if *guard == Some(pid) {
+            *guard = None;
+        }
+    }
+}
 
 pub(crate) fn cancel() {
     CANCELLED.store(true, Ordering::SeqCst);
+    let pid = ACTIVE_PID.lock().ok().and_then(|mut guard| guard.take());
+    if let Some(pid) = pid {
+        crate::shell::process_tree::kill_process_group_by_pid(pid);
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -53,6 +74,9 @@ pub(crate) fn start_finetune(
     train_audio_dir: PathBuf,
 ) -> Result<(), String> {
     CANCELLED.store(false, Ordering::SeqCst);
+    if let Ok(mut guard) = ACTIVE_PID.lock() {
+        *guard = None;
+    }
 
     let gpt_sovits_path = default_gpt_sovits_path();
     let venv_python = if cfg!(target_os = "windows") {
@@ -116,6 +140,9 @@ pub(crate) fn start_finetune(
         cmd.env("PYTORCH_ENABLE_MPS_FALLBACK", "1");
         cmd.env("TOKENIZERS_PARALLELISM", "false");
 
+        crate::shell::process_tree::prepare_new_process_group(&mut cmd);
+        crate::shell::process_tree::prepare_parent_death_signal(&mut cmd);
+
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
@@ -125,6 +152,7 @@ pub(crate) fn start_finetune(
                 return;
             }
         };
+        remember_child_pid(child.id());
 
         let stdout = child.stdout.take().expect("stdout piped");
         let stderr = child.stderr.take().expect("stderr piped");
@@ -179,11 +207,18 @@ pub(crate) fn start_finetune(
 
         loop {
             if CANCELLED.load(Ordering::SeqCst) {
-                let _ = child.kill();
+                let pid = child.id();
+                let _ = crate::shell::process_tree::kill_process_tree(&mut child);
+                crate::shell::process_tree::wait_for_child_exit(
+                    &mut child,
+                    crate::shared::child_reap_timeout(),
+                );
+                clear_child_pid(pid);
                 return;
             }
             match child.try_wait() {
                 Ok(Some(status)) => {
+                    clear_child_pid(child.id());
                     if status.success() {
                         let model_path = output_dir.join("s2Gv4.pth").to_string_lossy().to_string();
                         if std::path::Path::new(&model_path).exists() {
@@ -206,6 +241,7 @@ pub(crate) fn start_finetune(
                 }
                 Ok(None) => thread::sleep(std::time::Duration::from_millis(200)),
                 Err(e) => {
+                    clear_child_pid(child.id());
                     let _ = app_clone.emit("tts-finetune-error", FinetuneError {
                         character_id: cid, error: format!("Process error: {e}"),
                     });
