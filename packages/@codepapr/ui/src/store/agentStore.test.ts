@@ -3482,14 +3482,28 @@ describe('_messageCheckpoints', () => {
 });
 
 describe('normalizeSettings', () => {
-  it('clamps DeepSeek maxTokens to the provider limit', () => {
+  it('keeps maxTokens as set by user without artificial clamping', () => {
     const settings = normalizeSettings({
       apiMode: 'deepseek',
       provider: 'deepseek',
       maxTokens: 1_024_000,
     });
 
-    expect(settings.maxTokens).toBe(200000);
+    expect(settings.maxTokens).toBe(1_024_000);
+  });
+
+  it('defaults maxTokens to 100k for deepseek and 36k for custom/others', () => {
+    const deepseekSettings = normalizeSettings({
+      apiMode: 'deepseek',
+      provider: 'deepseek',
+    });
+    expect(deepseekSettings.maxTokens).toBe(100_000);
+
+    const customSettings = normalizeSettings({
+      apiMode: 'custom',
+      provider: 'openai',
+    });
+    expect(customSettings.maxTokens).toBe(36_000);
   });
 
   it('defaults mentorMaxTokens to 100k for fresh settings', () => {

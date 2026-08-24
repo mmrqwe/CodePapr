@@ -1,5 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { DEEPSEEK_MAX_TOKENS } from '@codepapr/api/tokenLimits';
+import {
+  DEFAULT_MAX_TOKENS,
+  DEEPSEEK_DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_CONTEXT_TOKENS,
+  DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
+} from '@codepapr/api';
 import type { ApiFormat, Lang, ModelProfile } from '../../store/agentStore';
 import type { Translation } from './types';
 import { InlineSelectRow, TextField, ToggleField } from '../forms';
@@ -87,7 +92,6 @@ export function ProfileEditorModal({
 
   const isLocal = draft.apiMode === 'local';
   const isClaudeFormat = draft.apiMode === 'custom' && draft.apiFormat === 'claude';
-  const maxTokensLimit = draft.apiMode === 'deepseek' ? DEEPSEEK_MAX_TOKENS : 128000;
 
   const modelPresets =
     draft.apiMode === 'deepseek'
@@ -112,7 +116,8 @@ export function ProfileEditorModal({
         apiFormat: 'openai',
         baseURL: '',
         model: 'deepseek-v4-pro',
-        maxContextTokens: 1048565,
+        maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
+        maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,
         topP: 0.9,
         multimodalEnabled: false,
@@ -129,7 +134,8 @@ export function ProfileEditorModal({
         apiFormat: 'openai',
         baseURL: '',
         model: 'deepseek-v4-flash',
-        maxContextTokens: 1048565,
+        maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
+        maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,
         topP: 0.9,
         multimodalEnabled: false,
@@ -146,7 +152,8 @@ export function ProfileEditorModal({
         apiFormat: 'claude',
         baseURL: 'https://openrouter.ai/api/v1',
         model: 'anthropic/claude-3.7-sonnet',
-        maxContextTokens: 200000,
+        maxTokens: DEFAULT_MAX_TOKENS,
+        maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,
         topP: 0.9,
         multimodalEnabled: true,
@@ -162,7 +169,8 @@ export function ProfileEditorModal({
         apiFormat: 'openai',
         baseURL: 'https://api.siliconflow.cn/v1',
         model: 'deepseek-ai/DeepSeek-V3',
-        maxContextTokens: 128000,
+        maxTokens: DEFAULT_MAX_TOKENS,
+        maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,
         topP: 0.9,
         multimodalEnabled: false,
@@ -178,7 +186,8 @@ export function ProfileEditorModal({
         apiFormat: 'openai',
         baseURL: 'https://api.openai.com/v1',
         model: 'gpt-4o',
-        maxContextTokens: 128000,
+        maxTokens: DEFAULT_MAX_TOKENS,
+        maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,
         topP: 0.9,
         multimodalEnabled: true,
@@ -194,7 +203,8 @@ export function ProfileEditorModal({
         apiFormat: 'response',
         baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
         model: 'doubao-1.5-pro-32k',
-        maxContextTokens: 128000,
+        maxTokens: DEFAULT_MAX_TOKENS,
+        maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,
         topP: 0.9,
         multimodalEnabled: false,
@@ -211,7 +221,8 @@ export function ProfileEditorModal({
         baseURL: 'http://127.0.0.1:8080/v1',
         apiKey: '',
         model: 'local-model',
-        maxContextTokens: 128000,
+        maxTokens: DEFAULT_MAX_TOKENS,
+        maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,
         topP: 0.9,
         multimodalEnabled: false,
@@ -563,7 +574,7 @@ export function ProfileEditorModal({
               label={t.thinkingBudgetLabel}
               type="number"
               min={1024}
-              max={maxTokensLimit}
+              max={2000000}
               step={512}
               value={draft.thinkingBudgetTokens ?? 4096}
               onChange={(e) => {
@@ -649,25 +660,34 @@ export function ProfileEditorModal({
               min={1000}
               max={2000000}
               step={10000}
-              value={draft.maxContextTokens ?? 128000}
+              value={draft.maxContextTokens ?? (draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS : DEFAULT_MAX_CONTEXT_TOKENS)}
               onChange={(e) => {
                 const parsed = parseInt(e.target.value, 10);
-                update({ maxContextTokens: Number.isFinite(parsed) ? parsed : 128000 });
+                update({
+                  maxContextTokens: Number.isFinite(parsed)
+                    ? parsed
+                    : (draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS : DEFAULT_MAX_CONTEXT_TOKENS),
+                });
               }}
-              placeholder="128000"
+              placeholder={String(draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS : DEFAULT_MAX_CONTEXT_TOKENS)}
             />
 
             <TextField
               label={t.maxTokens}
               type="number"
               min={100}
-              max={maxTokensLimit}
+              max={2000000}
               step={500}
-              value={draft.maxTokens}
+              value={draft.maxTokens ?? (draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS)}
               onChange={(e) => {
                 const parsed = parseInt(e.target.value, 10);
-                update({ maxTokens: Number.isFinite(parsed) ? parsed : draft.maxTokens });
+                update({
+                  maxTokens: Number.isFinite(parsed)
+                    ? parsed
+                    : (draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS),
+                });
               }}
+              placeholder={String(draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS)}
             />
           </div>
 

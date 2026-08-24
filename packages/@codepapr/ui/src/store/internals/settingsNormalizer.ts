@@ -1,4 +1,10 @@
-import { sanitizeMaxTokens } from '@codepapr/api';
+import {
+  sanitizeMaxTokens,
+  DEFAULT_MAX_TOKENS,
+  DEEPSEEK_DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_CONTEXT_TOKENS,
+  DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
+} from '@codepapr/api';
 import { normalizeMcpSettings } from '../../utils/mcpTypes';
 import { isBuiltinThemeId } from '../../theme/themes';
 import { resolveTheme, validateCustomTheme } from '../../theme/themeEngine';
@@ -39,7 +45,7 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
   const maxTokens =
     typeof obj.maxTokens === 'number' && Number.isFinite(obj.maxTokens)
       ? Math.max(100, Math.floor(obj.maxTokens))
-      : DEFAULT_SETTINGS.maxTokens;
+      : (apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS);
   const maxContextTokens =
     typeof obj.maxContextTokens === 'number' && Number.isFinite(obj.maxContextTokens)
       ? Math.max(1000, Math.floor(obj.maxContextTokens))
@@ -98,8 +104,8 @@ export function createDefaultProfile(
       baseURL: '',
       apiKey: '',
       model: 'deepseek-v4-pro',
-      maxTokens: DEFAULT_SETTINGS.maxTokens,
-      maxContextTokens: 1048565,
+      maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
+      maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,
       topP: 0.9,
       multimodalEnabled: false,
@@ -118,8 +124,8 @@ export function createDefaultProfile(
       baseURL: 'http://127.0.0.1:8080/v1',
       apiKey: '',
       model: 'local-model',
-      maxTokens: DEFAULT_SETTINGS.maxTokens,
-      maxContextTokens: 128000,
+      maxTokens: DEFAULT_MAX_TOKENS,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,
       topP: 0.9,
       multimodalEnabled: false,
@@ -137,8 +143,8 @@ export function createDefaultProfile(
     baseURL: '',
     apiKey: '',
     model: 'gpt-4o',
-    maxTokens: DEFAULT_SETTINGS.maxTokens,
-    maxContextTokens: 128000,
+    maxTokens: DEFAULT_MAX_TOKENS,
+    maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
     temperature: 0.7,
     topP: 0.9,
     multimodalEnabled: true,
@@ -177,8 +183,8 @@ function buildSynthesizedProfiles(
       baseURL: deepseek.baseURL,
       apiKey: deepseek.apiKey,
       model: deepseek.model || 'deepseek-v4-pro',
-      maxTokens: deepseek.maxTokens || DEFAULT_SETTINGS.maxTokens,
-      maxContextTokens: 1048565,
+      maxTokens: deepseek.maxTokens || DEEPSEEK_DEFAULT_MAX_TOKENS,
+      maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,
       topP: 0.9,
       multimodalEnabled: false,
@@ -195,8 +201,8 @@ function buildSynthesizedProfiles(
       baseURL: deepseek.baseURL,
       apiKey: deepseek.apiKey,
       model: deepseek.fastModel || 'deepseek-v4-flash',
-      maxTokens: deepseek.maxTokens || DEFAULT_SETTINGS.maxTokens,
-      maxContextTokens: 1048565,
+      maxTokens: deepseek.maxTokens || DEEPSEEK_DEFAULT_MAX_TOKENS,
+      maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,
       topP: 0.9,
       multimodalEnabled: false,
@@ -213,8 +219,8 @@ function buildSynthesizedProfiles(
       baseURL: custom.baseURL,
       apiKey: custom.apiKey,
       model: custom.model || 'gpt-4o',
-      maxTokens: custom.maxTokens || DEFAULT_SETTINGS.maxTokens,
-      maxContextTokens: typeof input.maxContextTokens === 'number' ? input.maxContextTokens : 128000,
+      maxTokens: custom.maxTokens || DEFAULT_MAX_TOKENS,
+      maxContextTokens: typeof input.maxContextTokens === 'number' ? input.maxContextTokens : DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: typeof input.temperature === 'number' ? input.temperature : 0.7,
       topP: typeof input.topP === 'number' ? input.topP : 0.9,
       multimodalEnabled: typeof input.multimodalEnabled === 'boolean' ? input.multimodalEnabled : true,
@@ -231,8 +237,8 @@ function buildSynthesizedProfiles(
       baseURL: local.baseURL || 'http://127.0.0.1:8080/v1',
       apiKey: local.apiKey,
       model: local.model || 'local-model',
-      maxTokens: local.maxTokens || DEFAULT_SETTINGS.maxTokens,
-      maxContextTokens: 128000,
+      maxTokens: local.maxTokens || DEFAULT_MAX_TOKENS,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,
       topP: 0.9,
       multimodalEnabled: false,
@@ -253,7 +259,7 @@ function buildSynthesizedProfiles(
       apiKey: mentorApiKey,
       model: mentorModel || 'claude-sonnet-4-20250514',
       maxTokens: mentorMaxTokens,
-      maxContextTokens: 200000,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,
       topP: 0.9,
       multimodalEnabled: true,
@@ -307,7 +313,7 @@ function migrateLegacySettings(
   }
 
   // Only migrate if legacy flat fields are present
-  if (!legacyModel && !legacyApiKey && !legacyBaseURL && !legacyFastModel) {
+  if (!legacyModel && !legacyApiKey && !legacyBaseURL && !legacyFastModel && !legacyMaxTokens) {
     return { deepseek, custom, local };
   }
 
@@ -448,7 +454,7 @@ export function normalizeSettings(
   const maxTokens = sanitizeMaxTokens(
     activeConfig.maxTokens,
     provider,
-    DEFAULT_SETTINGS.maxTokens
+    provider === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS
   );
   const maxToolRounds =
     typeof input.maxToolRounds === 'number' && Number.isFinite(input.maxToolRounds)
@@ -457,7 +463,7 @@ export function normalizeSettings(
   const maxContextTokens =
     typeof input.maxContextTokens === 'number' && Number.isFinite(input.maxContextTokens)
       ? Math.max(1000, Math.floor(input.maxContextTokens))
-      : DEFAULT_SETTINGS.maxContextTokens;
+      : (apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS : DEFAULT_MAX_CONTEXT_TOKENS);
   const maxConversationRounds =
     typeof input.maxConversationRounds === 'number' && Number.isFinite(input.maxConversationRounds)
       ? Math.max(2, Math.floor(input.maxConversationRounds))

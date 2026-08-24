@@ -1,5 +1,10 @@
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_CODING_SYSTEM_PROMPT } from '@codepapr/core';
-import { DEFAULT_MAX_TOKENS } from '@codepapr/api';
+import {
+  DEFAULT_MAX_TOKENS,
+  DEEPSEEK_DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_CONTEXT_TOKENS,
+  DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
+} from '@codepapr/api';
 import { normalizeMcpSettings } from '../../utils/mcpTypes';
 import type { ConversationStats, CumulativeStats, ModelProfile, ModelTierStats, Settings } from './types';
 
@@ -12,8 +17,8 @@ export const DEFAULT_MODEL_PROFILES: ModelProfile[] = [
     baseURL: '',
     apiKey: '',
     model: 'deepseek-v4-pro',
-    maxTokens: DEFAULT_MAX_TOKENS,
-    maxContextTokens: 1048565,
+    maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
+    maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
     temperature: 0.7,
     topP: 0.9,
     multimodalEnabled: false,
@@ -30,8 +35,8 @@ export const DEFAULT_MODEL_PROFILES: ModelProfile[] = [
     baseURL: '',
     apiKey: '',
     model: 'deepseek-v4-flash',
-    maxTokens: DEFAULT_MAX_TOKENS,
-    maxContextTokens: 1048565,
+    maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
+    maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
     temperature: 0.7,
     topP: 0.9,
     multimodalEnabled: false,
@@ -49,7 +54,7 @@ export const DEFAULT_MODEL_PROFILES: ModelProfile[] = [
     apiKey: '',
     model: 'gpt-4o',
     maxTokens: DEFAULT_MAX_TOKENS,
-    maxContextTokens: 128000,
+    maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
     temperature: 0.7,
     topP: 0.9,
     multimodalEnabled: true,
@@ -67,7 +72,7 @@ export const DEFAULT_MODEL_PROFILES: ModelProfile[] = [
     apiKey: '',
     model: 'local-model',
     maxTokens: DEFAULT_MAX_TOKENS,
-    maxContextTokens: 128000,
+    maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
     temperature: 0.7,
     topP: 0.9,
     multimodalEnabled: false,
@@ -119,7 +124,7 @@ export const DEFAULT_SETTINGS: Settings = {
     baseURL: '',
     model: 'deepseek-v4-pro',
     fastModel: 'deepseek-v4-flash',
-    maxTokens: DEFAULT_MAX_TOKENS,
+    maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
   },
   custom: {
     apiKey: '',
@@ -153,9 +158,9 @@ export const DEFAULT_SETTINGS: Settings = {
   experimentalVoice: false,
   temperature: 0.7,
   topP: 0.9,
-  maxTokens: DEFAULT_MAX_TOKENS,
+  maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
   maxToolRounds: DEFAULT_AGENT_MAX_TOOL_ROUNDS,
-  maxContextTokens: 500_000,
+  maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
   maxConversationRounds: 24,
   chatRenderBatchRounds: 6,
   compactionModel: 'fast',

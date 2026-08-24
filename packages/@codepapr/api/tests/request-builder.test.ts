@@ -176,7 +176,7 @@ describe('RequestBuilder - DeepSeek cache stability', () => {
     expect(req2.messages[3]?.content).toBe(bigToolResult);
   });
 
-  it('会把 DeepSeek 的超限 maxTokens 截断到服务端允许范围', () => {
+  it('透传用户设定的 maxTokens 不做人为截断', () => {
     const req = new RequestBuilder().build({
       prefix: createPrefix(),
       appendLog: new AppendOnlyLog('clamp'),
@@ -185,7 +185,7 @@ describe('RequestBuilder - DeepSeek cache stability', () => {
       maxTokens: 1_024_000,
     });
 
-    expect(req.maxTokens).toBe(200_000);
+    expect(req.maxTokens).toBe(1_024_000);
   });
 
   it('只为支持显式缓存提示的 provider 生成 cacheControl', () => {
