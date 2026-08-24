@@ -363,7 +363,7 @@ LLM 侧的代码智能由 `lsp` 工具与 `list`（目录树 + 逐文件轻量�
 
 ### 项目规则
 
-读取 `.CodePapr/AGENTS.md`，内容注入系统提示词（发给模型前会去掉未填的空占位）。打开工作区时若文件不存在，会写出默认约定并尽量填入检测到的验证命令；已有文件只填空着的验证行，空白文件视为关闭注入。适合写：项目约定、目录结构、禁止改动的范围、验证标准。子代理（含 Explore）继承同一份项目规则。Agent 改完代码后会提示用 `/check` 跑验证。
+读取 `.CodePapr/AGENTS.md`，内容注入系统提示词（发给模型前会去掉未填的空占位）。打开工作区时若文件不存在，会写出默认约定并尽量填入检测到的验证命令；已有文件只填空着的验证行，空白文件视为关闭注入。适合写：项目约定、目录结构、禁止改动的范围、验证标准。子代理（含 Explore）继承同一份项目规则。
 
 ### 自定义子代理
 
@@ -403,7 +403,7 @@ Skill 是主 Agent 的可复用操作手册，放在 `.CodePapr/skills/` 下，�
 
 输入 `/` 即可弹出命令自动补全列表。
 
-**主模型内置命令：** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build` `/check` `/goal`
+**主模型内置命令：** `/review` `/fix` `/test` `/explain` `/diagnose` `/refactor` `/doc` `/new` `/optimize` `/build` `/goal`
 
 **快速模型内置命令：** `/search` `/lint` `/clean` `/commit` `/summary`
 

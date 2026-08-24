@@ -164,18 +164,6 @@ export const BUILTIN_COMMAND_UI: Record<string, CommandUiCopy> = {
       en: 'Build the project and fix errors.\nUsage: /build',
     },
   },
-  check: {
-    description: {
-      'zh-CN': '按项目验证命令跑检查，只汇报证据，不改代码',
-      'zh-TW': '依專案驗證命令跑檢查，只彙報證據，不改程式',
-      en: 'Run the project verify commands and report evidence; do not change code',
-    },
-    usage: {
-      'zh-CN': '按项目验证命令跑检查，只汇报、不改代码。\n用法: /check [范围]\n示例: /check  或 /check 登录页改动',
-      'zh-TW': '依專案驗證命令跑檢查，只彙報、不改程式。\n用法: /check [範圍]\n示例: /check  或 /check 登入頁改動',
-      en: 'Run project checks and report only.\nUsage: /check [scope]\nExample: /check  or /check login page changes',
-    },
-  },
   new: {
     description: {
       'zh-CN': '根据描述创建新文件、组件、模块或功能',

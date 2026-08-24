@@ -10,6 +10,7 @@ import {
   inferImageMediaType,
   looksLikeBinaryText,
   partitionIncomingFiles,
+  buildTailExecutionProcessGroup,
 } from './utils';
 
 describe('slashCommandNameFilter', () => {
@@ -131,5 +132,115 @@ describe('formatBytesAsMbLabel', () => {
   it('rounds 1MB-class limits to a whole number', () => {
     expect(formatBytesAsMbLabel(1_000_000)).toBe('1');
     expect(formatBytesAsMbLabel(8 * 1024 * 1024)).toBe('8');
+  });
+});
+
+describe('buildTailExecutionProcessGroup', () => {
+  it('groups intermediate execution steps and sets summaryMessage to the final assistant message', () => {
+    const messages = [
+      {
+        id: 'u-1',
+        role: 'user' as const,
+        content: '重构这个模块并修复 bug',
+        timestamp: 1000,
+      },
+      {
+        id: 'a-1',
+        role: 'assistant' as const,
+        content: '正在读取文件...',
+        workMode: 'agent' as const,
+        timestamp: 2000,
+      },
+      {
+        id: 'a-2',
+        role: 'assistant' as const,
+        content: '已完成重构与修复：1. 提取工具类 2. 补齐单元测试。',
+        workMode: 'agent' as const,
+        timestamp: 3000,
+      },
+    ];
+
+    const group = buildTailExecutionProcessGroup(messages);
+    expect(group).not.toBeNull();
+    expect(group?.userMessageId).toBe('u-1');
+    expect(group?.summaryMessageId).toBe('a-2');
+    expect(group?.messages).toHaveLength(1);
+    expect(group?.messages[0]?.id).toBe('a-1');
+    expect(group?.durationMs).toBe(2000);
+  });
+
+  it('returns null if there are fewer than 3 messages (single round / direct reply)', () => {
+    const messages = [
+      {
+        id: 'u-1',
+        role: 'user' as const,
+        content: '你好',
+        timestamp: 1000,
+      },
+      {
+        id: 'a-1',
+        role: 'assistant' as const,
+        content: '你好！有什么可以帮你的？',
+        workMode: 'agent' as const,
+        timestamp: 2000,
+      },
+    ];
+
+    expect(buildTailExecutionProcessGroup(messages)).toBeNull();
+  });
+
+  it('returns null while the summary message is still streaming', () => {
+    const messages = [
+      {
+        id: 'u-1',
+        role: 'user' as const,
+        content: '重构这个模块',
+        timestamp: 1000,
+      },
+      {
+        id: 'a-1',
+        role: 'assistant' as const,
+        content: '正在处理...',
+        workMode: 'agent' as const,
+        timestamp: 2000,
+      },
+      {
+        id: 'a-2',
+        role: 'assistant' as const,
+        content: '正在输出最终结果...',
+        workMode: 'agent' as const,
+        isStreaming: true,
+        timestamp: 3000,
+      },
+    ];
+
+    expect(buildTailExecutionProcessGroup(messages)).toBeNull();
+  });
+
+  it('returns null for non-execution tasks in ask mode', () => {
+    const messages = [
+      {
+        id: 'u-1',
+        role: 'user' as const,
+        content: '请解释一下这个函数的作用',
+        timestamp: 1000,
+      },
+      {
+        id: 'a-1',
+        role: 'assistant' as const,
+        content: '这是第一段分析。',
+        workMode: 'ask' as const,
+        timestamp: 2000,
+      },
+      {
+        id: 'a-2',
+        role: 'assistant' as const,
+        content: '这是总结。',
+        workMode: 'ask' as const,
+        timestamp: 3000,
+      },
+    ];
+
+    expect(buildTailExecutionProcessGroup(messages)).toBeNull();
   });
 });

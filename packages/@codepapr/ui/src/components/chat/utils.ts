@@ -599,7 +599,6 @@ export function buildTailExecutionProcessGroup(messages: UIMessage[]): Execution
   if (
     !summaryMessage ||
     summaryMessage.role !== 'assistant' ||
-    !summaryMessage.synthetic ||
     summaryMessage.isStreaming
   ) {
     return null;

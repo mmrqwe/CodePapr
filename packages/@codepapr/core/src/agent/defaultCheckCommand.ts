@@ -1,6 +1,5 @@
 /**
- * 默认项目命令 /check：无 `.CodePapr/commands/check.md` 时由内置命令提供；
- * 项目配置里创建名为 check 的命令时，预填同一份模板。
+ * 项目命令模板 /check：在项目配置里创建名为 check 的自定义命令时，预填此验证模板。
  */
 
 export const DEFAULT_CHECK_COMMAND_NAME = 'check';
