@@ -120,7 +120,8 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opac
 .main{margin-left:var(--sidebar-w);flex:1;min-width:0;padding:32px 48px 80px;max-width:1000px}
 @media(max-width:1100px){.main{padding:24px 28px 60px}}
 @media(max-width:860px){
-  .sidebar{display:none}
+  .sidebar{display:flex;transform:translateX(-100%);pointer-events:none}
+  .sidebar.open{transform:translateX(0);pointer-events:auto}
   .main{margin-left:0;padding:20px 18px 60px}
   .mobile-header{display:flex!important}
 }
@@ -267,6 +268,15 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
   .modal-close{display:inline-block;padding:10px 28px;border-radius:var(--radius-xs);background:var(--accent);color:#fff;font-size:0.88rem;font-weight:600;cursor:pointer;border:none;transition:all 0.2s;font-family:var(--font-sans)}
   .modal-close:hover{box-shadow:0 4px 20px var(--accent-glow);transform:translateY(-1px)}
 
+
+.mobile-nav-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border);align-items:center}
+.mobile-nav-actions a,.mobile-nav-actions button.mobile-cta{
+  color:var(--foreground-muted);text-decoration:none;font-size:0.85rem;padding:8px 12px;border:1px solid var(--border);
+  border-radius:var(--radius-xs);background:var(--surface);cursor:pointer;font-family:var(--font-sans)
+}
+.mobile-nav-actions a:hover,.mobile-nav-actions button.mobile-cta:hover{color:var(--foreground);border-color:var(--border-hover)}
+.mobile-nav-actions button.mobile-cta{background:var(--accent);color:#fff;border-color:transparent;font-weight:600}
+
 </style>
 <script>
 (function(){
@@ -345,7 +355,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
         <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       </button>
-      <a href="#" onclick="showComingSoon(event)">Release →</a>
+      <a href="#" onclick="showComingSoon(event)">Coming Soon</a>
     </div>
   </aside>
 
@@ -386,7 +396,13 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <a class="nav-item" onclick="mobileNavTo('workflows')">Workflows</a>
       <a class="nav-item" onclick="mobileNavTo('cost')">Cost</a>
       <a class="nav-item" onclick="mobileNavTo('faq')">FAQ</a>
-    </div>
+    
+      <div class="mobile-nav-actions">
+        <a href="index.en.html">← Home</a>
+        <a href="tutorial.html" onclick="localStorage.setItem('codepapr-lang','zh')">中</a>
+        <button type="button" class="mobile-cta" onclick="showComingSoon(event)">Coming Soon</button>
+      </div>
+</div>
 
     <!-- Tutorial Hero -->
     <div class="tutorial-hero">
