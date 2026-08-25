@@ -525,7 +525,7 @@
             <h3>应用与会话辅助 <span>App &amp; Auxiliary</span></h3>
             <div class="tags"><span class="tag">app_render / app_publish / skill / question / todo</span></div>
           </div>
-          <div class="hz"><b>沙箱渲染</b>提供交互式 HTML 应用能力</div>
+          <div class="hz"><b>沙箱渲染</b>提供交互式应用能力</div>
         </div>
 
         <div class="item">
@@ -533,7 +533,7 @@
             <div class="addr">APP</div>
             <div class="name">app_render / app_list / app_start / app_stop / app_delete<span class="cchip c-text">App 模式</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>app_render</b>：打开已写入 <code>.CodePapr/apps/&lt;appId&gt;/</code> 的交互式 HTML 应用（运行于沙箱 iframe，注入 Papr SDK）；搭配 <code>app_*</code> 系列工具管理常驻微应用的生命周期。文件必须用 write/edit/patch 落盘，app_render 只挂载。</div>
+          <div class="desc"><b>app_render</b>：打开已写入 <code>.CodePapr/apps/&lt;appId&gt;/</code> 的交互式应用（运行于沙箱 iframe，注入 Papr SDK）；搭配 <code>app_*</code> 系列工具管理常驻微应用的生命周期。文件必须用 write/edit/patch 落盘，app_render 只挂载。</div>
           <div class="more"><div class="mbox"><code>app_render</code> 对子代理强制禁用（防止嵌套渲染）；只传 appId。权限、Agent、后端进程都写在 manifest.json 里。<code>app_list</code> 仅 App 模式：创建前查重、查看运行状态。编程 Agent 发现「能推什么」靠会话上下文，不靠 list。</div></div>
         </div>
 

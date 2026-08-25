@@ -620,9 +620,16 @@ describe('promptSystem', () => {
     expect(zhCN).toContain('文件拆分');
     expect(zhCN).toContain('200 行');
     expect(zhCN).toContain('js/db.js');
+    expect(zhCN).toContain('script type="module" src="js/main.js"');
+    expect(zhCN).toContain('server/index.js');
+    expect(zhCN).toContain('禁止只写两个大单文件');
+    expect(zhCN).not.toContain('在此实现路由');
     const en = buildModeSystemPrompt({ mode: 'app', workspacePath: '/tmp/project', lang: 'en' });
     expect(en).toContain('File layout (required)');
     expect(en).toContain('one giant app.js');
+    expect(en).toContain('Do not ship two giant files');
+    expect(en).toContain('server/index.js');
+    expect(en).not.toContain('implement routes here');
   });
 
   it('all mode prompts pass the ImmutablePrefix static-content guard', () => {

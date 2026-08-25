@@ -22,7 +22,7 @@
 | **Ask** | Explanation, analysis, suggestions | Read-only; no file modifications or command execution |
 | **Plan** | Complex task decomposition | Output a plan with options, execute after confirmation |
 | **Agent** | Bug fixes, feature implementation | Autonomous execution: search → modify → verify |
-| **App** | Data visualization, interactive apps | Instantly generates interactive HTML apps; supports Papr SDK (`window.papr`) for Agent/storage/HTTP/filesystem |
+| **App** | Data visualization, interactive apps | Instantly generates interactive apps; supports Papr SDK (`window.papr`) for Agent/storage/HTTP/filesystem |
 
 In Plan mode, when requirements are ambiguous, the Agent will call the `question` tool to ask you instead of guessing.
 
@@ -112,7 +112,7 @@ const history = await papr.db.get('inbox:cards');
 
 ### Creating Apps
 
-Switch to **App mode** and describe the app you want in natural language. The Agent uses `write` / `edit` / `patch` to put `manifest.json` and the entry HTML in `.CodePapr/apps/<appId>/`, then calls `app_render({ appId })` to open it. `app_render` only mounts an app already on disk; it does not write files. Call it again after edits to refresh (you can still export a zip from the dock).
+Switch to **App mode** and describe the app you want in natural language. The Agent uses `write` / `edit` / `patch` to put `manifest.json`, a shell `index.html`, and `css/` + `js/` in `.CodePapr/apps/<appId>/`, then calls `app_render({ appId })` to open it. `app_render` only mounts an app already on disk; it does not write files. Call it again after edits to refresh (you can still export a zip from the dock).
 
 ### Agent Push (app_publish + inbox)
 
@@ -551,7 +551,7 @@ Not great:
 Go straight to Agent mode with a clear objective and affected file scope.
 
 ### 3. Generate Data Visualizations
-Switch to App mode to let the Agent explore data and generate an interactive HTML app — perfect for database analysis, relationship diagrams, dashboards, and more.
+Switch to App mode to let the Agent explore data and generate an interactive app — perfect for database analysis, relationship diagrams, dashboards, and more.
 
 ### 4. Conversation Reset Rollback
 If the Agent goes off track, hover the previous correct user message and click "Reset to here" to continue from that state.

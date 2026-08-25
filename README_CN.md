@@ -4,7 +4,7 @@
 
 **本地优先的编码 Agent 运行时。Tauri 桌面工作台。**
 
-CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主 Agent 调度 **Explore**（代码分析）、**Scout**（网页搜索）、**Mentor**（架构指导）三个内置子代理协作，另有 **Verifier**（Goal 验收）与 **Compactor**（上下文压缩）两个运行时内部代理，支持自定义扩展。文件读写、命令执行、Git 操作、浏览器预览、LSP 诊断——全在本地完成。
+CodePapr 是一个基于 LLM 前缀缓存优化的本地编码 Agent 系统。主 Agent 调度 **Explore**（代码分析）、**Scout**（网页搜索）、**Mentor**（架构指导）三个内置子代理协作，另有 **Verifier**（Goal 验收）与 **Compactor**（上下文压缩）两个运行时内部代理，支持自定义扩展。文件读写、命令执行、Git 操作、浏览器预览、LSP 诊断——全在本地完成。
 
 ---
 
@@ -21,7 +21,7 @@ CodePapr 是一个基于 DeepSeek 缓存优化的本地编码 Agent 系统。主
 | **TodoList 任务规划** | Agent 自动创建并跟踪任务清单，支持进度汇报与重规划 |
 | **项目记忆（零审核）** | 偏好、约束与已验证事实自动写入。短指令进每次会话的 Bootstrap，踩坑经验按回合 Recall，网页引用只进搜索。记忆面板是 SQLite 账本上唯一给人看的面。 |
 | **代码智能（LSP + AST）** | `lsp` 工具 9 个导航 action（跳转定义、引用、hover、文件/工作区符号、实现、调用层级），LSP 优先并自动降级 AST 项目图（结果带 source/confidence）；`list` 浏览目录树并附带逐文件轻量符号。ProjectGraph（UI 侧）另支持死代码检测、循环依赖、重构建议等 |
-| **DeepSeek 前缀缓存优化** | 三层提示词注入策略，最大化缓存命中降低成本 |
+| **LLM 前缀缓存** | 三层提示词注入策略，最大化缓存命中降低成本 |
 | **SEARCH/REPLACE Diff** | 先校验再写入，支持原子性多文件 patch |
 | **MCP 协议支持** | 集成外部 MCP 工具服务器（stdio / SSE / Streamable HTTP）；内置 DuckDuckGo Search、Postgres、SQLite 预设；MCP 市场一键安装官方注册表服务器；逐服务器权限模式（只读 / 读写 / 危险）与变更操作确认流 |
 | **Git 深度集成** | 8 个 Git action + diff 面板 + 安全回退（备份引用+撤销） |
@@ -90,7 +90,7 @@ npm run publish    # 生成安装包 (.dmg/.msi)
 | **Ask** | 解释、分析、建议 | 只读，不改文件不跑命令 |
 | **Plan** | 复杂任务拆解 | 先出方案和可选项，确认后执行 |
 | **Agent** | Bug 修复、功能实现 | 自主执行：搜索→修改→验证 |
-| **App** | 数据可视化、探索 | 即时生成交互式 HTML 应用；在沙箱面板渲染 D3/ECharts/Mermaid 等图表 |
+| **App** | 数据可视化、探索 | 即时生成交互式应用；在沙箱面板渲染 D3/ECharts/Mermaid 等图表 |
 
 ## 项目配置
 

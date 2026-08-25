@@ -337,7 +337,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <div class="nav-section">
         <div class="nav-section-title">深入</div>
         <a class="nav-item" onclick="scrollToSection('architecture')"><span class="dot"></span>系统架构</a>
-        <a class="nav-item" onclick="scrollToSection('cache')"><span class="dot"></span>DeepSeek 缓存优化</a>
+        <a class="nav-item" onclick="scrollToSection('cache')"><span class="dot"></span>LLM 前缀缓存</a>
         <a class="nav-item" onclick="scrollToSection('lsp')"><span class="dot"></span>语言智能与 LSP</a>
         <a class="nav-item" onclick="scrollToSection('verify')"><span class="dot"></span>验证与发布</a>
       </div>
@@ -414,7 +414,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <a href="tutorial.en.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:8px" onclick="localStorage.setItem('codepapr-lang','en')">EN</a>
       </div>
       <h1><span class="gradient">CodePapr 教程</span></h1>
-      <p>本地编码 Agent 工作台：读项目、改文件、跑命令、预览结果。DeepSeek 前缀缓存。</p>
+      <p>本地编码 Agent 工作台：读项目、改文件、跑命令、预览结果。深度适配 LLM 前缀缓存。</p>
     </div>
 
     <!-- 1. Intro -->
@@ -428,23 +428,6 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
           <li><strong>缓存优先</strong>：稳定内容前置，易变内容后置</li>
           <li><strong>结构化改文件</strong>：Search/Replace Diff，先校验再写入</li>
         </ul>
-
-        <h3>和常见工具的差别</h3>
-        <p style="margin-bottom:16px;font-size:0.85rem;color:var(--foreground-dim)">对照各工具当前公开能力。</p>
-        <table>
-          <thead><tr><th>维度</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
-          <tbody>
-            <tr><td><strong>形态</strong></td><td>SDK / VS Code / JetBrains / CLI / Kanban</td><td>终端命令</td><td>独立桌面 IDE</td><td class="highlight-cell">独立桌面应用（Tauri 2）</td></tr>
-            <tr><td><strong>多 Agent</strong></td><td>✅ 团队 + 协调者 + 定时调度</td><td>❌ 单 Agent</td><td>✅ 多 Agent 舰队 + ACP 协议</td><td class="highlight-cell">✅ 主 Agent + 3 内置子代理 + 2 内部代理 + 自定义</td></tr>
-            <tr><td><strong>任务规划</strong></td><td>Kanban 看板</td><td>❌</td><td>Spaces + Kanban</td><td class="highlight-cell">TodoList：自动创建 / 进度追踪 / re-plan</td></tr>
-            <tr><td><strong>代码理解</strong></td><td>读取文件 + grep + LSP</td><td>Repo Map</td><td>Fast Context（毫秒级）</td><td class="highlight-cell">ProjectGraph 语义图：14 个分析 action</td></tr>
-            <tr><td><strong>回退机制</strong></td><td>Checkpoints 快照</td><td>Git commit 回退</td><td>Diff review</td><td class="highlight-cell">Git auto-commit checkpoint + <code>reset --hard</code>：代码与消息原子性恢复</td></tr>
-            <tr><td><strong>缓存优化</strong></td><td>❌</td><td>❌</td><td>❌</td><td class="highlight-cell">DeepSeek 三层前缀缓存，跨会话复用</td></tr>
-            <tr><td><strong>模型支持</strong></td><td>几乎所有（含本地）</td><td>几乎所有（含本地）</td><td>内置免费模型 + 第三方</td><td class="highlight-cell">DeepSeek / OpenAI / Claude / 本地</td></tr>
-            <tr><td><strong>扩展性</strong></td><td>SDK + MCP + 插件系统</td><td>配置文件</td><td>MCP + Extension + ACP</td><td class="highlight-cell">自定义 Agent / Skills / 命令 / 规则</td></tr>
-            <tr><td><strong>价格</strong></td><td>开源免费 + API 费用</td><td>开源免费 + API 费用</td><td>免费 / $20 Pro / $200 Max</td><td class="highlight-cell">开源免费 + API 费用</td></tr>
-          </tbody>
-        </table>
 
         <h3>支持的 LLM Provider</h3>
         <div class="card"><div class="tag-stack">
@@ -677,10 +660,10 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
 
         <h3><span class="badge badge-app">App</span> 应用生成模式</h3>
-        <p><strong>适合：</strong>数据探索与可视化、生成交互式图表和仪表盘、一句话将分析结果变成可交互的 HTML 应用。</p>
+        <p><strong>适合：</strong>数据探索与可视化、生成交互式图表和仪表盘、一句话将分析结果变成可交互的应用。</p>
         <p><strong>核心理念：</strong></p>
         <ul>
-          <li>你的直接产出<strong>不是 Markdown 回答</strong>——而是一个完整的 HTML 应用</li>
+          <li>你的直接产出<strong>不是 Markdown 回答</strong>——而是一个完整的应用（拆分源码的 .papr 应用）</li>
           <li>就像即时开发一个针对当前问题的专用工具</li>
           <li>与编码 Agent 完全不同——它是"应用工厂"，不是"写代码的人"</li>
         </ul>
@@ -690,7 +673,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>写入应用：用 write 把 manifest.json、骨架 index.html、css/theme.css 和按职责拆开的 js/*.js 写到 <code>.CodePapr/apps/&lt;appId&gt;/</code></li>
           <li>打开结果：调用 <code>app_render({ appId })</code> 挂到右侧"应用"面板（不写文件）</li>
         </ol>
-        <p><strong>HTML 应用规范：</strong></p>
+        <p><strong>应用规范：</strong></p>
         <ul>
           <li>多文件拆分：index.html 只做骨架，样式进 css/theme.css，逻辑按职责拆进 js/*.js（原生 ES module，不要构建链）</li>
           <li>通过 CDN 引用图表库（D3、ECharts、Mermaid、MapLibre、Leaflet、Three.js 等）</li>
@@ -707,7 +690,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>Ask / Plan / Agent 之间<strong>可以自由切换</strong>，无需新建会话</li>
           <li>App ↔ 编码模式互切换 -> 新建会话</li>
         </ul>
-        <p><strong>模型策略：</strong>始终使用主模型（deepseek-v4-pro）以保证 HTML 生成质量。</p>
+        <p><strong>模型策略：</strong>始终使用主模型以保证应用生成质量。</p>
         <p><strong>应用管理：</strong>右侧面板的"应用"Tab 显示所有已注册的 .papr App。绿/红圆点指示运行状态。底部工具栏：▶ 启动 / 打开 / ■ 停止 / 🗑 删除。LLM 可通过 <code>app_list</code>、<code>app_start</code>、<code>app_stop</code>、<code>app_delete</code> 工具管理应用生命周期。完整开发与插件规范详见 <a href="#apps" style="color:var(--accent);font-weight:500;">App 模式与插件生成</a> 章节。</p>
         <p><strong>权限模型：</strong>App 用 <code>local</code>（none / read / write）× <code>network</code>（true / false）两轴声明访问档。设置 → App Tab 可收窄全局默认与逐 app 覆盖；保存后正在运行的后端会按新沙箱重启。</p>
 
@@ -1048,7 +1031,7 @@ https://api.deepseek.com/v1</code></pre>
 
         <h3>启用/切换角色</h3>
         <p>在角色编辑页点击<strong>启用</strong>，只对<strong>当前会话</strong>生效。列表里点击角色名是进入编辑，不会激活。打开面板时会选中当前会话已启用的角色。</p>
-        <p>角色人设放在 Session Bootstrap 中（<strong>不在系统提示词的 ImmutablePrefix 中</strong>），因此切换角色不会破坏 DeepSeek 前缀缓存。新会话默认不带角色。</p>
+        <p>角色人设放在 Session Bootstrap 中（<strong>不在系统提示词的 ImmutablePrefix 中</strong>），因此切换角色不会破坏 LLM 前缀缓存。新会话默认不带角色。</p>
 
         <div class="callout success">
           <strong>提示：</strong>角色扮演不影响 Agent 的代码理解和执行能力。Agent 仍然能搜索项目、修改文件、运行命令——只是输出的语气和风格会匹配角色设定。
@@ -1961,7 +1944,7 @@ X-API-Key: your-api-key</code></pre>
 
     <!-- 14. Cache -->
     <section class="section" id="cache">
-      <div class="section-header"><h2>DeepSeek 缓存优化</h2></div>
+      <div class="section-header"><h2>LLM 前缀缓存</h2></div>
       <div class="content">
         <h3>请求怎么叠（缓存视角）</h3>
         <p>发给模型的不是一锅炖。完整分层与记忆流程见 <a href="context-architecture.html">上下文分层</a>。越靠前越稳，前缀缓存越好用：</p>
@@ -2001,7 +1984,7 @@ X-API-Key: your-api-key</code></pre>
         </ul>
 
         <h3>缓存优先架构：Context Epoch 模型</h3>
-        <p>DeepSeek 按<strong>字节前缀逐字匹配</strong>自动缓存（无显式断点）。架构的第一性原则是：<strong>epoch 内前缀字节稳定（只追加），epoch 之间通过压缩有意重置。</strong></p>
+        <p>前缀缓存按<strong>字节前缀逐字匹配</strong>自动命中（无显式断点）。架构的第一性原则是：<strong>epoch 内前缀字节稳定（只追加），epoch 之间通过压缩有意重置。</strong></p>
         <ul>
           <li><strong>epoch</strong> = 一个 agent 生命周期内、前缀保持字节稳定的跨度。工具循环每一轮把 assistant 消息与 tool 结果<strong>追加到尾部</strong>，前缀逐字节复用 → 循环内多次调用天然高命中。</li>
           <li><strong>epoch 边界 = 上下文压缩</strong>：达到上下文阈值时，把历史摘要成 checkpoint + 保留尾部，开启新 epoch（一次性 miss，之后重新稳定累积命中）。这对齐 OpenCode 的 Context Epoch 与 Claude Code 的 auto-compact。checkpoint 按<strong>保留边界插入</strong>（非追加到末尾），其后保留近期尾部原文（含工具调用↔结果配对，边界在 UI 消息粒度选取、不切出孤儿 tool 消息）；checkpoint 在有效上下文中以 <strong>user 轮</strong>发出，避免压缩后首条 / 连续 assistant，提升跨 provider 正确性。</li>
@@ -2038,7 +2021,7 @@ X-API-Key: your-api-key</code></pre>
           <li><strong>TodoList digest 冻结</strong>：checkpoint 生成时冻结当前 digest，重建时复用而非实时重渲染</li>
           <li><strong>参数冻结</strong>：topP / temperature / maxTokens / thinkingEnabled 冻结在 ImmutablePrefix，变化即换 hash</li>
         </ul>
-        <p><strong>已知限制：</strong>DeepSeek 前缀缓存有存活时间，长时间空闲后首次调用会重新 miss 整段前缀（与客户端无关）；压缩是有损的，阈值越高单次压缩覆盖的历史越多。</p>
+        <p><strong>已知限制：</strong>LLM 前缀缓存有存活时间，长时间空闲后首次调用会重新 miss 整段前缀（与客户端无关）；压缩是有损的，阈值越高单次压缩覆盖的历史越多。</p>
       </div>
     </section>
 

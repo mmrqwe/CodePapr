@@ -525,7 +525,7 @@
             <h3>App &amp; Auxiliary <span>Runtime Helpers</span></h3>
             <div class="tags"><span class="tag">app_render / app_publish / skill / question / todo</span></div>
           </div>
-          <div class="hz"><b>Sandboxed Rendering</b>Interactive HTML application panel</div>
+          <div class="hz"><b>Sandboxed Rendering</b>Interactive application panel</div>
         </div>
 
         <div class="item">
@@ -533,7 +533,7 @@
             <div class="addr">APP</div>
             <div class="name">app_render / app_list / app_start / app_stop / app_delete<span class="cchip c-text">App Mode</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>app_render</b>: Opens interactive HTML apps already written under <code>.CodePapr/apps/&lt;appId&gt;/</code> (sandboxed iframe with Papr SDK); paired with <code>app_*</code> tools to manage application lifecycle. Files must be written with write/edit/patch; app_render only mounts.</div>
+          <div class="desc"><b>app_render</b>: Opens interactive apps already written under <code>.CodePapr/apps/&lt;appId&gt;/</code> (sandboxed iframe with Papr SDK); paired with <code>app_*</code> tools to manage application lifecycle. Files must be written with write/edit/patch; app_render only mounts.</div>
           <div class="more"><div class="mbox"><code>app_render</code> is strictly disabled for subagents to prevent recursive rendering loops; pass appId only. Permissions, agents, and backend processes live in manifest.json. <code>app_list</code> is App-mode only: duplicate checks and running state. The coding Agent discovers publish targets from session context, not from list.</div></div>
         </div>
 

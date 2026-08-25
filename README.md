@@ -4,7 +4,7 @@
 
 **Local-first coding agent runtime. Tauri desktop workbench.**
 
-CodePapr is a local coding agent system built with DeepSeek cache optimization. The main agent orchestrates three built-in sub-agents — **Explore** (code analysis), **Scout** (web search), and **Mentor** (architecture guidance) — plus two runtime-internal agents (**Verifier** for goal acceptance, **Compactor** for context compaction), with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
+CodePapr is a local coding agent system built with LLM prefix cache optimization. The main agent orchestrates three built-in sub-agents — **Explore** (code analysis), **Scout** (web search), and **Mentor** (architecture guidance) — plus two runtime-internal agents (**Verifier** for goal acceptance, **Compactor** for context compaction), with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
 
 ---
 
@@ -16,12 +16,12 @@ CodePapr is a local coding agent system built with DeepSeek cache optimization. 
 
 | Capability | Description |
 |-----------|-------------|
-| **Ask / Plan / Agent / App modes** | Single runtime for explanation, execution, and interactive HTML app generation |
+| **Ask / Plan / Agent / App modes** | Single runtime for explanation, execution, and interactive app generation |
 | **Multi-agent collaboration** | Main agent dispatches Explore/Scout/Mentor and custom sub-agents via the `task` tool |
 | **TodoList task planning** | Agents auto-create and track task lists with progress reporting and re-planning |
 | **Project memory (zero-review)** | Preferences, constraints, and verified facts save automatically. Short instructions go in every-session Bootstrap; procedures in per-turn Recall; web citations in search only. The memory panel is the only human surface over the SQLite ledger. |
 | **Code intelligence (LSP + AST)** | `lsp` tool with 9 navigation actions (go-to-definition, references, hover, document/workspace symbols, implementations, call hierarchy) — LSP-first with automatic AST project-graph fallback tagged by source/confidence; `list` shows the directory tree with per-file lightweight symbols. The ProjectGraph (UI-facing) further supports dead code detection, circular dependency checks, and refactoring suggestions |
-| **DeepSeek prefix cache optimization** | Three-layer prompt injection strategy to maximize cache hits and reduce costs |
+| **LLM prefix cache** | Three-layer prompt injection strategy to maximize cache hits and reduce costs |
 | **SEARCH/REPLACE Diff** | Validate before writing, with atomic multi-file patch support |
 | **MCP protocol support** | Integrate external MCP tool servers (stdio / SSE / Streamable HTTP); built-in DuckDuckGo Search, Postgres, SQLite presets; MCP marketplace with one-click install from the official registry; per-server permission modes (read-only / read-write / dangerous) and mutating-tool confirmation flow |
 | **Deep Git integration** | 8 Git actions + diff panel + safe rollback with backup ref + undo |
@@ -90,7 +90,7 @@ npm run publish    # Generate installer (.dmg/.msi)
 | **Ask** | Explanation, analysis, suggestions | Read-only — no file edits or command execution |
 | **Plan** | Complex task breakdown | Proposes a plan and options, then executes on confirmation |
 | **Agent** | Bug fixes, feature implementation | Autonomous execution: search → modify → verify |
-| **App** | Data visualization, exploration | Instantly generates interactive HTML apps; renders D3/ECharts/Mermaid in a sandboxed panel |
+| **App** | Data visualization, exploration | Instantly generates interactive apps; renders D3/ECharts/Mermaid in a sandboxed panel |
 
 ## Project Configuration
 

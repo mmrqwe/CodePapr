@@ -337,7 +337,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <div class="nav-section">
         <div class="nav-section-title">Deep Dive</div>
         <a class="nav-item" onclick="scrollToSection('architecture')"><span class="dot"></span>System Architecture</a>
-        <a class="nav-item" onclick="scrollToSection('cache')"><span class="dot"></span>DeepSeek Cache Optimization</a>
+        <a class="nav-item" onclick="scrollToSection('cache')"><span class="dot"></span>LLM Prefix Cache</a>
         <a class="nav-item" onclick="scrollToSection('lsp')"><span class="dot"></span>Language Intelligence &amp; LSP</a>
         <a class="nav-item" onclick="scrollToSection('verify')"><span class="dot"></span>Verification &amp; Release</a>
       </div>
@@ -414,7 +414,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         <a href="tutorial.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:4px;font-weight:600" onclick="localStorage.setItem('codepapr-lang','zh')">中</a>
       </div>
       <h1><span class="gradient">CodePapr Tutorial</span></h1>
-      <p>Local coding agent workbench: read the project, edit files, run commands, preview results. DeepSeek prefix cache.</p>
+      <p>Local coding agent workbench: read the project, edit files, run commands, preview results. Deeply adapted for LLM prefix caching.</p>
     </div>
 
     <!-- 1. Intro -->
@@ -428,23 +428,6 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
           <li><strong>Cache-first</strong>: stable content first, volatile last</li>
           <li><strong>Structured edits</strong>: Search/Replace diffs, validate then write</li>
         </ul>
-
-        <h3>Vs other tools</h3>
-        <p style="margin-bottom:16px;font-size:0.85rem;color:var(--foreground-dim)">Based on each tool’s public capabilities.</p>
-        <table>
-          <thead><tr><th>Dimension</th><th>Cline (62k⭐)</th><th>Aider (46k⭐)</th><th>Devin Desktop</th><th class="highlight-cell">CodePapr</th></tr></thead>
-          <tbody>
-            <tr><td><strong>Form Factor</strong></td><td>SDK / VS Code / JetBrains / CLI / Kanban</td><td>Terminal Command</td><td>Standalone Desktop IDE</td><td class="highlight-cell">Standalone Desktop App (Tauri 2)</td></tr>
-            <tr><td><strong>Multi-Agent</strong></td><td>✅ Team + Coordinator + Scheduled Dispatch</td><td>❌ Single Agent</td><td>✅ Multi-Agent Fleet + ACP Protocol</td><td class="highlight-cell">✅ Main Agent + 3 Built-in Sub-agents + 2 Internal Agents + Custom</td></tr>
-            <tr><td><strong>Task Planning</strong></td><td>Kanban Board</td><td>❌</td><td>Spaces + Kanban</td><td class="highlight-cell">TodoList: auto-create / progress tracking / re-plan</td></tr>
-            <tr><td><strong>Code Understanding</strong></td><td>Read Files + grep + LSP</td><td>Repo Map</td><td>Fast Context (milliseconds)</td><td class="highlight-cell">ProjectGraph Semantic Graph: 14 analysis actions</td></tr>
-            <tr><td><strong>Rollback</strong></td><td>Checkpoints Snapshot</td><td>Git commit rollback</td><td>Diff review</td><td class="highlight-cell">Git auto-commit checkpoint + <code>reset --hard</code>: atomic code and message recovery</td></tr>
-            <tr><td><strong>Cache Optimization</strong></td><td>❌</td><td>❌</td><td>❌</td><td class="highlight-cell">DeepSeek three-layer prefix caching, reusable across sessions</td></tr>
-            <tr><td><strong>Model Support</strong></td><td>Almost all (incl. local)</td><td>Almost all (incl. local)</td><td>Built-in free model + third-party</td><td class="highlight-cell">DeepSeek / OpenAI / Claude / Local</td></tr>
-            <tr><td><strong>Extensibility</strong></td><td>SDK + MCP + Plugin System</td><td>Config Files</td><td>MCP + Extension + ACP</td><td class="highlight-cell">Custom Agents / Skills / Commands / Rules</td></tr>
-            <tr><td><strong>Pricing</strong></td><td>Open Source Free + API Costs</td><td>Open Source Free + API Costs</td><td>Free / $20 Pro / $200 Max</td><td class="highlight-cell">Open Source Free + API Costs</td></tr>
-          </tbody>
-        </table>
 
         <h3>Supported LLM Providers</h3>
         <div class="card"><div class="tag-stack">
@@ -677,10 +660,10 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
 
         <h3><span class="badge badge-app">App</span> Application Generation Mode</h3>
-        <p><strong>Best for:</strong> Data exploration and visualization, generating interactive charts and dashboards, turning analysis results into interactive HTML apps with a single sentence.</p>
+        <p><strong>Best for:</strong> Data exploration and visualization, generating interactive charts and dashboards, turning analysis results into interactive apps with a single sentence.</p>
         <p><strong>Core Philosophy:</strong></p>
         <ul>
-          <li>Your output is <strong>not a Markdown answer</strong> — it is a complete HTML application</li>
+          <li>Your output is <strong>not a Markdown answer</strong> — it is a complete app (a split-file .papr app)</li>
           <li>Like instantly building a purpose-built tool for the current problem</li>
           <li>Fundamentally different from the coding Agent — it's an "app factory," not a "code writer"</li>
         </ul>
@@ -690,7 +673,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>Write the app: use write to save manifest.json, a shell index.html, css/theme.css, and js/*.js split by responsibility under <code>.CodePapr/apps/&lt;appId&gt;/</code></li>
           <li>Open it: call <code>app_render({ appId })</code> to mount it in the right-side Application panel (does not write files)</li>
         </ol>
-        <p><strong>HTML App Conventions:</strong></p>
+        <p><strong>App conventions:</strong></p>
         <ul>
           <li>Split files: index.html is a shell only; styles in css/theme.css; logic in js/*.js by responsibility (native ES modules, no bundler)</li>
           <li>Reference chart libraries via CDN (D3, ECharts, Mermaid, MapLibre, Leaflet, Three.js, etc.)</li>
@@ -707,7 +690,7 @@ https://api.deepseek.com/v1</code></pre>
           <li>Ask / Plan / Agent can <strong>switch freely</strong> between each other without creating a new session</li>
           <li>App ↔ coding mode switch -> create a new session</li>
         </ul>
-        <p><strong>Model Strategy:</strong> Always uses the primary model (deepseek-v4-pro) to ensure HTML generation quality.</p>
+        <p><strong>Model Strategy:</strong> Always uses the primary model to ensure app generation quality.</p>
         <p><strong>App Management:</strong> The right panel's "Apps" tab shows all registered .papr apps. Green/red dots indicate running status. Bottom toolbar: ▶ Start / Open / ■ Stop / 🗑 Delete. LLM manages app lifecycle via <code>app_list</code>, <code>app_start</code>, <code>app_stop</code>, <code>app_delete</code> tools. For full development and plugin specifications, see the <a href="#apps" style="color:var(--accent);font-weight:500;">App Mode &amp; Plugin Generation</a> section.</p>
         <p><strong>Permission model:</strong> Apps declare access with <code>local</code> (none / read / write) × <code>network</code> (true / false). Settings → App Tab can narrow the global default and per-app overrides; saving restarts running backends with the new sandbox.</p>
 
@@ -1048,7 +1031,7 @@ After the change, at least run verification for the affected scope; if no narrow
 
         <h3>Activating/Switching Characters</h3>
         <p>Click <strong>Enable</strong> on the editor to apply the character to the <strong>current session only</strong>. Clicking a name in the list opens it for editing and does not activate it. Opening the panel selects the character already enabled for this session.</p>
-        <p>Character personas are placed in the Session Bootstrap (<strong>not in the system prompt's ImmutablePrefix</strong>), so switching characters does not break the DeepSeek prefix cache. New sessions start with no character.</p>
+        <p>Character personas are placed in the Session Bootstrap (<strong>not in the system prompt's ImmutablePrefix</strong>), so switching characters does not break the LLM prefix cache. New sessions start with no character.</p>
 
         <div class="callout success">
           <strong>Tip:</strong> Character roleplay does not affect the Agent's code understanding and execution abilities. The Agent can still search projects, modify files, and run commands — only the output tone and style will match the character setting.
@@ -1960,7 +1943,7 @@ X-API-Key: your-api-key</code></pre>
 
     <!-- 14. Cache -->
     <section class="section" id="cache">
-      <div class="section-header"><h2>DeepSeek Cache Optimization</h2></div>
+      <div class="section-header"><h2>LLM Prefix Cache</h2></div>
       <div class="content">
         <h3>How a request is stacked (cache view)</h3>
         <p>The model does not get one blob. Full layering and memory flow: <a href="context-architecture.en.html">Context layering</a>. Earlier bytes stay still so prefix cache works:</p>
@@ -2000,7 +1983,7 @@ After compaction:
         </ul>
 
         <h3>Cache-First Architecture: the Context Epoch Model</h3>
-        <p>DeepSeek caches automatically by <strong>byte-exact prefix match</strong> (no explicit breakpoints). The first principle is: <strong>keep the prefix byte-stable (append-only) within an epoch; reset it deliberately only across epochs via compaction.</strong></p>
+        <p>Prefix cache hits automatically by <strong>byte-exact prefix match</strong> (no explicit breakpoints). The first principle is: <strong>keep the prefix byte-stable (append-only) within an epoch; reset it deliberately only across epochs via compaction.</strong></p>
         <ul>
           <li>An <strong>epoch</strong> = a span within one agent lifetime during which the prefix stays byte-stable. Each tool-loop round <strong>appends</strong> the assistant message and tool results to the tail; the prefix is reused byte-for-byte → the multiple calls within a loop naturally hit the cache.</li>
           <li><strong>The epoch boundary = context compaction</strong>: when the context threshold is reached, history is summarized into a checkpoint + retained tail, starting a new epoch (a one-time miss, then stable hit accumulation resumes). This mirrors OpenCode's Context Epoch and Claude Code's auto-compact. The checkpoint is <strong>inserted at the retention boundary</strong> (not appended at the end); the recent tail after it stays verbatim (including tool-call↔result pairs — the boundary is chosen at UI-message granularity so no tool message is orphaned). In the effective context the checkpoint is emitted as a <strong>user turn</strong>, avoiding a leading/consecutive assistant after compaction for better cross-provider correctness.</li>
@@ -2037,7 +2020,7 @@ After compaction:
           <li><strong>Frozen TodoList digest</strong>: the current digest is frozen into the checkpoint at generation and reused on rebuild instead of re-rendered live</li>
           <li><strong>Frozen parameters</strong>: topP / temperature / maxTokens / thinkingEnabled are frozen in ImmutablePrefix; any change flips the hash</li>
         </ul>
-        <p><strong>Known limitations:</strong> DeepSeek's prefix cache has a lifetime; after a long idle period the first call re-misses the whole prefix (independent of the client). Compaction is lossy — the higher the threshold, the more history a single compaction covers.</p>
+        <p><strong>Known limitations:</strong> LLM prefix cache has a lifetime; after a long idle period the first call re-misses the whole prefix (independent of the client). Compaction is lossy — the higher the threshold, the more history a single compaction covers.</p>
       </div>
     </section>
 

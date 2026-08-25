@@ -22,7 +22,7 @@
 | **Ask** | 解释、分析、建议 | 只读，不改文件不跑命令 |
 | **Plan** | 复杂任务拆解 | 先出方案和可选项，确认后执行 |
 | **Agent** | Bug 修复、功能实现 | 自主执行：搜索→修改→验证 |
-| **App** | 数据可视化、交互应用 | 即时生成交互式 HTML 应用；支持 Papr SDK（`window.papr`）调用 Agent/存储/HTTP/文件系统 |
+| **App** | 数据可视化、交互应用 | 即时生成交互式应用；支持 Papr SDK（`window.papr`）调用 Agent/存储/HTTP/文件系统 |
 
 Plan 模式下，当需求模糊时 Agent 会调用 `question` 工具向你提问，而不是猜测。
 
@@ -112,7 +112,7 @@ const history = await papr.db.get('inbox:cards');
 
 ### 创建 App
 
-切换 **App 模式**，用自然语言描述想要的 App。Agent 用 `write` / `edit` / `patch` 把 `manifest.json` 和入口 HTML 写到 `.CodePapr/apps/<appId>/`，再调用 `app_render({ appId })` 打开到应用面板。`app_render` 只挂载已落盘的应用，不会写文件。修改后再次 `app_render({ appId })` 即可刷新（面板仍可导出 zip）。
+切换 **App 模式**，用自然语言描述想要的 App。Agent 用 `write` / `edit` / `patch` 把 `manifest.json`、骨架 `index.html` 以及 `css/`、`js/` 写到 `.CodePapr/apps/<appId>/`，再调用 `app_render({ appId })` 打开到应用面板。`app_render` 只挂载已落盘的应用，不会写文件。修改后再次 `app_render({ appId })` 即可刷新（面板仍可导出 zip）。
 
 ### Agent 推送（app_publish + inbox）
 
@@ -590,7 +590,7 @@ macOS 上 `bash` 工具、Shell 会话与 app 后端进程都通过 `sandbox-exe
 直接在 Agent 模式给出明确目标和影响文件范围。
 
 ### 3. 生成数据可视化
-切换 App 模式，让 Agent 探索数据并生成交互式 HTML 应用——适合数据库分析、关系图、仪表盘等场景。
+切换 App 模式，让 Agent 探索数据并生成交互式应用——适合数据库分析、关系图、仪表盘等场景。
 
 ### 4. 对话重置回退
 如果 Agent 走偏了方向，hover 之前正确的用户消息，点击"重置到此点"回到该状态继续。
