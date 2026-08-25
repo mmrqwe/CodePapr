@@ -2,6 +2,7 @@ import type { AgentWorkerToMainMessage, MainToAgentWorkerMessage } from './agent
 import type { AgentRuntimeTransport } from './agentRuntimeHost';
 
 export class WorkerTransport implements AgentRuntimeTransport {
+  readonly kind = 'worker' as const;
   private readonly worker: Worker;
   private readonly messageListeners: Array<(message: AgentWorkerToMainMessage) => void> = [];
   private readonly errorListeners: Array<(error: { message: string; detail?: string }) => void> = [];
@@ -52,7 +53,7 @@ export class WorkerTransport implements AgentRuntimeTransport {
     this.errorListeners.push(listener);
   }
 
-  terminate(): void {
+  terminate(_options?: { kill?: boolean }): void {
     if (this.terminated) return;
     this.terminated = true;
     try {

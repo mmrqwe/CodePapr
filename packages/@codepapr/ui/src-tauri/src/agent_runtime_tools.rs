@@ -1,8 +1,8 @@
-//! P1: execute sidecar `tool-request`s in Rust so bash/fs/git do not wait on WebView JS.
+//! P1/P2: execute sidecar `tool-request`s in Rust so tools do not wait on WebView JS.
 //!
-//! UI-bound tools (todo, memory, MCP, browser, graph, lsp, question, apps) are
-//! still forwarded to the page. Permission prompts are the exception that may
-//! wait on the UI.
+//! UI-bound tools (todo, memory, MCP, browser, graph, question, apps, project
+//! diagnostics, skill/webfetch) are still forwarded to the page. Permission
+//! prompts wait on the UI.
 
 use crate::git_operations;
 use crate::shell::background;
@@ -53,6 +53,29 @@ const RUST_HOSTED_TOOLS: &[&str] = &[
     "workspace_git_stage",
     "workspace_git_commit",
     "workspace_git_restore",
+    "workspace_git_reset",
+    "workspace_restore_undo",
+    "read_image",
+    "workspace_read_image",
+    "local_time_now",
+    "lsp",
+    "lsp_edit",
+    "diagnostics",
+    "workspace_lsp_diagnostics",
+    "workspace_symbol_definition",
+    "workspace_symbol_references",
+    "workspace_symbol_hover",
+    "workspace_document_symbol",
+    "workspace_workspace_symbol",
+    "workspace_implementation",
+    "workspace_prepare_call_hierarchy",
+    "workspace_incoming_calls",
+    "workspace_outgoing_calls",
+    "workspace_rename_symbol",
+    "workspace_apply_code_action",
+    "workspace_organize_imports",
+    "workspace_fix_diagnostics",
+    "workspace_format_files",
 ];
 
 #[derive(Clone)]
@@ -132,6 +155,9 @@ pub fn should_host_in_rust(message: &Value) -> bool {
         return false;
     };
     if !RUST_HOSTED_TOOLS.contains(&name) {
+        return false;
+    }
+    if name == "diagnostics" && message.pointer("/arguments/project") == Some(&Value::Bool(true)) {
         return false;
     }
     let args = message.get("arguments").cloned().unwrap_or(Value::Null);
@@ -490,7 +516,40 @@ fn dispatch_tool_inner(
         | "workspace_git_branch_checkout"
         | "workspace_git_stage"
         | "workspace_git_commit"
-        | "workspace_git_restore" => dispatch_git(ctx, name, args),
+        | "workspace_git_restore"
+        | "workspace_git_reset"
+        | "workspace_restore_undo" => dispatch_git(ctx, name, args),
+        "read_image" | "workspace_read_image" => dispatch_read_image(app, runtime_id, ctx, req, cancel),
+        "local_time_now" => Ok(ok_result(local_time_now(), Vec::new())),
+        "lsp"
+        | "lsp_edit"
+        | "diagnostics"
+        | "workspace_lsp_diagnostics"
+        | "workspace_symbol_definition"
+        | "workspace_symbol_references"
+        | "workspace_symbol_hover"
+        | "workspace_document_symbol"
+        | "workspace_workspace_symbol"
+        | "workspace_implementation"
+        | "workspace_prepare_call_hierarchy"
+        | "workspace_incoming_calls"
+        | "workspace_outgoing_calls"
+        | "workspace_rename_symbol"
+        | "workspace_apply_code_action"
+        | "workspace_organize_imports"
+        | "workspace_fix_diagnostics"
+        | "workspace_format_files" => {
+            if let Some(path) = extract_path(args, false)? {
+                ensure_codepapr_access(&path, "read", &ctx.mode)?;
+                ensure_external_allowed(app, runtime_id, ctx, req, &path, "read", cancel)?;
+            }
+            let (value, mutated) =
+                crate::agent_runtime_lsp::dispatch(app, &ctx.workspace_path, name, args)?;
+            Ok(HostedOutcome {
+                result: Ok(value),
+                mutated,
+            })
+        }
         other => Err(format!("sidecar 宿主未实现工具: {other}")),
     }
 }
@@ -774,12 +833,159 @@ fn dispatch_git(ctx: &RuntimeToolContext, name: &str, args: &Value) -> Result<Ho
             });
             git_op_json("restore", result)
         }
+        "reset" | "workspace_git_reset" => {
+            let target = arg_string_req(args, &["target"])?;
+            git_operations::validate_git_ref(&target, "target")?;
+            let result = crate::shared::with_workspace_git_write_lock(workspace, || {
+                crate::snapshot::RestoreEngine::new(workspace).execute(&target)
+            })?;
+            let message = if result.ok {
+                format!(
+                    "已回退到 {target}，备份引用 {}，恢复 {} 个文件。",
+                    result.backup_ref.as_deref().unwrap_or("N/A"),
+                    result.files_restored
+                )
+            } else {
+                result.error.clone().unwrap_or_else(|| "回退失败。".to_string())
+            };
+            return Ok(HostedOutcome {
+                result: Ok(json!({
+                    "available": true,
+                    "isRepo": true,
+                    "ok": result.ok,
+                    "raw": "",
+                    "action": "reset",
+                    "message": message,
+                    "backupBranch": result.backup_ref,
+                    "target": target,
+                })),
+                mutated: vec![".".to_string()],
+            });
+        }
+        "undo" | "workspace_restore_undo" => {
+            crate::shared::with_workspace_git_write_lock(workspace, || {
+                crate::snapshot::RestoreEngine::new(workspace).undo(None)
+            })?;
+            return Ok(HostedOutcome {
+                result: Ok(json!({
+                    "available": true,
+                    "isRepo": true,
+                    "ok": true,
+                    "raw": "",
+                    "action": "undo",
+                    "message": "已撤销上一次恢复操作。",
+                })),
+                mutated: vec![".".to_string()],
+            });
+        }
         other => return Err(format!("未知的 git action: {other}")),
     };
     Ok(HostedOutcome {
         result: Ok(mapped),
         mutated: Vec::new(),
     })
+}
+
+fn dispatch_read_image(
+    app: &AppHandle,
+    runtime_id: &str,
+    ctx: &RuntimeToolContext,
+    req: &ToolRequest,
+    cancel: &Arc<AtomicBool>,
+) -> Result<HostedOutcome, String> {
+    let path = require_path(&req.arguments)?;
+    ensure_codepapr_access(&path, "read", &ctx.mode)?;
+    ensure_external_allowed(app, runtime_id, ctx, req, &path, "read", cancel)?;
+    let result = workspace_fs::read::read_image_file_impl(
+        ctx.workspace_path.clone(),
+        path,
+        arg_usize(&req.arguments, "maxBytes"),
+    )?;
+    Ok(HostedOutcome {
+        result: Ok(json!({
+            "path": result.path,
+            "mediaType": result.media_type,
+            "bytes": result.bytes,
+            "__images": [{
+                "mediaType": result.media_type,
+                "data": result.data,
+            }],
+        })),
+        mutated: Vec::new(),
+    })
+}
+
+fn local_time_now() -> Value {
+    let unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let (year, month, day, hour, min, sec, wday, offset_minutes, zone) = local_civil_clock();
+    let sign = if offset_minutes >= 0 { '+' } else { '-' };
+    let abs = offset_minutes.abs();
+    let offset_hours = abs / 60;
+    let offset_remain = abs % 60;
+    let weekday = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ]
+    .get(wday as usize)
+    .copied()
+    .unwrap_or("Sunday");
+    json!({
+        "iso": format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}{sign}{offset_hours:02}:{offset_remain:02}"),
+        "local": format!("{year:04}-{month:02}-{day:02} {hour:02}:{min:02}:{sec:02}"),
+        "date": format!("{year:04}-{month:02}-{day:02}"),
+        "time": format!("{hour:02}:{min:02}:{sec:02}"),
+        "weekday": weekday,
+        "timeZone": zone,
+        "offsetMinutes": offset_minutes,
+        "unixMs": unix_ms,
+    })
+}
+
+fn local_civil_clock() -> (i32, i32, i32, i32, i32, i32, i32, i32, String) {
+    #[cfg(unix)]
+    {
+        unsafe {
+            let mut t: libc::time_t = 0;
+            if libc::time(&mut t) == -1 {
+                return (1970, 1, 1, 0, 0, 0, 4, 0, "UTC".to_string());
+            }
+            let mut tm = std::mem::zeroed::<libc::tm>();
+            if libc::localtime_r(&t, &mut tm).is_null() {
+                return (1970, 1, 1, 0, 0, 0, 4, 0, "UTC".to_string());
+            }
+            let offset_minutes = (tm.tm_gmtoff / 60) as i32;
+            let zone = if tm.tm_zone.is_null() {
+                "local".to_string()
+            } else {
+                std::ffi::CStr::from_ptr(tm.tm_zone)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            (
+                tm.tm_year + 1900,
+                tm.tm_mon + 1,
+                tm.tm_mday,
+                tm.tm_hour,
+                tm.tm_min,
+                tm.tm_sec,
+                tm.tm_wday,
+                offset_minutes,
+                zone,
+            )
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        (1970, 1, 1, 0, 0, 0, 4, 0, "UTC".to_string())
+    }
 }
 
 fn git_op_json(action: &str, result: crate::snapshot::types::GitOperationResult) -> Value {
@@ -1306,8 +1512,20 @@ mod tests {
             "arguments": { "relativePath": ".CodePapr/memory.md", "content": "x" }
         });
         assert!(!should_host_in_rust(&memory));
-        let lsp = json!({ "toolName": "lsp", "arguments": { "action": "hover" } });
-        assert!(!should_host_in_rust(&lsp));
+        let lsp = json!({ "toolName": "lsp", "arguments": { "action": "hover", "relativePath": "src/a.ts" } });
+        assert!(should_host_in_rust(&lsp));
+        let git_reset = json!({ "toolName": "git", "arguments": { "action": "reset", "target": "HEAD" } });
+        assert!(should_host_in_rust(&git_reset));
+        let image = json!({ "toolName": "read_image", "arguments": { "relativePath": "shot.png" } });
+        assert!(should_host_in_rust(&image));
+        let time = json!({ "toolName": "local_time_now", "arguments": {} });
+        assert!(should_host_in_rust(&time));
+        let project_diag = json!({ "toolName": "diagnostics", "arguments": { "project": true } });
+        assert!(!should_host_in_rust(&project_diag));
+        let file_diag = json!({ "toolName": "diagnostics", "arguments": { "relativePath": "src/a.ts" } });
+        assert!(should_host_in_rust(&file_diag));
+        let graph = json!({ "toolName": "graph", "arguments": { "action": "overview" } });
+        assert!(!should_host_in_rust(&graph));
     }
 
     #[test]
@@ -1361,5 +1579,12 @@ mod tests {
         assert!(ensure_codepapr_access(".CodePapr/tmp/out.txt", "write", "agent").is_ok());
         assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "agent").is_err());
         assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "app").is_ok());
+    }
+
+    #[test]
+    fn local_time_now_has_iso_and_unix() {
+        let value = local_time_now();
+        assert!(value.get("iso").and_then(Value::as_str).unwrap_or("").contains('T'));
+        assert!(value.get("unixMs").and_then(Value::as_u64).unwrap_or(0) > 0);
     }
 }

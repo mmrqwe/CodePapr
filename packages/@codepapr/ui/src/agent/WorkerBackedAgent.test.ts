@@ -10,6 +10,7 @@ import {
   WorkerCrashError,
   type AgentRuntimeStreamEvent,
 } from './WorkerBackedAgent';
+import type { AgentRuntimeTransport } from './agentRuntimeHost';
 
 function makeMcpSearchSettings(): McpSettings {
   const base = createDefaultMcpSettings();
@@ -66,9 +67,41 @@ class MockWorker {
   }
 }
 
+class MockSidecarTransport implements AgentRuntimeTransport {
+  static instances: MockSidecarTransport[] = [];
+  readonly kind = 'sidecar' as const;
+  readonly messages: MainToAgentWorkerMessage[] = [];
+  terminated = false;
+  killed = false;
+  private messageListeners: Array<(message: AgentWorkerToMainMessage) => void> = [];
+
+  constructor() {
+    MockSidecarTransport.instances.push(this);
+  }
+
+  post(message: MainToAgentWorkerMessage): void {
+    this.messages.push(message);
+  }
+
+  addMessageListener(listener: (message: AgentWorkerToMainMessage) => void): void {
+    this.messageListeners.push(listener);
+  }
+
+  addErrorListener(): void {}
+
+  emit(message: AgentWorkerToMainMessage): void {
+    for (const listener of this.messageListeners) listener(message);
+  }
+
+  terminate(options?: { kill?: boolean }): void {
+    this.terminated = true;
+    this.killed = options?.kill === true;
+  }
+}
+
 function createAgent(
   initialMessages: IMessage[] = [],
-  overrides?: { multimodalEnabled?: boolean; mcpSearch?: boolean }
+  overrides?: { multimodalEnabled?: boolean; mcpSearch?: boolean; transport?: AgentRuntimeTransport }
 ): WorkerBackedAgent {
   return new WorkerBackedAgent({
     sessionId: 'session-1',
@@ -153,6 +186,7 @@ function createAgent(
       reasoningEffort: 'max',
     },
     runtime: {},
+    ...(overrides?.transport ? { transport: overrides.transport } : {}),
   });
 }
 
@@ -168,6 +202,7 @@ describe('WorkerBackedAgent', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     MockWorker.instances = [];
+    MockSidecarTransport.instances = [];
     vi.stubGlobal('Worker', MockWorker);
   });
 
@@ -655,6 +690,40 @@ describe('WorkerBackedAgent', () => {
     expect(worker?.terminated).toBe(true);
     await rejection;
     await expect(chatPromise).rejects.toThrow(/no heartbeat for 60s/i);
+  });
+
+  it('sidecar uses the 15s heartbeat timeout with no WebKit grace window', async () => {
+    const transport = new MockSidecarTransport();
+    const agent = createAgent([], { transport });
+    const chatPromise = agent.chat('hello');
+    const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+
+    expect(agent.isolatedFromWebKit()).toBe(true);
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(agent.isCrashed()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(agent.isCrashed()).toBe(true);
+    expect(transport.killed).toBe(true);
+    await rejection;
+    await expect(chatPromise).rejects.toThrow(/no heartbeat for 15s/i);
+  });
+
+  it('sidecar ignore visibilitychange so a hidden page does not thaw the heartbeat', async () => {
+    const transport = new MockSidecarTransport();
+    const agent = createAgent([], { transport });
+    const chatPromise = agent.chat('hello');
+    const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    transport.emit({ type: 'pong' });
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(agent.isCrashed()).toBe(false);
+
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(agent.isCrashed()).toBe(true);
+    await rejection;
   });
 
   it('refreshes the heartbeat baseline when the page becomes visible again', async () => {

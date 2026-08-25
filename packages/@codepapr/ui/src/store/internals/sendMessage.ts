@@ -146,6 +146,7 @@ import {
   createMainThreadAgent,
   getAgentMessagesSince,
 } from './agentFactory';
+import { shouldUseSidecarAgentRuntime } from './providerFactory';
 import { maybeGenerateContextCheckpoint } from './contextCheckpoint';
 import { handleWorkspaceMutation } from './backgroundDiagnostics';
 import type {
@@ -157,9 +158,7 @@ import type {
   UIToolInvocation,
 } from './types';
 
-// Worker 崩溃恢复链参数：先重建 Worker 重试（每次先等页面恢复可见，避开解冻
-// 节流期），达到上限后降级主线程 Agent 把回合跑完——崩溃对用户永不表现为
-// 「报错停止」。延迟递增，避免热循环。
+// 崩溃恢复：Sidecar 重启进程，不等页面可见。Worker 回退仍先等解冻（WKWebView）。
 const CRASH_RECOVERY_MAX_WORKER_RETRIES = 3;
 const CRASH_RECOVERY_RETRY_DELAYS_MS = [200, 500, 1000];
 const CRASH_RECOVERY_VISIBLE_WAIT_MS = 30_000;
@@ -315,15 +314,19 @@ function buildModeSwitchMessage(mode: WorkMode): UIMessage {
  *     的「权限等待不限时」一致），弹窗停留超过看门狗阈值时必须推迟触发；
  *  2. 静默长工具执行——无流事件输出的工具由工具自身的 IPC 超时兜底
  *     （toolIpcTimeoutMs / graph / task），看门狗在工具在飞时必须推迟触发；
- *  3. 页面不可见——WKWebView 在后台会冻结 JS，心跳/流事件被节流，看门狗
- *     会把仍在 worker 里跑的回合误杀成已完成；推迟到页面重新可见。
+ *  3. 页面不可见——仅 Worker 回退路径：WKWebView 后台会冻结 JS。Sidecar
+ *     是独立 Node 进程，隐藏页面不得推迟看门狗。
  *  上述情况返回 true，调用方应重新武装看门狗而不是强制恢复。 */
 export function shouldDeferIdleWatchdog(
-  agent: Pick<AgentRuntimeHandle, 'hasInflightToolExecutions'> | null | undefined,
+  agent: Pick<AgentRuntimeHandle, 'hasInflightToolExecutions' | 'isolatedFromWebKit'> | null | undefined,
 ): boolean {
-  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return true;
   if (isPermissionWaitActive()) return true;
   if (agent?.hasInflightToolExecutions?.()) return true;
+  const hiddenPageBlocksWorker =
+    typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  if (hiddenPageBlocksWorker && !agent?.isolatedFromWebKit?.() && !shouldUseSidecarAgentRuntime()) {
+    return true;
+  }
   return false;
 }
 
@@ -2012,11 +2015,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           };
 
           /**
-           * 崩溃恢复执行器：Worker 崩溃绝不向用户表现为「报错停止」。
-           * 链：重建 Worker 重试（≤3 次，每次先等页面可见 + 递增延迟）→
-           * 仍崩则降级主线程 Agent 跑完本回合 → 仅当主线程也失败才向上抛
-           * （此时已是常规错误，非 Worker 崩溃）。AbortError（用户取消）立即终止。
-           * 崩溃发生前主日志未收到本轮 delta（result 才落日志），重试无损。
+           * 崩溃恢复执行器：运行时崩溃绝不向用户表现为「报错停止」。
+           * 链：重建 sidecar/Worker 重试（≤3 次；Worker 回退才等页面可见）→
+           * 仍崩则降级主线程 Agent 跑完本回合 → 仅当主线程也失败才向上抛。
+           * AbortError（用户取消）立即终止。
            */
           const runWithCrashRecovery = async (
             passInput: string,
@@ -2041,7 +2043,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
 
             for (let attempt = 1; attempt <= CRASH_RECOVERY_MAX_WORKER_RETRIES; attempt++) {
-              await waitForPageVisible(CRASH_RECOVERY_VISIBLE_WAIT_MS);
+              if (!shouldUseSidecarAgentRuntime()) {
+                await waitForPageVisible(CRASH_RECOVERY_VISIBLE_WAIT_MS);
+              }
               await delay(CRASH_RECOVERY_RETRY_DELAYS_MS[attempt - 1] ?? 1000);
               rebuildAgentForRetry(false);
               resetStreamingForRetry();
@@ -2053,9 +2057,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               }
             }
 
-            // Worker 重建反复崩溃：降级主线程 Agent 兜底（无 Worker 即无
-            // 「Worker 被杀」失败模式），保证本回合有结果。
-            await waitForPageVisible(CRASH_RECOVERY_VISIBLE_WAIT_MS);
+            // Isolated runtime 反复崩溃：降级主线程 Agent 兜底。
+            if (!shouldUseSidecarAgentRuntime()) {
+              await waitForPageVisible(CRASH_RECOVERY_VISIBLE_WAIT_MS);
+            }
             rebuildAgentForRetry(true);
             mainThreadFallbackUsed = true;
             resetStreamingForRetry();

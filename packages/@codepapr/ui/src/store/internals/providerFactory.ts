@@ -135,7 +135,16 @@ export function shouldUseWorkerAgentRuntime(): boolean {
     return false;
   }
 
-  return true;
+  const override = agentRuntimeOverride();
+  if (override === 'worker') {
+    return true;
+  }
+  if (override === 'main' || override === 'sidecar') {
+    return false;
+  }
+  // Tauri default is the Node sidecar. Worker is emergency rollback only.
+  // Non-Tauri browser (vite preview) still uses a Worker.
+  return !isTauriRuntime();
 }
 
 function isTauriRuntime(): boolean {
@@ -158,7 +167,7 @@ function agentRuntimeOverride(): string | null {
   return null;
 }
 
-/** Desktop P0: Node sidecar unless explicitly rolled back to `worker`. */
+/** Desktop P2: Node sidecar unless explicitly rolled back to `worker` or `main`. */
 export function shouldUseSidecarAgentRuntime(): boolean {
   if (import.meta.env?.MODE === 'test') {
     return false;

@@ -24,10 +24,12 @@ export interface SidecarTransportOptions {
 }
 
 /**
- * One Node sidecar process per transport instance (matches Worker lifetime).
+ * App-level Node sidecar. Session switch detaches without killing the process;
+ * crash recovery passes `{ kill: true }` so Rust starts a fresh Node.
  * Posts are queued until `agent_runtime_start` returns.
  */
 export class SidecarTransport implements AgentRuntimeTransport {
+  readonly kind = 'sidecar' as const;
   private runtimeId: string | null = null;
   private readonly queue: string[] = [];
   private ready = false;
@@ -49,7 +51,6 @@ export class SidecarTransport implements AgentRuntimeTransport {
     try {
       const runtimeId = await invoke<string>('agent_runtime_start');
       if (this.terminated) {
-        await invoke('agent_runtime_stop', { runtimeId }).catch(() => undefined);
         return;
       }
       this.runtimeId = runtimeId;
@@ -112,7 +113,7 @@ export class SidecarTransport implements AgentRuntimeTransport {
     this.errorListeners.push(listener);
   }
 
-  terminate(): void {
+  terminate(options?: { kill?: boolean }): void {
     if (this.terminated) return;
     this.terminated = true;
     this.queue.length = 0;
@@ -124,7 +125,7 @@ export class SidecarTransport implements AgentRuntimeTransport {
     this.unlistenExit = null;
     this.detachHostBridge?.();
     this.detachHostBridge = null;
-    if (runtimeId) {
+    if (options?.kill && runtimeId) {
       void invoke('agent_runtime_stop', { runtimeId }).catch(() => undefined);
     }
   }

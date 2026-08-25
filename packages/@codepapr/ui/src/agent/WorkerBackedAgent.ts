@@ -108,11 +108,9 @@ const STREAM_SNAPSHOT_INTERVAL_MS = 2000;
 // the timeout declares the worker crashed, triggering recovery.
 const WORKER_HEARTBEAT_INTERVAL_MS = 5000;
 const WORKER_HEARTBEAT_TIMEOUT_MS = 15000;
-// A worker that has never answered a pong gets a longer grace window: its
-// first turn pays the full-sync cost (cloning + hashing the whole log),
-// which blocks pong replies — especially right after a page thaw, when
-// WebKit still throttles the process. Declaring it dead after only 15s
-// produces false crashes that cascade through the recovery retries.
+// Worker-only: a never-answered pong gets a longer grace window. The first
+// turn pays the full-sync cost, and WebKit still throttles after a page thaw.
+// Sidecar is a real Node process and uses the normal 15s timeout.
 const WORKER_HEARTBEAT_INITIAL_GRACE_MS = 60000;
 const MAX_WORKER_DIAGNOSTICS = 20;
 // 取消 ACK 宽限：用户点停止后，worker 必须在该窗口内回 canceller ACK，
@@ -178,6 +176,8 @@ export interface AgentRuntimeHandle {
   /** 是否仍有主线程在飞的工具执行（含静默长工具）。空闲看门狗据此
    *  暂停：工具自身的 IPC 超时负责兜底，不能被 5.5 分钟的看门狗误杀（N6）。 */
   hasInflightToolExecutions?(): boolean;
+  /** Sidecar 不在 WKWebView 里跑：隐藏页面 / 解冻宽限对它无效。 */
+  isolatedFromWebKit?(): boolean;
 }
 
 export interface WorkerBackedAgentConfig {
@@ -405,7 +405,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         error.detail,
       );
     });
-    if (typeof document !== 'undefined') {
+    if (!this.isolatedFromWebKit() && typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.handleVisibilityChange);
     }
     this.startHeartbeat();
@@ -446,7 +446,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         this.lastPongAt = Date.now();
         return;
       }
-      const timeout = this.hasReceivedPong
+      const timeout = this.hasReceivedPong || this.isolatedFromWebKit()
         ? WORKER_HEARTBEAT_TIMEOUT_MS
         : WORKER_HEARTBEAT_INITIAL_GRACE_MS;
       if (Date.now() - this.lastPongAt > timeout) {
@@ -483,6 +483,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   isCrashed(): boolean {
     return this.crashed;
+  }
+
+  isolatedFromWebKit(): boolean {
+    return this.transport.kind === 'sidecar';
   }
 
   /** postMessage 统一出口：crashed/destroyed 后 worker 已被 terminate，直接
@@ -586,7 +590,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         };
         this.clearHeartbeat();
       }
-      this.transport.terminate();
+      this.transport.terminate({ kill: true });
       pending.reject(new DOMException('Agent was terminated', 'AbortError'));
       this.pendingRequests.delete(requestId);
       this.activeRequestId = null;
@@ -1336,7 +1340,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.unsubscribePermissionWait = null;
 
     try {
-      this.transport.terminate();
+      this.transport.terminate({ kill: true });
     } catch {
       // already terminated
     }

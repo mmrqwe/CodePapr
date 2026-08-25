@@ -3587,6 +3587,15 @@ describe('shouldDeferIdleWatchdog（N6）', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('sidecar 隔离运行时页面不可见也不推迟看门狗', () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden' });
+    try {
+      expect(shouldDeferIdleWatchdog({ isolatedFromWebKit: () => true })).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe('resetToMessage 撤销（N8）', () => {

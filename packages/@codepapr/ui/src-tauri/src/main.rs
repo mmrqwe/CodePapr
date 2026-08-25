@@ -5,6 +5,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod agent_runtime;
+mod agent_runtime_lsp;
 mod agent_runtime_tools;
 mod app_runtime;
 mod asset_scope;

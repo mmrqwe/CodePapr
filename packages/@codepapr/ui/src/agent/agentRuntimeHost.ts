@@ -11,8 +11,15 @@ export interface AgentRuntimeHost {
 
 /** UI ↔ runtime transport. WorkerBackedAgent talks only through this. */
 export interface AgentRuntimeTransport {
+  /** Sidecar is isolated from WKWebView freeze; Worker is not. */
+  readonly kind?: 'worker' | 'sidecar';
   post(message: MainToAgentWorkerMessage, transfer?: Transferable[]): void;
   addMessageListener(listener: (message: AgentWorkerToMainMessage) => void): void;
   addErrorListener(listener: (error: { message: string; detail?: string }) => void): void;
-  terminate(): void;
+  /**
+   * Detach this transport. Sidecar: omit `kill` to keep the app-level Node
+   * process (session switch sends `init` on a new agent). Pass `{ kill: true }`
+   * after a crash so recovery starts a fresh process.
+   */
+  terminate(options?: { kill?: boolean }): void;
 }

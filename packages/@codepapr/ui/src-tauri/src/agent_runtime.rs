@@ -1,7 +1,9 @@
-//! Node sidecar for the Agent chat loop (P0: leave WKWebView / Web Worker).
+//! Node sidecar for the Agent chat loop.
 //!
-//! One OS process per `agent_runtime_start` call. UI talks NDJSON over stdin/stdout.
-//! P1: `tool-request` for fs/bash/git is executed here instead of WebView JS.
+//! App-level singleton Node process. Session switch reuses the live process
+//! (`init` from the new agent). Crash recovery calls `agent_runtime_stop`
+//! then start. UI talks NDJSON over stdin/stdout.
+//! P2: `tool-request` for fs/bash/git/lsp/images is executed here instead of WebView JS.
 
 use crate::agent_runtime_tools::{self, RuntimeToolContext};
 use crate::lsp_managed_tools;
@@ -54,9 +56,14 @@ struct ExitEvent {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static RUNTIMES: OnceLock<Mutex<HashMap<String, RuntimeProcess>>> = OnceLock::new();
+static START_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn runtimes() -> &'static Mutex<HashMap<String, RuntimeProcess>> {
     RUNTIMES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn start_lock() -> &'static Mutex<()> {
+    START_LOCK.get_or_init(|| Mutex::new(()))
 }
 
 fn lock_runtimes() -> Result<std::sync::MutexGuard<'static, HashMap<String, RuntimeProcess>>, String> {
@@ -292,8 +299,37 @@ fn clear_runtime_meta(runtime_id: &str) {
     }
 }
 
+fn live_runtime_id() -> Result<Option<String>, String> {
+    let mut map = lock_runtimes()?;
+    let mut dead = Vec::new();
+    let mut live = None;
+    for (id, runtime) in map.iter_mut() {
+        match runtime.child.try_wait() {
+            Ok(None) => {
+                live = Some(id.clone());
+                break;
+            }
+            _ => dead.push(id.clone()),
+        }
+    }
+    for id in dead {
+        if let Some(mut runtime) = map.remove(&id) {
+            drop(runtime.stdin);
+            let _ = kill_process_tree(&mut runtime.child);
+        }
+        clear_runtime_meta(&id);
+    }
+    Ok(live)
+}
+
 #[tauri::command]
 pub fn agent_runtime_start(app: AppHandle) -> Result<String, String> {
+    let _guard = start_lock()
+        .lock()
+        .map_err(|_| "agent runtime start lock poisoned".to_string())?;
+    if let Some(existing) = live_runtime_id()? {
+        return Ok(existing);
+    }
     let node = resolve_node()?;
     let script = resolve_sidecar_script(&app)?;
     let mut command = Command::new(&node);
@@ -349,6 +385,9 @@ pub fn agent_runtime_send(runtime_id: String, line: String) -> Result<(), String
 
 #[tauri::command]
 pub fn agent_runtime_stop(runtime_id: String) -> Result<(), String> {
+    let _guard = start_lock()
+        .lock()
+        .map_err(|_| "agent runtime start lock poisoned".to_string())?;
     let runtime = {
         let mut map = lock_runtimes()?;
         map.remove(&runtime_id)
