@@ -884,6 +884,36 @@ describe('WorkerBackedAgent', () => {
     await expect(runPromise).resolves.toMatchObject({ content: 'done' });
   });
 
+  it('tracks rust-hosted tool activity for the idle watchdog', async () => {
+    const agent = createAgent();
+    const runPromise = agent.runAppAgent(
+      { appId: 'app-1', agentName: 'assistant', task: 'go' },
+      undefined,
+      'run-host',
+    );
+    const worker = MockWorker.instances[0];
+    expect(agent.hasInflightToolExecutions()).toBe(false);
+
+    worker?.emit({
+      type: 'tool-host-activity',
+      requestId: 'run-host',
+      toolRequestId: 'run-host:1',
+      phase: 'start',
+    });
+    expect(agent.hasInflightToolExecutions()).toBe(true);
+
+    worker?.emit({
+      type: 'tool-host-activity',
+      requestId: 'run-host',
+      toolRequestId: 'run-host:1',
+      phase: 'end',
+    });
+    expect(agent.hasInflightToolExecutions()).toBe(false);
+
+    worker?.emit({ type: 'app-agent-result', requestId: 'run-host', content: 'done' });
+    await expect(runPromise).resolves.toMatchObject({ content: 'done' });
+  });
+
   it('drops tool requests after an app-agent run was cancelled', async () => {
     const agent = createAgent();
     const runPromise = agent.runAppAgent(

@@ -1,0 +1,1365 @@
+//! P1: execute sidecar `tool-request`s in Rust so bash/fs/git do not wait on WebView JS.
+//!
+//! UI-bound tools (todo, memory, MCP, browser, graph, lsp, question, apps) are
+//! still forwarded to the page. Permission prompts are the exception that may
+//! wait on the UI.
+
+use crate::git_operations;
+use crate::shell::background;
+use crate::shell::sandbox::SandboxAccessArgs;
+use crate::workspace_fs::{self, access::check_external_path};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
+
+pub const PERMISSION_EVENT: &str = "agent-runtime://permission-request";
+pub const PERMISSION_CANCEL_EVENT: &str = "agent-runtime://permission-cancel";
+pub const WORKSPACE_MUTATED_EVENT: &str = "agent-runtime://workspace-mutated";
+
+const RUST_HOSTED_TOOLS: &[&str] = &[
+    "read",
+    "write",
+    "edit",
+    "patch",
+    "grep",
+    "glob",
+    "list",
+    "bash",
+    "git",
+    "workspace_read_file",
+    "workspace_write_file",
+    "workspace_apply_patch",
+    "workspace_apply_diff",
+    "workspace_search_text",
+    "workspace_search_files",
+    "workspace_list_files",
+    "workspace_run_shell_command",
+    "workspace_run_command",
+    "workspace_start_shell_background_command",
+    "workspace_start_background_command",
+    "workspace_list_background_processes",
+    "workspace_stop_background_process",
+    "workspace_stop_all_background_processes",
+    "workspace_git_status",
+    "workspace_git_diff",
+    "workspace_git_history",
+    "workspace_git_branch_checkout",
+    "workspace_git_stage",
+    "workspace_git_commit",
+    "workspace_git_restore",
+];
+
+#[derive(Clone)]
+pub struct RuntimeToolContext {
+    pub workspace_path: String,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppAccess {
+    network: Option<bool>,
+    workspace_write: Option<bool>,
+    allow_codepapr_apps: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolRequest {
+    request_id: String,
+    tool_request_id: String,
+    tool_name: String,
+    #[serde(default)]
+    arguments: Value,
+    app_access: Option<AppAccess>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionRequestEvent {
+    runtime_id: String,
+    request_id: String,
+    path: String,
+    operation: String,
+    workspace_path: String,
+    exists: bool,
+    allow_file: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceMutatedEvent {
+    runtime_id: String,
+    paths: Vec<String>,
+}
+
+struct PermissionDecision {
+    approved: bool,
+    scope: String,
+}
+
+struct HostedOutcome {
+    result: Result<Value, String>,
+    mutated: Vec<String>,
+}
+
+static NEXT_PERMISSION_ID: AtomicU64 = AtomicU64::new(1);
+static PERMISSION_WAITERS: OnceLock<Mutex<HashMap<String, Sender<Result<PermissionDecision, String>>>>> =
+    OnceLock::new();
+static TOOL_CANCELS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+static TOOL_PERMISSION: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn permission_waiters() -> &'static Mutex<HashMap<String, Sender<Result<PermissionDecision, String>>>> {
+    PERMISSION_WAITERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn tool_cancels() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    TOOL_CANCELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn tool_permission() -> &'static Mutex<HashMap<String, String>> {
+    TOOL_PERMISSION.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn should_host_in_rust(message: &Value) -> bool {
+    let Some(name) = message.get("toolName").and_then(Value::as_str) else {
+        return false;
+    };
+    if !RUST_HOSTED_TOOLS.contains(&name) {
+        return false;
+    }
+    let args = message.get("arguments").cloned().unwrap_or(Value::Null);
+    !touches_memory_file(name, &args)
+}
+
+pub fn cancel_hosted_tool(message: &Value) {
+    let Some(tool_request_id) = message
+        .get("toolRequestId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return;
+    };
+    if let Some(flag) = tool_cancels()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .get(&tool_request_id)
+        .cloned()
+    {
+        flag.store(true, Ordering::SeqCst);
+    }
+    let _ = background::cancel_running_command(tool_request_id.clone());
+    if let Some(permission_id) = tool_permission()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .remove(&tool_request_id)
+    {
+        reject_permission(&permission_id, "已取消".to_string());
+    }
+}
+
+#[tauri::command]
+pub fn agent_runtime_permission_respond(
+    request_id: String,
+    approved: bool,
+    scope: String,
+) -> Result<(), String> {
+    let sender = permission_waiters()
+        .lock()
+        .map_err(|_| "permission lock poisoned".to_string())?
+        .remove(&request_id);
+    if let Some(sender) = sender {
+        let _ = sender.send(Ok(PermissionDecision { approved, scope }));
+    }
+    Ok(())
+}
+
+pub fn handle_hosted_tool_request(app: AppHandle, runtime_id: String, message: Value) {
+    let parsed: ToolRequest = match serde_json::from_value(message) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!("[agent-sidecar] tool-request parse failed: {err}");
+            return;
+        }
+    };
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    tool_cancels()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .insert(parsed.tool_request_id.clone(), cancel_flag.clone());
+
+    let activity_start = json!({
+        "type": "tool-host-activity",
+        "requestId": parsed.request_id,
+        "toolRequestId": parsed.tool_request_id,
+        "phase": "start",
+    });
+    let _ = app.emit(
+        crate::agent_runtime::FRAME_EVENT,
+        json!({
+            "runtimeId": runtime_id,
+            "message": activity_start,
+        }),
+    );
+
+    let ctx = match crate::agent_runtime::runtime_tool_context(&runtime_id) {
+        Some(ctx) if !ctx.workspace_path.is_empty() => ctx,
+        _ => {
+            finish_hosted_tool(
+                &app,
+                &runtime_id,
+                &parsed,
+                Err("agent sidecar 尚未收到 workspacePath（等 init）".to_string()),
+                Vec::new(),
+            );
+            return;
+        }
+    };
+
+    let outcome = dispatch_tool(&app, &runtime_id, &ctx, &parsed, &cancel_flag);
+    finish_hosted_tool(
+        &app,
+        &runtime_id,
+        &parsed,
+        outcome.result,
+        outcome.mutated,
+    );
+}
+
+fn finish_hosted_tool(
+    app: &AppHandle,
+    runtime_id: &str,
+    parsed: &ToolRequest,
+    result: Result<Value, String>,
+    mutated: Vec<String>,
+) {
+    tool_cancels()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .remove(&parsed.tool_request_id);
+    tool_permission()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .remove(&parsed.tool_request_id);
+
+    let response = match result {
+        Ok(value) => json!({
+            "type": "tool-response",
+            "payload": {
+                "requestId": parsed.request_id,
+                "toolRequestId": parsed.tool_request_id,
+                "success": true,
+                "result": value,
+            }
+        }),
+        Err(error) => json!({
+            "type": "tool-response",
+            "payload": {
+                "requestId": parsed.request_id,
+                "toolRequestId": parsed.tool_request_id,
+                "success": false,
+                "error": error,
+            }
+        }),
+    };
+    if let Err(err) = crate::agent_runtime::write_sidecar_stdin(runtime_id, &format!("{response}\n")) {
+        eprintln!("[agent-sidecar] write tool-response failed: {err}");
+    }
+
+    if !mutated.is_empty() {
+        let _ = app.emit(
+            WORKSPACE_MUTATED_EVENT,
+            WorkspaceMutatedEvent {
+                runtime_id: runtime_id.to_string(),
+                paths: mutated,
+            },
+        );
+    }
+
+    let activity_end = json!({
+        "type": "tool-host-activity",
+        "requestId": parsed.request_id,
+        "toolRequestId": parsed.tool_request_id,
+        "phase": "end",
+    });
+    let _ = app.emit(
+        crate::agent_runtime::FRAME_EVENT,
+        json!({
+            "runtimeId": runtime_id,
+            "message": activity_end,
+        }),
+    );
+}
+
+fn dispatch_tool(
+    app: &AppHandle,
+    runtime_id: &str,
+    ctx: &RuntimeToolContext,
+    req: &ToolRequest,
+    cancel: &Arc<AtomicBool>,
+) -> HostedOutcome {
+    match dispatch_tool_inner(app, runtime_id, ctx, req, cancel) {
+        Ok(outcome) => outcome,
+        Err(error) => HostedOutcome {
+            result: Err(error),
+            mutated: Vec::new(),
+        },
+    }
+}
+
+fn dispatch_tool_inner(
+    app: &AppHandle,
+    runtime_id: &str,
+    ctx: &RuntimeToolContext,
+    req: &ToolRequest,
+    cancel: &Arc<AtomicBool>,
+) -> Result<HostedOutcome, String> {
+    let name = req.tool_name.as_str();
+    let args = &req.arguments;
+    let include_apps = ctx.mode == "app";
+
+    if cancel.load(Ordering::SeqCst) {
+        return Err("已取消".to_string());
+    }
+
+    match name {
+        "read" | "workspace_read_file" => {
+            let path = require_path(args)?;
+            ensure_codepapr_access(&path, "read", &ctx.mode)?;
+            ensure_external_allowed(app, runtime_id, ctx, req, &path, "read", cancel)?;
+            let result = workspace_fs::read::read_text_file_impl(
+                ctx.workspace_path.clone(),
+                path,
+                arg_usize(args, "maxBytes"),
+                arg_usize(args, "startLine"),
+                arg_usize(args, "endLine"),
+                arg_usize(args, "aroundLine"),
+                arg_usize(args, "contextLines"),
+            )?;
+            Ok(ok_result(result, Vec::new()))
+        }
+        "list" | "workspace_list_files" => {
+            let path = extract_path(args, false)?;
+            if let Some(path) = path.as_ref() {
+                ensure_codepapr_access(path, "list", &ctx.mode)?;
+                ensure_external_allowed(app, runtime_id, ctx, req, path, "list", cancel)?;
+            }
+            let result = workspace_fs::list::list_workspace_files_impl(
+                ctx.workspace_path.clone(),
+                path,
+                arg_usize(args, "maxDepth"),
+                Some(include_apps),
+            )?;
+            Ok(ok_result(result, Vec::new()))
+        }
+        "write" | "workspace_write_file" => {
+            let path = require_path(args)?;
+            let content = arg_string_req(args, &["content"])?;
+            ensure_codepapr_access(&path, "write", &ctx.mode)?;
+            ensure_external_allowed(app, runtime_id, ctx, req, &path, "write", cancel)?;
+            let result = workspace_fs::write::write_text_file_impl(
+                ctx.workspace_path.clone(),
+                path.clone(),
+                content,
+            )?;
+            let mutated = vec![result.path.clone()];
+            Ok(ok_result(result, mutated))
+        }
+        "edit" | "workspace_apply_patch" => {
+            let path = require_path(args)?;
+            ensure_codepapr_access(&path, "write", &ctx.mode)?;
+            ensure_external_allowed(app, runtime_id, ctx, req, &path, "write", cancel)?;
+            let current = workspace_fs::read::read_text_file_impl(
+                ctx.workspace_path.clone(),
+                path.clone(),
+                Some(20_000_000),
+                None,
+                None,
+                None,
+                None,
+            )?;
+            if current.truncated_by_bytes {
+                return Err(format!(
+                    "文件 {path} 超过 20MB 上限，请改用 workspace_write_file 重写整个文件"
+                ));
+            }
+            let patched = apply_search_replace(
+                &current.content,
+                &arg_string_req(args, &["search"])?,
+                &arg_string_req(args, &["replace"])?,
+                arg_bool(args, "replaceAll"),
+                arg_usize(args, "expectedOccurrences"),
+            )?;
+            let result = workspace_fs::write::write_text_file_impl(
+                ctx.workspace_path.clone(),
+                path.clone(),
+                patched.content,
+            )?;
+            let mutated = vec![result.path.clone()];
+            Ok(HostedOutcome {
+                result: Ok(json!({
+                    "path": result.path,
+                    "replacements": patched.replacements,
+                    "bytes": result.bytes,
+                    "change": result.change,
+                })),
+                mutated,
+            })
+        }
+        "patch" | "workspace_apply_diff" => {
+            apply_multi_patch(app, runtime_id, ctx, req, cancel)
+        }
+        "grep" | "workspace_search_text" => {
+            let query = if name == "grep" {
+                arg_string_req(args, &["query"])?
+            } else {
+                arg_string_req(args, &["query", "pattern"])?
+            };
+            let result = workspace_fs::search::search_workspace_text_impl_full(
+                ctx.workspace_path.clone(),
+                query,
+                arg_bool(args, "caseSensitive"),
+                Some(true),
+                arg_usize(args, "contextLines"),
+                arg_usize(args, "maxResults"),
+                arg_usize(args, "maxMatchesPerFile"),
+                arg_usize(args, "maxBytesPerFile"),
+                Some(include_apps),
+                arg_bool(args, "includeIgnoredDirs"),
+            )?;
+            let mut value = serde_json::to_value(result).unwrap_or(Value::Null);
+            if args.get("semantic") == Some(&Value::Bool(true)) {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("degraded".to_string(), json!(true));
+                    let note = "语义搜索在 sidecar 宿主中降级为正则搜索。";
+                    match obj.get("note").and_then(Value::as_str) {
+                        Some(existing) if !existing.is_empty() => {
+                            obj.insert("note".to_string(), json!(format!("{note} {existing}")));
+                        }
+                        _ => {
+                            obj.insert("note".to_string(), json!(note));
+                        }
+                    }
+                }
+            }
+            Ok(HostedOutcome {
+                result: Ok(value),
+                mutated: Vec::new(),
+            })
+        }
+        "glob" | "workspace_search_files" => {
+            let raw_query = arg_string_req(args, &["query"])?;
+            let query = if name == "glob" {
+                glob_to_regex(&raw_query)
+            } else if arg_bool(args, "isRegexp") == Some(true) {
+                raw_query
+            } else {
+                glob_to_regex(&raw_query)
+            };
+            let result = workspace_fs::search::search_workspace_paths_impl_full(
+                ctx.workspace_path.clone(),
+                query,
+                arg_bool(args, "caseSensitive"),
+                Some(true),
+                arg_usize(args, "maxResults"),
+                Some(include_apps),
+                arg_bool(args, "includeIgnoredDirs"),
+            )?;
+            Ok(ok_result(result, Vec::new()))
+        }
+        "bash"
+        | "workspace_run_shell_command"
+        | "workspace_run_command"
+        | "workspace_start_shell_background_command"
+        | "workspace_start_background_command"
+        | "workspace_list_background_processes"
+        | "workspace_stop_background_process"
+        | "workspace_stop_all_background_processes" => {
+            dispatch_bash(app, runtime_id, ctx, req, cancel)
+        }
+        "git"
+        | "workspace_git_status"
+        | "workspace_git_diff"
+        | "workspace_git_history"
+        | "workspace_git_branch_checkout"
+        | "workspace_git_stage"
+        | "workspace_git_commit"
+        | "workspace_git_restore" => dispatch_git(ctx, name, args),
+        other => Err(format!("sidecar 宿主未实现工具: {other}")),
+    }
+}
+
+fn apply_multi_patch(
+    app: &AppHandle,
+    runtime_id: &str,
+    ctx: &RuntimeToolContext,
+    req: &ToolRequest,
+    cancel: &Arc<AtomicBool>,
+) -> Result<HostedOutcome, String> {
+    let patches = req
+        .arguments
+        .get("patches")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "patches 必须是数组".to_string())?;
+    let mut planned: Vec<(String, String)> = Vec::new();
+    for patch in patches {
+        let path = require_path(patch)?;
+        ensure_codepapr_access(&path, "write", &ctx.mode)?;
+        ensure_external_allowed(app, runtime_id, ctx, req, &path, "write", cancel)?;
+        let current = workspace_fs::read::read_text_file_impl(
+            ctx.workspace_path.clone(),
+            path.clone(),
+            Some(20_000_000),
+            None,
+            None,
+            None,
+            None,
+        )?;
+        if current.truncated_by_bytes {
+            return Err(format!("文件 {path} 超过 20MB 上限，无法打补丁"));
+        }
+        let content = match planned.iter().find(|(p, _)| p == &path) {
+            Some((_, existing)) => existing.clone(),
+            None => current.content,
+        };
+        let patched = apply_search_replace(
+            &content,
+            &arg_string_req(patch, &["search"])?,
+            &arg_string_req(patch, &["replace"])?,
+            arg_bool(patch, "replaceAll"),
+            arg_usize(patch, "expectedOccurrences"),
+        )?;
+        if let Some((_, existing)) = planned.iter_mut().find(|(p, _)| p == &path) {
+            *existing = patched.content;
+        } else {
+            planned.push((path, patched.content));
+        }
+    }
+    let mut files = Vec::new();
+    let mut mutated = Vec::new();
+    for (path, content) in planned {
+        let result = workspace_fs::write::write_text_file_impl(
+            ctx.workspace_path.clone(),
+            path.clone(),
+            content,
+        )?;
+        mutated.push(result.path.clone());
+        files.push(json!({
+            "path": result.path,
+            "bytes": result.bytes,
+            "change": result.change,
+        }));
+    }
+    Ok(HostedOutcome {
+        result: Ok(json!({
+            "files": files,
+            "totalFiles": files.len(),
+            "totalPatches": patches.len(),
+        })),
+        mutated,
+    })
+}
+
+fn dispatch_bash(
+    app: &AppHandle,
+    runtime_id: &str,
+    ctx: &RuntimeToolContext,
+    req: &ToolRequest,
+    cancel: &Arc<AtomicBool>,
+) -> Result<HostedOutcome, String> {
+    let args = &req.arguments;
+    let action = arg_string(args, &["action"]).unwrap_or_else(|| "run".to_string());
+    if req.tool_name == "workspace_list_background_processes" || action == "list" {
+        let result = background::list_background_processes(Some(ctx.workspace_path.clone()))?;
+        return Ok(ok_result(result, Vec::new()));
+    }
+    if req.tool_name == "workspace_stop_background_process" || action == "stop" {
+        let pid = arg_u32(args, "pid").ok_or_else(|| "pid 必须是数字".to_string())?;
+        let result = background::stop_background_process(pid, Some("sidecar-tool".to_string()))?;
+        return Ok(ok_result(result, Vec::new()));
+    }
+    if req.tool_name == "workspace_stop_all_background_processes" || action == "stop_all" {
+        let result = background::stop_all_background_processes(
+            Some(ctx.workspace_path.clone()),
+            Some("sidecar-tool".to_string()),
+        )?;
+        return Ok(ok_result(result, Vec::new()));
+    }
+
+    let command = arg_string_req(args, &["command"])?;
+    let workdir = arg_string(args, &["workdir"]);
+    if let Some(dir) = workdir.as_deref() {
+        ensure_codepapr_access(dir, "execute", &ctx.mode)?;
+        ensure_external_allowed(app, runtime_id, ctx, req, dir, "execute", cancel)?;
+    }
+    ensure_shell_codepapr(&command, workdir.as_deref(), &ctx.mode)?;
+    for candidate in extract_absolute_command_paths(&command) {
+        ensure_external_allowed(app, runtime_id, ctx, req, &candidate, "execute", cancel)?;
+    }
+
+    let sandbox = sandbox_from_access(&ctx.mode, req.app_access.as_ref());
+    let timeout = arg_u64(args, "timeoutSeconds").or_else(|| arg_u64(args, "timeout"));
+    let background_run = arg_bool(args, "background") == Some(true)
+        || req.tool_name == "workspace_start_shell_background_command"
+        || req.tool_name == "workspace_start_background_command";
+
+    if background_run {
+        let result = if req.tool_name == "workspace_start_background_command" {
+            background::start_workspace_background_command(
+                ctx.workspace_path.clone(),
+                command,
+                arg_string_vec(args, "args"),
+                workdir,
+                arg_string(args, &["previewUrl"]),
+                Some(sandbox),
+                None,
+            )?
+        } else {
+            background::start_workspace_shell_background_command(
+                ctx.workspace_path.clone(),
+                command,
+                workdir,
+                arg_string(args, &["previewUrl"]),
+                Some(sandbox),
+            )?
+        };
+        return Ok(ok_result(result, Vec::new()));
+    }
+
+    if req.tool_name == "workspace_run_command" {
+        let result = background::run_workspace_command_impl(
+            ctx.workspace_path.clone(),
+            command,
+            arg_string_vec(args, "args"),
+            timeout,
+            workdir,
+            Some(req.tool_request_id.clone()),
+        )?;
+        return Ok(ok_result(result, Vec::new()));
+    }
+
+    let result = background::run_workspace_shell_command_impl(
+        ctx.workspace_path.clone(),
+        command,
+        workdir,
+        timeout,
+        Some(sandbox),
+        Some(req.tool_request_id.clone()),
+    )?;
+    Ok(ok_result(result, Vec::new()))
+}
+
+fn dispatch_git(ctx: &RuntimeToolContext, name: &str, args: &Value) -> Result<HostedOutcome, String> {
+    let workspace = Path::new(&ctx.workspace_path);
+    let action = if name == "git" {
+        arg_string_req(args, &["action"])?
+    } else {
+        name.trim_start_matches("workspace_git_").to_string()
+    };
+    let mapped = match action.as_str() {
+        "status" | "workspace_git_status" => {
+            let status = crate::shared::with_workspace_git_read_lock(workspace, || {
+                git_operations::status::git_status_impl(workspace)
+            });
+            json!({
+                "available": status.available,
+                "isRepo": status.is_repo,
+                "files": status.entries.iter().map(|entry| json!({
+                    "path": entry.path,
+                    "originalPath": entry.old_path,
+                    "indexStatus": entry.index_status,
+                    "worktreeStatus": entry.worktree_status,
+                    "isUntracked": entry.is_untracked,
+                })).collect::<Vec<_>>(),
+                "raw": "",
+                "branch": status.branch,
+                "headShort": status.head_short,
+                "message": status.message,
+            })
+        }
+        "diff" | "workspace_git_diff" => {
+            let staged = arg_bool(args, "staged").unwrap_or(false);
+            let pathspecs = arg_string_vec(args, "pathspecs").unwrap_or_default();
+            let diff = crate::shared::with_workspace_git_read_lock(workspace, || {
+                git_operations::diff::git_diff_impl(workspace, staged, &pathspecs)
+            });
+            json!({
+                "available": diff.available,
+                "isRepo": true,
+                "staged": staged,
+                "pathspecs": pathspecs,
+                "stat": diff.stat,
+                "diff": diff.diff,
+                "truncated": diff.truncated,
+                "message": diff.message,
+            })
+        }
+        "log" | "history" | "workspace_git_history" => {
+            let limit = arg_usize(args, "limit").unwrap_or(20).min(100);
+            let entries = crate::shared::with_workspace_git_read_lock(workspace, || {
+                git_operations::log::git_log_impl(workspace, limit)
+            });
+            json!({
+                "available": true,
+                "isRepo": true,
+                "entries": entries.iter().map(|entry| json!({
+                    "hash": entry.sha,
+                    "shortHash": entry.short_hash,
+                    "committedAt": chrono_like_iso(entry.timestamp),
+                    "authorName": entry.author,
+                    "refNames": entry.refs,
+                    "subject": entry.message,
+                    "isHead": entry.is_head,
+                })).collect::<Vec<_>>(),
+                "raw": "",
+            })
+        }
+        "branch" | "workspace_git_branch_checkout" => {
+            let branch_name = arg_string_req(args, &["branchName"])?;
+            git_operations::validate_git_ref(&branch_name, "branchName")?;
+            if let Some(start) = arg_string(args, &["startPoint"]) {
+                git_operations::validate_git_ref(&start, "startPoint")?;
+            }
+            let result = crate::shared::with_workspace_git_write_lock(workspace, || {
+                git_operations::branch::git_branch_checkout_impl(
+                    workspace,
+                    &branch_name,
+                    arg_bool(args, "create").unwrap_or(false),
+                    arg_bool(args, "createIfMissing").unwrap_or(true),
+                    arg_string(args, &["startPoint"]).as_deref(),
+                )
+            });
+            git_op_json("branch_checkout", result)
+        }
+        "stage" | "workspace_git_stage" => {
+            let pathspecs = arg_string_vec(args, "pathspecs").unwrap_or_default();
+            let stage_all = arg_bool(args, "all").unwrap_or(pathspecs.is_empty());
+            let result = crate::shared::with_workspace_git_write_lock(workspace, || {
+                git_operations::stage::git_stage_impl(workspace, stage_all, &pathspecs)
+            });
+            git_op_json("stage", result)
+        }
+        "commit" | "workspace_git_commit" => {
+            let message = arg_string_req(args, &["message"])?;
+            let pathspecs = arg_string_vec(args, "pathspecs").unwrap_or_default();
+            let result = crate::shared::with_workspace_git_write_lock(workspace, || {
+                git_operations::commit::git_commit_impl(
+                    workspace,
+                    &message,
+                    arg_bool(args, "stageAll").unwrap_or(false),
+                    &pathspecs,
+                    arg_bool(args, "allowEmpty").unwrap_or(false),
+                )
+            });
+            git_op_json("commit", result)
+        }
+        "restore" | "workspace_git_restore" => {
+            if let Some(source) = arg_string(args, &["source"]) {
+                git_operations::validate_git_ref(&source, "source")?;
+            }
+            let pathspecs = arg_string_vec(args, "pathspecs").unwrap_or_default();
+            let result = crate::shared::with_workspace_git_write_lock(workspace, || {
+                git_operations::restore_files::git_restore_files_impl(
+                    workspace,
+                    &pathspecs,
+                    arg_string(args, &["source"]).as_deref(),
+                    arg_bool(args, "includeUntracked"),
+                )
+            });
+            git_op_json("restore", result)
+        }
+        other => return Err(format!("未知的 git action: {other}")),
+    };
+    Ok(HostedOutcome {
+        result: Ok(mapped),
+        mutated: Vec::new(),
+    })
+}
+
+fn git_op_json(action: &str, result: crate::snapshot::types::GitOperationResult) -> Value {
+    json!({
+        "available": true,
+        "isRepo": true,
+        "ok": result.ok,
+        "raw": result.message,
+        "action": action,
+        "message": result.message,
+        "backupBranch": result.backup_ref,
+    })
+}
+
+fn sandbox_from_access(mode: &str, access: Option<&AppAccess>) -> SandboxAccessArgs {
+    let allow_apps = mode == "app" || access.map(|a| a.allow_codepapr_apps.unwrap_or(true)).unwrap_or(false);
+    if let Some(access) = access {
+        SandboxAccessArgs {
+            network: access.network.unwrap_or(true),
+            workspace_write: access.workspace_write.unwrap_or(true),
+            allow_bind: false,
+            allow_codepapr_apps: allow_apps,
+        }
+    } else {
+        SandboxAccessArgs {
+            network: true,
+            workspace_write: true,
+            allow_bind: false,
+            allow_codepapr_apps: allow_apps,
+        }
+    }
+}
+
+fn ensure_external_allowed(
+    app: &AppHandle,
+    runtime_id: &str,
+    ctx: &RuntimeToolContext,
+    req: &ToolRequest,
+    path: &str,
+    operation: &str,
+    cancel: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    if !is_absolute_path(path) {
+        return Ok(());
+    }
+    let check = check_external_path(ctx.workspace_path.clone(), path.to_string())?;
+    if check.in_workspace || check.allowed {
+        return Ok(());
+    }
+    if check.protected {
+        return Err(format!(
+            "安全限制：禁止访问受保护的隐藏目录 {}",
+            check.canonical_path
+        ));
+    }
+    if cancel.load(Ordering::SeqCst) {
+        return Err("已取消".to_string());
+    }
+
+    let permission_id = format!(
+        "perm-{}",
+        NEXT_PERMISSION_ID.fetch_add(1, Ordering::Relaxed)
+    );
+    let (tx, rx) = mpsc::channel();
+    permission_waiters()
+        .lock()
+        .map_err(|_| "permission lock poisoned".to_string())?
+        .insert(permission_id.clone(), tx);
+    tool_permission()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .insert(req.tool_request_id.clone(), permission_id.clone());
+
+    let _ = crate::agent_runtime::write_sidecar_stdin(
+        runtime_id,
+        &format!("{}\n", json!({ "type": "permission-wait", "waiting": true })),
+    );
+    let _ = app.emit(
+        PERMISSION_EVENT,
+        PermissionRequestEvent {
+            runtime_id: runtime_id.to_string(),
+            request_id: permission_id.clone(),
+            path: if check.exists {
+                check.canonical_path.clone()
+            } else {
+                path.to_string()
+            },
+            operation: operation.to_string(),
+            workspace_path: ctx.workspace_path.clone(),
+            exists: check.exists,
+            allow_file: check.exists,
+        },
+    );
+
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            let _ = app.emit(
+                PERMISSION_CANCEL_EVENT,
+                json!({ "runtimeId": runtime_id, "requestId": permission_id }),
+            );
+            reject_permission(&permission_id, "已取消".to_string());
+            let _ = crate::agent_runtime::write_sidecar_stdin(
+                runtime_id,
+                &format!("{}\n", json!({ "type": "permission-wait", "waiting": false })),
+            );
+            return Err("已取消".to_string());
+        }
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(Ok(decision)) => {
+                let _ = crate::agent_runtime::write_sidecar_stdin(
+                    runtime_id,
+                    &format!("{}\n", json!({ "type": "permission-wait", "waiting": false })),
+                );
+                if !decision.approved {
+                    return Err(format!("用户拒绝访问外部路径：{}", check.canonical_path));
+                }
+                crate::workspace_fs::access::grant_external_access(
+                    ctx.workspace_path.clone(),
+                    check.canonical_path.clone(),
+                    decision.scope,
+                )?;
+                return Ok(());
+            }
+            Ok(Err(err)) => {
+                let _ = crate::agent_runtime::write_sidecar_stdin(
+                    runtime_id,
+                    &format!("{}\n", json!({ "type": "permission-wait", "waiting": false })),
+                );
+                return Err(err);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = crate::agent_runtime::write_sidecar_stdin(
+                    runtime_id,
+                    &format!("{}\n", json!({ "type": "permission-wait", "waiting": false })),
+                );
+                return Err("权限请求已取消".to_string());
+            }
+        }
+    }
+}
+
+fn reject_permission(request_id: &str, error: String) {
+    if let Some(sender) = permission_waiters()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .remove(request_id)
+    {
+        let _ = sender.send(Err(error));
+    }
+}
+
+fn ok_result<T: Serialize>(value: T, mutated: Vec<String>) -> HostedOutcome {
+    HostedOutcome {
+        result: serde_json::to_value(value).map_err(|err| err.to_string()),
+        mutated,
+    }
+}
+
+pub(crate) fn glob_to_regex(glob: &str) -> String {
+    let mut pattern = String::from("^");
+    let chars: Vec<char> = glob.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '*' {
+            if chars.get(i + 1) == Some(&'*') {
+                i += 1;
+                if chars.get(i + 1) == Some(&'/') {
+                    i += 1;
+                    pattern.push_str("(.*/)?");
+                } else {
+                    pattern.push_str(".*");
+                }
+            } else {
+                pattern.push_str("[^/]*");
+            }
+        } else if ch == '?' {
+            pattern.push_str("[^/]");
+        } else if ".+^${}()|[]\\".contains(ch) {
+            pattern.push('\\');
+            pattern.push(ch);
+        } else {
+            pattern.push(ch);
+        }
+        i += 1;
+    }
+    pattern.push('$');
+    pattern
+}
+
+#[derive(Debug)]
+pub(crate) struct PatchedContent {
+    content: String,
+    replacements: usize,
+}
+
+pub(crate) fn apply_search_replace(
+    content: &str,
+    search: &str,
+    replace: &str,
+    replace_all: Option<bool>,
+    expected_occurrences: Option<usize>,
+) -> Result<PatchedContent, String> {
+    if search.is_empty() {
+        return Err("search 不能为空".to_string());
+    }
+    let file_has_crlf = content.contains("\r\n");
+    let search_lf = search.replace("\r\n", "\n");
+    let replace_lf = replace.replace("\r\n", "\n");
+    let content_lf = if file_has_crlf {
+        content.replace("\r\n", "\n")
+    } else {
+        content.to_string()
+    };
+    let occurrences = content_lf.matches(&search_lf).count();
+    if occurrences == 0 {
+        let hint = if search.contains("\r\n") && !file_has_crlf {
+            "（文件使用 LF 换行，但 search 使用了 CRLF）"
+        } else if !search.contains("\r\n") && file_has_crlf {
+            "（文件使用 CRLF 换行，但 search 使用了 LF）"
+        } else {
+            ""
+        };
+        return Err(format!("未找到要替换的文本块{hint}"));
+    }
+    if let Some(expected) = expected_occurrences {
+        if expected != occurrences {
+            return Err(format!(
+                "预期匹配 {expected} 处，实际匹配 {occurrences} 处"
+            ));
+        }
+    }
+    if occurrences > 1 && replace_all != Some(true) {
+        let extra = if expected_occurrences.is_some() {
+            "（expectedOccurrences 只能校验数量，不能消歧；请加长 search 或设置 replaceAll=true）"
+        } else {
+            ""
+        };
+        return Err(format!(
+            "匹配到 {occurrences} 处文本块，请改用更精确的 search 或设置 replaceAll=true{extra}"
+        ));
+    }
+    let replacements = if replace_all == Some(true) {
+        occurrences
+    } else {
+        1
+    };
+    let patched_lf = if replace_all == Some(true) {
+        content_lf.replace(&search_lf, &replace_lf)
+    } else {
+        content_lf.replacen(&search_lf, &replace_lf, 1)
+    };
+    let content = if file_has_crlf {
+        patched_lf.replace('\n', "\r\n")
+    } else {
+        patched_lf
+    };
+    Ok(PatchedContent {
+        content,
+        replacements,
+    })
+}
+
+pub(crate) fn is_memory_file_path(relative_path: &str) -> bool {
+    let normalized = relative_path
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .replace("//", "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase();
+    normalized == ".codepapr/memory.md"
+}
+
+fn touches_memory_file(name: &str, args: &Value) -> bool {
+    if matches!(
+        name,
+        "write" | "edit" | "patch" | "workspace_write_file" | "workspace_apply_patch" | "workspace_apply_diff"
+    ) {
+        if let Ok(path) = extract_path(args, false) {
+            if path.as_deref().is_some_and(is_memory_file_path) {
+                return true;
+            }
+        }
+        if let Some(patches) = args.get("patches").and_then(Value::as_array) {
+            return patches.iter().any(|patch| {
+                extract_path(patch, false)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|path| is_memory_file_path(&path))
+            });
+        }
+    }
+    false
+}
+
+fn ensure_codepapr_access(path: &str, op: &str, mode: &str) -> Result<(), String> {
+    let Some(suffix) = codepapr_suffix(path) else {
+        return Ok(());
+    };
+    if is_allowed_codepapr_suffix(&suffix, op, mode) {
+        return Ok(());
+    }
+    Err(format!(
+        "无法访问「{path}」：.CodePapr 由 CodePapr 运行时管理。Agent 请使用 skill / 项目配置界面；草稿可用 .CodePapr/tmp、tool-output、downloads。"
+    ))
+}
+
+fn ensure_shell_codepapr(command: &str, workdir: Option<&str>, mode: &str) -> Result<(), String> {
+    if let Some(dir) = workdir {
+        ensure_codepapr_access(dir, "execute", mode)?;
+    }
+    for token in command.split(|ch: char| " \t\"'`=<>|;&()".contains(ch)) {
+        let token = token.trim_end_matches(|ch: char| ",.;".contains(ch));
+        if token.is_empty() || codepapr_suffix(token).is_none() {
+            continue;
+        }
+        ensure_codepapr_access(token, "execute", mode)?;
+    }
+    Ok(())
+}
+
+fn codepapr_suffix(path: &str) -> Option<String> {
+    let normalized = path.replace('\\', "/");
+    let parts: Vec<&str> = normalized
+        .split('/')
+        .map(str::trim)
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+    let index = parts
+        .iter()
+        .position(|part| part.eq_ignore_ascii_case(".codepapr"))?;
+    Some(parts[index + 1..].join("/"))
+}
+
+fn is_allowed_codepapr_suffix(suffix: &str, op: &str, mode: &str) -> bool {
+    if suffix.is_empty() {
+        return false;
+    }
+    let first = suffix.split('/').next().unwrap_or("").to_ascii_lowercase();
+    matches!(
+        first.as_str(),
+        "tmp" | "tool-output" | "downloads" | "screenshots" | "images" | "assets" | "fixtures"
+    ) || (first == "skills" && op != "write")
+        || (first == "apps" && mode == "app")
+}
+
+fn is_absolute_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    normalized.starts_with('/') || {
+        let bytes = normalized.as_bytes();
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
+    }
+}
+
+fn extract_absolute_command_paths(command: &str) -> Vec<String> {
+    let skip = sandbox_skip_prefixes();
+    let mut out = Vec::new();
+    for part in command.split(|ch: char| " \t\"'`=<>|;&()".contains(ch)) {
+        let candidate = part
+            .trim_matches(|ch: char| ",.;".contains(ch))
+            .replace('\\', "/");
+        if !(candidate.starts_with('/') || is_absolute_path(&candidate)) {
+            continue;
+        }
+        if skip.iter().any(|prefix| candidate.starts_with(prefix)) {
+            continue;
+        }
+        if !out.contains(&candidate) {
+            out.push(candidate);
+        }
+    }
+    out
+}
+
+fn sandbox_skip_prefixes() -> Vec<String> {
+    let mut prefixes = vec![
+        "/bin/".to_string(),
+        "/sbin/".to_string(),
+        "/usr/bin/".to_string(),
+        "/usr/sbin/".to_string(),
+        "/usr/local/bin/".to_string(),
+        "/opt/homebrew/bin/".to_string(),
+        "/opt/homebrew/".to_string(),
+    ];
+    if let Ok(path) = std::env::var("PATH") {
+        for entry in path.split(':').filter(|entry| !entry.is_empty()) {
+            prefixes.push(format!("{entry}/"));
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        for name in [".npm", ".cache", ".cargo", ".local/share", ".nvm", ".volta"] {
+            prefixes.push(format!("{home}/{name}/"));
+        }
+    }
+    prefixes
+}
+
+fn require_path(args: &Value) -> Result<String, String> {
+    extract_path(args, false)?.ok_or_else(|| "relativePath 必须是字符串".to_string())
+}
+
+fn extract_path(args: &Value, _required: bool) -> Result<Option<String>, String> {
+    for key in [
+        "relativePath",
+        "path",
+        "filePath",
+        "file_path",
+        "imagePath",
+        "image_path",
+        "file",
+        "src",
+    ] {
+        if let Some(value) = arg_string(args, &[key]) {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+fn arg_string(args: &Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(value) = args.get(*key).and_then(Value::as_str) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn arg_string_req(args: &Value, keys: &[&str]) -> Result<String, String> {
+    arg_string(args, keys).ok_or_else(|| format!("{} 必须是字符串", keys[0]))
+}
+
+fn arg_bool(args: &Value, key: &str) -> Option<bool> {
+    args.get(key).and_then(Value::as_bool)
+}
+
+fn arg_usize(args: &Value, key: &str) -> Option<usize> {
+    args.get(key).and_then(Value::as_u64).map(|n| n as usize)
+}
+
+fn arg_u64(args: &Value, key: &str) -> Option<u64> {
+    args.get(key).and_then(Value::as_u64)
+}
+
+fn arg_u32(args: &Value, key: &str) -> Option<u32> {
+    args.get(key).and_then(Value::as_u64).map(|n| n as u32)
+}
+
+fn arg_string_vec(args: &Value, key: &str) -> Option<Vec<String>> {
+    args.get(key).and_then(Value::as_array).map(|items| {
+        items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    })
+}
+
+fn chrono_like_iso(timestamp: i64) -> String {
+    // Keep a stable UTC-ish ISO without pulling chrono. JS used toISOString().
+    let secs = timestamp.max(0) as u64;
+    let days = secs / 86_400;
+    let rem = secs % 86_400;
+    let hour = rem / 3600;
+    let min = (rem % 3600) / 60;
+    let sec = rem % 60;
+    let mut y = 1970u64;
+    let mut remain_days = days;
+    loop {
+        let len = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if remain_days < len {
+            break;
+        }
+        remain_days -= len;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let mdays = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut month = 1u64;
+    for dim in mdays {
+        if remain_days < dim {
+            break;
+        }
+        remain_days -= dim;
+        month += 1;
+    }
+    let day = remain_days + 1;
+    format!("{y:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}.000Z")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rust_hosted_allowlist_covers_hot_path() {
+        let read = json!({ "toolName": "read", "arguments": { "relativePath": "src/a.ts" } });
+        assert!(should_host_in_rust(&read));
+        let todo = json!({ "toolName": "todo", "arguments": {} });
+        assert!(!should_host_in_rust(&todo));
+        let memory = json!({
+            "toolName": "write",
+            "arguments": { "relativePath": ".CodePapr/memory.md", "content": "x" }
+        });
+        assert!(!should_host_in_rust(&memory));
+        let lsp = json!({ "toolName": "lsp", "arguments": { "action": "hover" } });
+        assert!(!should_host_in_rust(&lsp));
+    }
+
+    #[test]
+    fn glob_starstar_matches_ts() {
+        assert_eq!(glob_to_regex("**/*.ts"), "^(.*/)?[^/]*\\.ts$");
+        assert_eq!(glob_to_regex("src/*.rs"), "^src/[^/]*\\.rs$");
+    }
+
+    #[test]
+    fn read_write_edit_roundtrip_on_disk() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-host-tools");
+        std::fs::write(ws.file_path("note.txt"), "alpha\n").unwrap();
+        crate::workspace_fs::write::write_text_file_impl(
+            ws.workspace_arg(),
+            "note.txt".to_string(),
+            "alpha\nbeta\n".to_string(),
+        )
+        .unwrap();
+        let read = crate::workspace_fs::read::read_text_file_impl(
+            ws.workspace_arg(),
+            "note.txt".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(read.content.contains("beta"));
+        let patched = apply_search_replace(&read.content, "beta", "gamma", None, None).unwrap();
+        assert_eq!(patched.replacements, 1);
+        assert!(patched.content.contains("gamma"));
+        assert!(!patched.content.contains("beta"));
+    }
+
+    #[test]
+    fn search_replace_single_and_all() {
+        let one = apply_search_replace("hello world\n", "world", "there", None, None).unwrap();
+        assert_eq!(one.content, "hello there\n");
+        assert_eq!(one.replacements, 1);
+        let all = apply_search_replace("a\na\n", "a", "b", Some(true), None).unwrap();
+        assert_eq!(all.content, "b\nb\n");
+        assert_eq!(all.replacements, 2);
+        let err = apply_search_replace("hello", "missing", "x", None, None).unwrap_err();
+        assert!(err.contains("未找到"));
+    }
+
+    #[test]
+    fn codepapr_gate_blocks_config_and_allows_scratch() {
+        assert!(ensure_codepapr_access(".CodePapr/AGENTS.md", "read", "agent").is_err());
+        assert!(ensure_codepapr_access(".CodePapr/tmp/out.txt", "write", "agent").is_ok());
+        assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "agent").is_err());
+        assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "app").is_ok());
+    }
+}

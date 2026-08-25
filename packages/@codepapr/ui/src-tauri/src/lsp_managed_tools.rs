@@ -2123,6 +2123,10 @@ fn managed_java_executable(java_root: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_file())
 }
 
+pub(crate) fn find_managed_node_command() -> Option<PathBuf> {
+    managed_node_runtime_from_roots(&managed_tool_roots()).map(|runtime| runtime.command)
+}
+
 fn managed_node_runtime_from_roots(roots: &[PathBuf]) -> Option<ManagedNodeRuntime> {
     roots
         .iter()

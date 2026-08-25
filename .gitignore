@@ -20,6 +20,7 @@ dist/
 .scratch/
 .ProjectGraph/
 packages/@codepapr/ui/generated/
+packages/@codepapr/ui/dist-sidecar/
 packages/@codepapr/ui/src-tauri/generated/
 packages/@codepapr/ui/src-tauri/target/
 Release/

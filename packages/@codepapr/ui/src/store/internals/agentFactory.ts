@@ -28,6 +28,7 @@ import {
 } from '../../agent/WorkerBackedAgent';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import { createContextCompactionHandler } from '../../agent/compactionHandler';
+import { SidecarTransport } from '../../agent/sidecarTransport';
 import { registerWorkspaceTools } from '../../tools/workspaceTools';
 import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTool';
 
@@ -37,6 +38,7 @@ import { registerTodoListTools } from '../../tools/todoListTool';
 import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
 import {
   buildProviderInstance,
+  shouldUseSidecarAgentRuntime,
   shouldUseWorkerAgentRuntime,
   toWorkerAgentSettings,
 } from './providerFactory';
@@ -535,7 +537,7 @@ export function createAgent(
     buildAgentSessionBootstrapPrompt(settings, workspacePath, runtime.skillDefinitions ?? []);
 
   try {
-    if (shouldUseWorkerAgentRuntime()) {
+    if (shouldUseSidecarAgentRuntime() || shouldUseWorkerAgentRuntime()) {
       const provider = resolveProviderName(settings);
       return new WorkerBackedAgent({
         sessionId,
@@ -597,10 +599,13 @@ export function createAgent(
         onStreamSnapshot: runtime.onStreamSnapshot,
         onRefreshBootstrap: buildBootstrapRefresher(settings, workspacePath, runtime),
         onMidLoopCompactionCommit: runtime.onMidLoopCompactionCommit,
+        ...(shouldUseSidecarAgentRuntime()
+          ? { transport: new SidecarTransport({ onWorkspaceMutated }) }
+          : {}),
       });
     }
   } catch (e) {
-    console.warn('[Agent] Worker init failed, falling back to main-thread agent:', e);
+    console.warn('[Agent] Isolated runtime init failed, falling back to main-thread agent:', e);
   }
 
   return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime);

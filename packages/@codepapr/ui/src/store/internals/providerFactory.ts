@@ -137,3 +137,41 @@ export function shouldUseWorkerAgentRuntime(): boolean {
 
   return true;
 }
+
+function isTauriRuntime(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+function agentRuntimeOverride(): string | null {
+  try {
+    const fromStorage = localStorage.getItem('codepapr-agent-runtime');
+    if (fromStorage && fromStorage.trim()) {
+      return fromStorage.trim().toLowerCase();
+    }
+  } catch {
+    // private mode / non-browser
+  }
+  const fromEnv = import.meta.env?.VITE_AGENT_RUNTIME;
+  if (typeof fromEnv === 'string' && fromEnv.trim()) {
+    return fromEnv.trim().toLowerCase();
+  }
+  return null;
+}
+
+/** Desktop P0: Node sidecar unless explicitly rolled back to `worker`. */
+export function shouldUseSidecarAgentRuntime(): boolean {
+  if (import.meta.env?.MODE === 'test') {
+    return false;
+  }
+  if (typeof navigator !== 'undefined' && /jsdom|happy-dom/i.test(navigator.userAgent)) {
+    return false;
+  }
+  const override = agentRuntimeOverride();
+  if (override === 'worker' || override === 'main') {
+    return false;
+  }
+  if (override === 'sidecar') {
+    return true;
+  }
+  return isTauriRuntime();
+}

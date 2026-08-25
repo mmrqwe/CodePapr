@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.codepapr.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run build:sidecar && npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
@@ -35,7 +35,8 @@
     "shortDescription": "CodePapr - DeepSeek Cache-Optimized Local AI Coding Agent",
     "longDescription": "CodePapr is a local-first coding agent runtime with CLI automation, built on Tauri 2. It features DeepSeek prefix cache optimization, multi-agent collaboration, ProjectGraph semantic analysis, LSP support for 15+ languages, and TodoList task planning -- all running natively on your machine.",
     "resources": [
-      "../generated/lsp-tools/**/*"
+      "../generated/lsp-tools/**/*",
+      "../dist-sidecar/agent-runtime.mjs"
     ],
     "icon": [
       "icons/32x32.png",

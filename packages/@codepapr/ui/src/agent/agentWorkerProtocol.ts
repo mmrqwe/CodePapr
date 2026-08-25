@@ -389,6 +389,13 @@ export type AgentWorkerToMainMessage =
       toolRequestId: string;
     }
   | {
+      /** P1: Rust hosted a tool; UI tracks inflight for the idle watchdog only. */
+      type: 'tool-host-activity';
+      requestId: string;
+      toolRequestId: string;
+      phase: 'start' | 'end';
+    }
+  | {
       type: 'proxy-chat';
       requestId: string;
       proxyChatId: string;

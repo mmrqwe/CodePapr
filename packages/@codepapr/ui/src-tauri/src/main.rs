@@ -4,6 +4,8 @@
 // documentation; all unsafe is reviewed.
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod agent_runtime;
+mod agent_runtime_tools;
 mod app_runtime;
 mod asset_scope;
 mod browser;
@@ -469,7 +471,11 @@ fn main() {
             papr_runtime::services::papr_fs_exists,
             papr_runtime::services::papr_delete_app,
             power::prevent_idle_sleep,
-            power::allow_idle_sleep
+            power::allow_idle_sleep,
+            agent_runtime::agent_runtime_start,
+            agent_runtime::agent_runtime_send,
+            agent_runtime::agent_runtime_stop,
+            agent_runtime_tools::agent_runtime_permission_respond
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -546,6 +552,7 @@ fn run_shutdown_cleanup() {
         return;
     }
     lsp::stop_all_servers();
+    agent_runtime::stop_all();
     tts::tts_server_stop_internal();
     tts::finetune::cancel();
     tts::installer::cancel();

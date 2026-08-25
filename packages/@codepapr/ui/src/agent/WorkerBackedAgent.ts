@@ -40,6 +40,8 @@ import {
   pushSubagentStep,
   completeSubagentProgress,
 } from '../utils/subagentProgress';
+import type { AgentRuntimeTransport } from './agentRuntimeHost';
+import { WorkerTransport } from './workerTransport';
 
 function resolveWorkerMultimodalEnabled(settings: WorkerAgentSettings, currentModel: string): boolean {
   if (!settings.multimodalEnabled) return false;
@@ -205,6 +207,8 @@ export interface WorkerBackedAgentConfig {
   /** PR1（ADR-005）：worker 产出 mid-loop 压缩提交数据后，由主线程 Store
    *  校验并单事务持久化 surface/compaction 记录。 */
   onMidLoopCompactionCommit?: (commit: MidLoopCompactionCommit) => Promise<void> | void;
+  /** Defaults to a Web Worker. Desktop P0 uses a Node sidecar transport. */
+  transport?: AgentRuntimeTransport;
 }
 
 function stableStringify(value: unknown): string {
@@ -302,7 +306,7 @@ export function getActiveAgent(): WorkerBackedAgent | null {
 }
 
 export class WorkerBackedAgent implements AgentRuntimeHandle {
-  private readonly worker: Worker;
+  private readonly transport: AgentRuntimeTransport;
   private readonly logStore: AppendOnlyLog;
   private readonly toolDefinitions: IToolDefinition[];
   private readonly toolExecutor: WorkerToolExecutor;
@@ -378,9 +382,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     const toolBridge = createWorkerToolExecutor(config);
     this.toolDefinitions = toolBridge.toolDefinitions;
     this.toolExecutor = toolBridge.execute;
-    this.worker = new Worker(new URL('./agentRuntime.worker.ts', import.meta.url), {
-      type: 'module',
-    });
+    this.transport = config.transport ?? new WorkerTransport();
     this.unsubscribePermissionWait = subscribePermissionWait((waiting) => {
       this.permissionWaitActive = waiting;
       for (const requestId of this.appAgentRequests.keys()) {
@@ -396,16 +398,20 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       }
       this.postToWorker({ type: 'permission-wait', waiting } satisfies MainToAgentWorkerMessage);
     });
-    this.worker.addEventListener('message', this.handleWorkerMessage);
-    this.worker.addEventListener('error', this.handleWorkerError);
-    this.worker.addEventListener('messageerror', this.handleWorkerMessageError);
+    this.transport.addMessageListener(this.handleRuntimeMessage);
+    this.transport.addErrorListener((error) => {
+      this.handleCrash(
+        error.message.startsWith('Agent ') ? error.message : `Agent runtime crashed: ${error.message}`,
+        error.detail,
+      );
+    });
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.handleVisibilityChange);
     }
     this.startHeartbeat();
-    // Warm the worker's caches up front so app agents can run before any chat
+    // Warm the runtime caches up front so app agents can run before any chat
     // turn (messages are processed in order, so this lands before any request).
-    this.worker.postMessage({
+    this.postToWorker({
       type: 'init',
       payload: {
         settings: config.settings,
@@ -450,9 +456,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         return;
       }
       try {
-        this.worker.postMessage({ type: 'ping' } satisfies MainToAgentWorkerMessage);
+        this.postToWorker({ type: 'ping' } satisfies MainToAgentWorkerMessage);
       } catch {
-        // posting to a dead worker can throw in some engines — treat as crash
+        // posting to a dead runtime can throw in some engines — treat as crash
         this.handleCrash('Agent worker unresponsive (heartbeat post failed)');
       }
     }, WORKER_HEARTBEAT_INTERVAL_MS);
@@ -488,13 +494,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   ): void {
     if (this.crashed || this.destroyed) return;
     try {
-      if (transfer) {
-        this.worker.postMessage(message, transfer);
-      } else {
-        this.worker.postMessage(message);
-      }
+      this.transport.post(message, transfer);
     } catch {
-      // worker may already be terminated
+      // runtime may already be terminated
     }
   }
 
@@ -584,7 +586,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         };
         this.clearHeartbeat();
       }
-      this.worker.terminate();
+      this.transport.terminate();
       pending.reject(new DOMException('Agent was terminated', 'AbortError'));
       this.pendingRequests.delete(requestId);
       this.activeRequestId = null;
@@ -645,7 +647,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       activeInstance = null;
     }
     try {
-      this.worker.terminate();
+      this.transport.terminate();
     } catch {
       // worker may already be terminated
     }
@@ -783,12 +785,12 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       // 必须同时取消 worker 侧的执行：旧实现只 reject 主线程 promise，worker
       // 会继续烧 token 跑完无人监听的 app agent（其 abort 控制器也滞留）。
       try {
-        this.worker.postMessage({
+        this.postToWorker({
           type: 'cancel-app-agent',
           requestId,
         } satisfies MainToAgentWorkerMessage);
       } catch {
-        // worker 可能已终止
+        // runtime 可能已终止
       }
       this.flushAppAgentDeltas(entry);
       this.appAgentRequests.delete(requestId);
@@ -869,8 +871,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.maybeCleanupDetached();
   }
 
-  private readonly handleWorkerMessage = (event: MessageEvent<AgentWorkerToMainMessage>) => {
-    const message = event.data;
+  private readonly handleRuntimeMessage = (message: AgentWorkerToMainMessage) => {
 
     // 取消 ACK 等待期间 worker 仍在响应（任何消息都算活着）：重新武装
     // 终止宽限窗口。大上下文同步会阻塞事件循环，worker 只是"慢"而非死。
@@ -973,6 +974,19 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         } catch {
           // already aborted
         }
+      }
+      return;
+    }
+
+    if (message.type === 'tool-host-activity') {
+      const appAgentEntry = this.appAgentRequests.get(message.requestId);
+      if (appAgentEntry) {
+        this.armAppAgentIdleTimer(message.requestId);
+      }
+      if (message.phase === 'start') {
+        this.inflightToolExecutions.set(message.toolRequestId, new AbortController());
+      } else {
+        this.inflightToolExecutions.delete(message.toolRequestId);
       }
       return;
     }
@@ -1285,19 +1299,6 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     pending.reject(reconstructWorkerError(message));
   };
 
-  private readonly handleWorkerError = (event: ErrorEvent) => {
-    this.handleCrash(
-      `Agent worker crashed: ${event.message || 'unknown error'}`,
-      event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : undefined,
-    );
-  };
-
-  private readonly handleWorkerMessageError = (_event: MessageEvent) => {
-    this.handleCrash(
-      'Agent worker message could not be deserialized (structured clone failure)',
-    );
-  };
-
   private handleCrash(message: string, detail?: string): void {
     if (this.crashed) return;
     this.crashed = true;
@@ -1335,7 +1336,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     this.unsubscribePermissionWait = null;
 
     try {
-      this.worker.terminate();
+      this.transport.terminate();
     } catch {
       // already terminated
     }
