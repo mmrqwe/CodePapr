@@ -3,9 +3,9 @@
 //! App-level singleton Node process. Session switch reuses the live process
 //! (`init` from the new agent). Crash recovery calls `agent_runtime_stop`
 //! then start. UI talks NDJSON over stdin/stdout.
-//! P2: `tool-request` for fs/bash/git/lsp/images is executed here instead of WebView JS.
+//! P2: `tool-request` for fs/bash/git/lsp/images/web/skill/shell is executed here instead of WebView JS.
 
-use crate::agent_runtime_tools::{self, RuntimeToolContext};
+use crate::agent_runtime_tools::{self, RuntimeSearxngSettings, RuntimeSkillEntry, RuntimeToolContext};
 use crate::lsp_managed_tools;
 use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
 use serde::Serialize;
@@ -30,6 +30,8 @@ struct RuntimeProcess {
 struct RuntimeMeta {
     workspace_path: Option<String>,
     mode: String,
+    searxng: RuntimeSearxngSettings,
+    skill_catalog: Vec<RuntimeSkillEntry>,
 }
 
 static RUNTIME_META: OnceLock<Mutex<HashMap<String, RuntimeMeta>>> = OnceLock::new();
@@ -232,6 +234,8 @@ pub(crate) fn runtime_tool_context(runtime_id: &str) -> Option<RuntimeToolContex
         } else {
             meta.mode.clone()
         },
+        searxng: meta.searxng.clone(),
+        skill_catalog: meta.skill_catalog.clone(),
     })
 }
 
@@ -273,13 +277,25 @@ fn note_outbound_message(runtime_id: &str, line: &str) {
         _ => None,
     };
     let mode = match ty {
-        "init" => value
+        "init" | "chat" | "run-app-agent" => value
             .pointer("/payload/runtime/mode")
             .and_then(|v| v.as_str())
             .map(str::to_string),
         _ => None,
     };
-    if workspace.is_none() && mode.is_none() {
+    let searxng = match ty {
+        "init" | "chat" | "run-app-agent" => value
+            .pointer("/payload/settings")
+            .map(parse_searxng_settings),
+        _ => None,
+    };
+    let skill_catalog = match ty {
+        "init" | "chat" | "run-app-agent" => value
+            .pointer("/payload/runtime/skillDefinitions")
+            .and_then(parse_skill_catalog),
+        _ => None,
+    };
+    if workspace.is_none() && mode.is_none() && searxng.is_none() && skill_catalog.is_none() {
         return;
     }
     if let Ok(mut map) = runtime_meta().lock() {
@@ -290,7 +306,103 @@ fn note_outbound_message(runtime_id: &str, line: &str) {
         if let Some(mode) = mode {
             meta.mode = mode;
         }
+        if let Some(searxng) = searxng {
+            meta.searxng = searxng;
+        }
+        if let Some(skill_catalog) = skill_catalog {
+            meta.skill_catalog = skill_catalog;
+        }
     }
+}
+
+fn parse_searxng_settings(settings: &serde_json::Value) -> RuntimeSearxngSettings {
+    RuntimeSearxngSettings {
+        enabled: settings
+            .get("searxngEnabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        base_url: settings
+            .get("searxngBaseUrl")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        categories: settings
+            .get("searxngCategories")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        time_range: settings
+            .get("searxngTimeRange")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        language: settings
+            .get("searxngLanguage")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        safe_search: settings
+            .get("searxngSafeSearch")
+            .and_then(serde_json::Value::as_u64)
+            .or_else(|| {
+                settings
+                    .get("searxngSafeSearch")
+                    .and_then(serde_json::Value::as_f64)
+                    .map(|n| n as u64)
+            })
+            .unwrap_or(1)
+            .min(2) as u8,
+        engines: settings
+            .get("searxngEngines")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+    }
+}
+
+fn parse_skill_catalog(value: &serde_json::Value) -> Option<Vec<RuntimeSkillEntry>> {
+    let items = value.as_array()?;
+    Some(
+        items
+            .iter()
+            .filter_map(|item| {
+                if !item.is_object() {
+                    return None;
+                }
+                Some(RuntimeSkillEntry {
+                    name: item
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    id: item
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    display_name: item
+                        .get("displayName")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    source_path: item
+                        .get("sourcePath")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    enabled: item
+                        .get("enabled")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(true),
+                })
+            })
+            .collect(),
+    )
 }
 
 fn clear_runtime_meta(runtime_id: &str) {

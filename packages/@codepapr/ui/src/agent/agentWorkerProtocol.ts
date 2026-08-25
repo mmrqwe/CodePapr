@@ -86,6 +86,13 @@ export interface WorkerAgentSettings {
   compactionModel: 'fast' | 'primary';
   compactionMaxTokens: number;
   compactionTemperature: number;
+  searxngEnabled?: boolean;
+  searxngBaseUrl?: string;
+  searxngCategories?: string;
+  searxngTimeRange?: string;
+  searxngLanguage?: string;
+  searxngSafeSearch?: number;
+  searxngEngines?: string;
 }
 
 export interface WorkerAgentParameters {

@@ -119,6 +119,13 @@ export function toWorkerAgentSettings(settings: Settings): WorkerAgentSettings {
   compactionModel: settings.compactionModel,
   compactionMaxTokens: settings.compactionMaxTokens,
   compactionTemperature: settings.compactionTemperature,
+  searxngEnabled: settings.searxngEnabled,
+  searxngBaseUrl: settings.searxngBaseUrl,
+  searxngCategories: settings.searxngCategories,
+  searxngTimeRange: settings.searxngTimeRange,
+  searxngLanguage: settings.searxngLanguage,
+  searxngSafeSearch: settings.searxngSafeSearch,
+  searxngEngines: settings.searxngEngines,
 };
 }
 

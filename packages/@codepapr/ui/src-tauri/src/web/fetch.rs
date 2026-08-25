@@ -110,7 +110,15 @@ pub(crate) async fn fetch_web_url(
     url: String,
     max_bytes: Option<usize>,
 ) -> Result<WebFetchUrlResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || fetch_web_url_impl(url, max_bytes))
+        .await
+        .map_err(|e| format!("读取网页失败: {e}"))?
+}
+
+pub(crate) fn fetch_web_url_impl(
+    url: String,
+    max_bytes: Option<usize>,
+) -> Result<WebFetchUrlResult, String> {
         let parsed_url = parse_browser_url(&url)?;
         if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
             return Err("url 必须是 http 或 https URL".to_string());
@@ -178,9 +186,6 @@ pub(crate) async fn fetch_web_url(
             truncated,
             content_type,
         })
-    })
-    .await
-    .map_err(|e| format!("读取网页失败: {e}"))?
 }
 
 #[tauri::command]
@@ -190,6 +195,17 @@ pub(crate) async fn download_web_file(
     relative_path: Option<String>,
 ) -> Result<DownloadFileResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        download_web_file_impl(workspace_path, url, relative_path)
+    })
+    .await
+    .map_err(|e| format!("下载失败: {e}"))?
+}
+
+pub(crate) fn download_web_file_impl(
+    workspace_path: String,
+    url: String,
+    relative_path: Option<String>,
+) -> Result<DownloadFileResult, String> {
         let workspace = canonical_workspace(&workspace_path)?;
         let parsed_url = parse_browser_url(&url)?;
         if !parsed_url.starts_with("https://") && !parsed_url.starts_with("http://") {
@@ -267,9 +283,6 @@ pub(crate) async fn download_web_file(
             content_type,
             overwritten,
         })
-    })
-    .await
-    .map_err(|e| format!("下载失败: {e}"))?
 }
 
 #[cfg(test)]

@@ -1,12 +1,14 @@
 //! P1/P2: execute sidecar `tool-request`s in Rust so tools do not wait on WebView JS.
 //!
-//! UI-bound tools (todo, memory, MCP, browser, graph, question, apps, project
-//! diagnostics, skill/webfetch) are still forwarded to the page. Permission
-//! prompts wait on the UI.
+//! UI-bound tools (todo, memory admission, MCP confirm, browser overlay, graph,
+//! question, apps) still go to the page. Permission prompts wait on the UI.
 
 use crate::git_operations;
 use crate::shell::background;
 use crate::shell::sandbox::SandboxAccessArgs;
+use crate::shell::session;
+use crate::web::fetch as web_fetch;
+use crate::web::search as web_search;
 use crate::workspace_fs::{self, access::check_external_path};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -76,12 +78,72 @@ const RUST_HOSTED_TOOLS: &[&str] = &[
     "workspace_organize_imports",
     "workspace_fix_diagnostics",
     "workspace_format_files",
+    "webfetch",
+    "web_fetch_url",
+    "web_download_file",
+    "websearch",
+    "skill",
+    "skill_load",
+    "shell_open_session",
+    "shell_list_sessions",
+    "shell_read_output",
+    "shell_send_input",
+    "shell_close_session",
+    "workspace_start_preview_session",
 ];
+
+#[derive(Clone)]
+pub struct RuntimeSearxngSettings {
+    pub enabled: bool,
+    pub base_url: String,
+    pub categories: String,
+    pub time_range: String,
+    pub language: String,
+    pub safe_search: u8,
+    pub engines: String,
+}
+
+impl Default for RuntimeSearxngSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: String::new(),
+            categories: String::new(),
+            time_range: String::new(),
+            language: String::new(),
+            safe_search: 1,
+            engines: String::new(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct RuntimeSkillEntry {
+    pub name: String,
+    pub id: String,
+    pub display_name: String,
+    pub source_path: String,
+    pub enabled: bool,
+}
+
+impl Default for RuntimeSkillEntry {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            id: String::new(),
+            display_name: String::new(),
+            source_path: String::new(),
+            enabled: true,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct RuntimeToolContext {
     pub workspace_path: String,
     pub mode: String,
+    pub searxng: RuntimeSearxngSettings,
+    pub skill_catalog: Vec<RuntimeSkillEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -504,6 +566,7 @@ fn dispatch_tool_inner(
         | "workspace_run_command"
         | "workspace_start_shell_background_command"
         | "workspace_start_background_command"
+        | "workspace_start_preview_session"
         | "workspace_list_background_processes"
         | "workspace_stop_background_process"
         | "workspace_stop_all_background_processes" => {
@@ -550,6 +613,16 @@ fn dispatch_tool_inner(
                 mutated,
             })
         }
+        "webfetch" | "web_fetch_url" | "web_download_file" => {
+            dispatch_webfetch(name, ctx, args)
+        }
+        "websearch" => dispatch_websearch(ctx, args),
+        "skill" | "skill_load" => dispatch_skill(ctx, args),
+        "shell_open_session"
+        | "shell_list_sessions"
+        | "shell_read_output"
+        | "shell_send_input"
+        | "shell_close_session" => dispatch_shell(app, runtime_id, ctx, req, cancel),
         other => Err(format!("sidecar 宿主未实现工具: {other}")),
     }
 }
@@ -666,10 +739,13 @@ fn dispatch_bash(
     let timeout = arg_u64(args, "timeoutSeconds").or_else(|| arg_u64(args, "timeout"));
     let background_run = arg_bool(args, "background") == Some(true)
         || req.tool_name == "workspace_start_shell_background_command"
-        || req.tool_name == "workspace_start_background_command";
+        || req.tool_name == "workspace_start_background_command"
+        || req.tool_name == "workspace_start_preview_session";
 
     if background_run {
-        let result = if req.tool_name == "workspace_start_background_command" {
+        let result = if req.tool_name == "workspace_start_background_command"
+            || req.tool_name == "workspace_start_preview_session"
+        {
             background::start_workspace_background_command(
                 ctx.workspace_path.clone(),
                 command,
@@ -986,6 +1062,313 @@ fn local_civil_clock() -> (i32, i32, i32, i32, i32, i32, i32, i32, String) {
     {
         (1970, 1, 1, 0, 0, 0, 4, 0, "UTC".to_string())
     }
+}
+
+fn dispatch_webfetch(
+    name: &str,
+    ctx: &RuntimeToolContext,
+    args: &Value,
+) -> Result<HostedOutcome, String> {
+    let url = arg_string_req(args, &["url"])?;
+    let save = name == "web_download_file" || arg_bool(args, "save") == Some(true);
+    if save {
+        let result = web_fetch::download_web_file_impl(
+            ctx.workspace_path.clone(),
+            url,
+            arg_string(args, &["relativePath"]),
+        )?;
+        let mutated = vec![result.path.clone()];
+        return Ok(ok_result(result, mutated));
+    }
+    let max_bytes = arg_usize(args, "maxBytes")
+        .unwrap_or(20_000)
+        .clamp(1_000, 100_000);
+    let result = web_fetch::fetch_web_url_impl(url, Some(max_bytes))?;
+    Ok(ok_result(result, Vec::new()))
+}
+
+fn dispatch_websearch(ctx: &RuntimeToolContext, args: &Value) -> Result<HostedOutcome, String> {
+    let query = arg_string_req(args, &["query"])?;
+    let max_results = arg_usize(args, "maxResults").unwrap_or(5).clamp(1, 10);
+    let categories = arg_string(args, &["searxngCategory", "searxngCategories"])
+        .unwrap_or_else(|| ctx.searxng.categories.clone());
+    let time_range = arg_string(args, &["searxngTimeRange"])
+        .unwrap_or_else(|| ctx.searxng.time_range.clone());
+    let language = arg_string(args, &["searxngLanguage"]).unwrap_or_else(|| ctx.searxng.language.clone());
+    let safe_search = arg_u8(args, "searxngSafeSearch").unwrap_or(ctx.searxng.safe_search);
+    let result = web_search::search_web_impl(
+        query,
+        Some(max_results),
+        Some(ctx.searxng.enabled),
+        Some(ctx.searxng.base_url.clone()),
+        Some(categories),
+        Some(time_range),
+        Some(language),
+        Some(safe_search),
+        Some(ctx.searxng.engines.clone()),
+    )?;
+    Ok(ok_result(result, Vec::new()))
+}
+
+fn dispatch_skill(ctx: &RuntimeToolContext, args: &Value) -> Result<HostedOutcome, String> {
+    let name = arg_string_req(args, &["name"])?;
+    if !is_safe_skill_id(&name) {
+        return Err("name 只能包含安全的 skill 路径片段".to_string());
+    }
+    let relative_path = resolve_skill_file_path(&ctx.workspace_path, &name)
+        .ok_or_else(|| format!("Skill 不存在: {name}"))?;
+    if !skill_available_to_load(&name, &ctx.skill_catalog)
+        || !skill_available_to_load(&relative_path, &ctx.skill_catalog)
+    {
+        return Err(format!("Skill 已停用: {name}"));
+    }
+    let result = workspace_fs::read::read_text_file_impl(
+        ctx.workspace_path.clone(),
+        relative_path.clone(),
+        Some(500_000),
+        None,
+        None,
+        None,
+        None,
+    )?;
+    let skill_root = skill_root_from_path(&relative_path);
+    Ok(HostedOutcome {
+        result: Ok(json!({
+            "path": result.path,
+            "content": result.content,
+            "bytes": result.bytes,
+            "startLine": result.start_line,
+            "endLine": result.end_line,
+            "totalLines": result.total_lines,
+            "truncatedByRange": result.truncated_by_range,
+            "truncatedByBytes": result.truncated_by_bytes,
+            "locationLine": result.location_line,
+            "locationColumn": result.location_column,
+            "skillPath": relative_path,
+            "skillRoot": skill_root,
+        })),
+        mutated: Vec::new(),
+    })
+}
+
+fn dispatch_shell(
+    app: &AppHandle,
+    runtime_id: &str,
+    ctx: &RuntimeToolContext,
+    req: &ToolRequest,
+    cancel: &Arc<AtomicBool>,
+) -> Result<HostedOutcome, String> {
+    let args = &req.arguments;
+    match req.tool_name.as_str() {
+        "shell_open_session" => {
+            let result = session::open_shell_session(
+                ctx.workspace_path.clone(),
+                arg_string(args, &["shell"]),
+            )?;
+            Ok(ok_result(result, Vec::new()))
+        }
+        "shell_list_sessions" => {
+            let result = session::list_shell_sessions(Some(ctx.workspace_path.clone()))?;
+            Ok(ok_result(result, Vec::new()))
+        }
+        "shell_read_output" => {
+            let session_id = arg_string_req(args, &["sessionId"])?;
+            let result = session::read_shell_output(session_id)?;
+            Ok(ok_result(result, Vec::new()))
+        }
+        "shell_close_session" => {
+            let session_id = arg_string_req(args, &["sessionId"])?;
+            let result = session::close_shell_session(session_id)?;
+            Ok(ok_result(result, Vec::new()))
+        }
+        "shell_send_input" => {
+            let session_id = arg_string_req(args, &["sessionId"])?;
+            let input = arg_string(args, &["input"]);
+            let command = arg_string(args, &["command"]);
+            if command.is_some() && input.is_some() {
+                return Err("shell_send_input 不能同时传 input 和 command".to_string());
+            }
+            if let Some(command) = command {
+                let command_args = arg_string_vec(args, "args").unwrap_or_default();
+                let joined = std::iter::once(command.clone())
+                    .chain(command_args.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                ensure_shell_codepapr(&joined, None, &ctx.mode)?;
+                for candidate in extract_absolute_command_paths(&joined) {
+                    ensure_external_allowed(app, runtime_id, ctx, req, &candidate, "execute", cancel)?;
+                }
+                let result = session::send_shell_command(session_id, command, Some(command_args))?;
+                return Ok(ok_result(result, Vec::new()));
+            }
+            let input = input.ok_or_else(|| "shell_send_input 必须提供 input 或 command".to_string())?;
+            ensure_shell_codepapr(&input, None, &ctx.mode)?;
+            for candidate in extract_absolute_command_paths(&input) {
+                ensure_external_allowed(app, runtime_id, ctx, req, &candidate, "execute", cancel)?;
+            }
+            let result = session::send_shell_input(session_id, input)?;
+            Ok(ok_result(result, Vec::new()))
+        }
+        other => Err(format!("sidecar 宿主未实现工具: {other}")),
+    }
+}
+
+fn is_safe_skill_id(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '/' | '-'))
+}
+
+fn is_resource_nested_skill_id(skill_id: &str) -> bool {
+    let segments: Vec<&str> = skill_id.split('/').filter(|part| !part.is_empty()).collect();
+    if segments.is_empty() {
+        return true;
+    }
+    for (index, segment) in segments.iter().enumerate() {
+        let lower = segment.to_ascii_lowercase();
+        if !matches!(
+            lower.as_str(),
+            "agents" | "references" | "templates" | "commands" | "scripts"
+        ) {
+            continue;
+        }
+        if index == 0 && segments.len() == 1 {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+fn collect_skill_entry_refs(entries: &[workspace_fs::types::FileEntry]) -> Vec<(String, String, String)> {
+    let mut refs: HashMap<String, (String, String)> = HashMap::new();
+    for entry in entries {
+        if entry.is_dir {
+            continue;
+        }
+        let normalized = entry.path.replace('\\', "/");
+        let Some(rest) = normalized.strip_prefix(".CodePapr/skills/") else {
+            continue;
+        };
+        if rest.is_empty() || rest.ends_with('/') {
+            continue;
+        }
+        let rest_lower = rest.to_ascii_lowercase();
+        if let Some(prefix) = rest_lower.strip_suffix("/skill.md") {
+            let skill_id = rest[..prefix.len()].to_string();
+            if is_resource_nested_skill_id(&skill_id) {
+                continue;
+            }
+            let display = skill_id
+                .split('/')
+                .filter(|part| !part.is_empty())
+                .next_back()
+                .unwrap_or(&skill_id)
+                .to_string();
+            refs.insert(skill_id, (display, normalized));
+            continue;
+        }
+        if !rest.contains('/') && rest_lower.ends_with(".md") {
+            let skill_id = rest[..rest.len() - 3].to_string();
+            refs.entry(skill_id.clone()).or_insert_with(|| (skill_id, normalized));
+        }
+    }
+    refs.into_iter()
+        .map(|(id, (display, path))| (id, display, path))
+        .collect()
+}
+
+fn resolve_skill_file_path(workspace_path: &str, name: &str) -> Option<String> {
+    if !is_safe_skill_id(name) {
+        return None;
+    }
+    let listed = workspace_fs::list::list_workspace_files_impl(
+        workspace_path.to_string(),
+        Some(".CodePapr/skills".to_string()),
+        Some(10),
+        Some(true),
+    )
+    .ok()?;
+    let entries = collect_skill_entry_refs(&listed.entries);
+    if let Some((_, _, path)) = entries.iter().find(|(id, _, _)| id == name) {
+        return Some(path.clone());
+    }
+    let matches: Vec<_> = entries
+        .iter()
+        .filter(|(id, display, _)| {
+            display == name
+                || id.split('/').filter(|part| !part.is_empty()).next_back() == Some(name)
+        })
+        .collect();
+    if matches.len() == 1 {
+        Some(matches[0].2.clone())
+    } else {
+        None
+    }
+}
+
+fn skill_root_from_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    if let Some(stripped) = lower.strip_suffix("/skill.md") {
+        return normalized[..stripped.len()].to_string();
+    }
+    if let Some(stripped) = lower.strip_suffix(".md") {
+        return normalized[..stripped.len()].to_string();
+    }
+    normalized
+}
+
+fn skill_available_to_load(needle: &str, catalog: &[RuntimeSkillEntry]) -> bool {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return false;
+    }
+    let matched = catalog.iter().find(|skill| {
+        skill_catalog_name(skill) == needle
+            || skill_leaf_name(skill) == needle
+            || skill.id == needle
+            || skill.display_name == needle
+            || skill.name == needle
+            || skill.source_path == needle
+    });
+    match matched {
+        Some(skill) => skill.enabled,
+        None => true,
+    }
+}
+
+fn skill_catalog_name(skill: &RuntimeSkillEntry) -> String {
+    let id = skill.id.trim();
+    if !id.is_empty() {
+        return id.to_string();
+    }
+    let display = skill.display_name.trim();
+    if !display.is_empty() {
+        return display.to_string();
+    }
+    skill.name.trim().to_string()
+}
+
+fn skill_leaf_name(skill: &RuntimeSkillEntry) -> String {
+    let catalog = if !skill.id.is_empty() {
+        skill.id.as_str()
+    } else if !skill.source_path.is_empty() {
+        skill.source_path.as_str()
+    } else {
+        skill.name.as_str()
+    };
+    catalog
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != "SKILL.md" && !part.eq_ignore_ascii_case("skill.md"))
+        .next_back()
+        .unwrap_or(catalog)
+        .trim_end_matches(".md")
+        .trim_end_matches(".MD")
+        .to_string()
 }
 
 fn git_op_json(action: &str, result: crate::snapshot::types::GitOperationResult) -> Value {
@@ -1438,6 +1821,15 @@ fn arg_u32(args: &Value, key: &str) -> Option<u32> {
     args.get(key).and_then(Value::as_u64).map(|n| n as u32)
 }
 
+fn arg_u8(args: &Value, key: &str) -> Option<u8> {
+    args.get(key).and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_f64().map(|n| n as u64))
+            .map(|n| n.min(255) as u8)
+    })
+}
+
 fn arg_string_vec(args: &Value, key: &str) -> Option<Vec<String>> {
     args.get(key).and_then(Value::as_array).map(|items| {
         items
@@ -1526,6 +1918,73 @@ mod tests {
         assert!(should_host_in_rust(&file_diag));
         let graph = json!({ "toolName": "graph", "arguments": { "action": "overview" } });
         assert!(!should_host_in_rust(&graph));
+        let webfetch = json!({ "toolName": "webfetch", "arguments": { "url": "https://example.com" } });
+        assert!(should_host_in_rust(&webfetch));
+        let websearch = json!({ "toolName": "websearch", "arguments": { "query": "rust" } });
+        assert!(should_host_in_rust(&websearch));
+        let skill = json!({ "toolName": "skill", "arguments": { "name": "docs" } });
+        assert!(should_host_in_rust(&skill));
+        let shell = json!({ "toolName": "shell_open_session", "arguments": {} });
+        assert!(should_host_in_rust(&shell));
+        let preview = json!({
+            "toolName": "workspace_start_preview_session",
+            "arguments": { "command": "python", "previewUrl": "http://127.0.0.1:8000" }
+        });
+        assert!(should_host_in_rust(&preview));
+        let question = json!({ "toolName": "question", "arguments": { "question": "ok?" } });
+        assert!(!should_host_in_rust(&question));
+        let browser = json!({ "toolName": "browser", "arguments": { "action": "open" } });
+        assert!(!should_host_in_rust(&browser));
+        let app_render = json!({ "toolName": "app_render", "arguments": { "appId": "demo" } });
+        assert!(!should_host_in_rust(&app_render));
+        let mcp = json!({ "toolName": "mcp__demo__search", "arguments": {} });
+        assert!(!should_host_in_rust(&mcp));
+    }
+
+    fn test_tool_ctx(workspace: &str) -> RuntimeToolContext {
+        RuntimeToolContext {
+            workspace_path: workspace.to_string(),
+            mode: "agent".to_string(),
+            searxng: RuntimeSearxngSettings::default(),
+            skill_catalog: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn skill_load_reads_project_skill_file() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-host-skill");
+        let skill_dir = ws.file_path(".CodePapr/skills/docs");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Docs\nhello skill\n").unwrap();
+        let outcome = dispatch_skill(
+            &test_tool_ctx(&ws.workspace_arg()),
+            &json!({ "name": "docs" }),
+        )
+        .unwrap();
+        let value = outcome.result.unwrap();
+        assert_eq!(value["skillPath"], ".CodePapr/skills/docs/SKILL.md");
+        assert!(value["content"].as_str().unwrap().contains("hello skill"));
+    }
+
+    #[test]
+    fn skill_load_rejects_disabled_catalog_entry() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-host-skill-off");
+        let skill_dir = ws.file_path(".CodePapr/skills/search");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Search\n").unwrap();
+        let mut ctx = test_tool_ctx(&ws.workspace_arg());
+        ctx.skill_catalog.push(RuntimeSkillEntry {
+            name: "search".to_string(),
+            id: "search".to_string(),
+            display_name: "search".to_string(),
+            source_path: ".CodePapr/skills/search/SKILL.md".to_string(),
+            enabled: false,
+        });
+        let err = match dispatch_skill(&ctx, &json!({ "name": "search" })) {
+            Ok(_) => panic!("disabled skill should not load"),
+            Err(error) => error,
+        };
+        assert!(err.contains("已停用"), "{err}");
     }
 
     #[test]

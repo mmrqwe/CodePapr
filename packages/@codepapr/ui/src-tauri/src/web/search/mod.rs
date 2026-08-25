@@ -267,6 +267,34 @@ pub(crate) async fn search_web(
     searxng_engines: Option<String>,
 ) -> Result<WebSearchResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        search_web_impl(
+            query,
+            max_results,
+            searxng_enabled,
+            searxng_base_url,
+            searxng_categories,
+            searxng_time_range,
+            searxng_language,
+            searxng_safe_search,
+            searxng_engines,
+        )
+    })
+    .await
+    .map_err(|e| format!("搜索失败: {e}"))?
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn search_web_impl(
+    query: String,
+    max_results: Option<usize>,
+    searxng_enabled: Option<bool>,
+    searxng_base_url: Option<String>,
+    searxng_categories: Option<String>,
+    searxng_time_range: Option<String>,
+    searxng_language: Option<String>,
+    searxng_safe_search: Option<u8>,
+    searxng_engines: Option<String>,
+) -> Result<WebSearchResponse, String> {
         let query = query.trim();
         if query.is_empty() {
             return Err("搜索关键词不能为空".to_string());
@@ -536,9 +564,6 @@ pub(crate) async fn search_web(
             cache_search_response(&cache_key, &response);
         }
         Ok(response)
-    })
-    .await
-    .map_err(|e| format!("搜索失败: {e}"))?
 }
 
 #[cfg(test)]
