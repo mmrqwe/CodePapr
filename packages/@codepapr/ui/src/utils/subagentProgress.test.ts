@@ -62,4 +62,12 @@ describe('subagentProgress 会话隔离', () => {
     expect(getSubagentRunsForSession(null)).toEqual([]);
     expect(getSubagentRuns()).toHaveLength(3);
   });
+
+  it('新会话 id 看不到上一会话已完成的 mentor 条目', () => {
+    const runId = startSubagentProgress('mentor', '架构评审', undefined, 'session-old');
+    completeSubagentProgress(runId, 'done');
+
+    expect(getSubagentRunsForSession('session-old')).toHaveLength(1);
+    expect(getSubagentRunsForSession('session-new')).toEqual([]);
+  });
 });

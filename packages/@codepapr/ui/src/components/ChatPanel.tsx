@@ -56,7 +56,7 @@ import AtMentionDropdown, {
   buildMentionItems,
 } from './AtMentionDropdown';
 import { useShallow } from 'zustand/react/shallow';
-import { subscribeSubagentProgress, getSubagentRunsForSession, toggleSubagentCollapse, type SubAgentRun } from '../utils/subagentProgress';
+import { subscribeSubagentProgress, getSubagentRunsForSession, toggleSubagentCollapse } from '../utils/subagentProgress';
 import { ConversationRoundsIndicator } from './ConversationRoundsIndicator';
 import { toast } from '../store/toastStore';
 import type { PlanFollowUpAction } from '../utils/planMode';
@@ -226,12 +226,16 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     useAgentStore.setState({ _currentMode: mode });
   }, [mode]);
 
-  const [subagentRuns, setSubagentRuns] = useState<SubAgentRun[]>([]);
+  // 按当前会话在渲染时派生，不能放进 useState + useEffect：ChatPanel 不随
+  // 新会话卸载，effect 要等绘制之后才过滤，空对话欢迎页会顶着上一会话的
+  // 「Mentor 思考完成」。进度变更只用来触发重渲染。
+  const [, setSubagentProgressEpoch] = useState(0);
   useEffect(() => {
-    const sync = () => setSubagentRuns(getSubagentRunsForSession(activeSessionId));
-    sync();
-    return subscribeSubagentProgress(sync);
-  }, [activeSessionId]);
+    return subscribeSubagentProgress(() => {
+      setSubagentProgressEpoch((epoch) => epoch + 1);
+    });
+  }, []);
+  const subagentRuns = getSubagentRunsForSession(activeSessionId);
   const [resetConfirmMsgId, setResetConfirmMsgId] = useState<string | null>(null);
   const [resetInFlight, setResetInFlight] = useState(false);
   const [retryMessagesLoading, setRetryMessagesLoading] = useState(false);

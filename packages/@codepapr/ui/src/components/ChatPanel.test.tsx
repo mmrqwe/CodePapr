@@ -30,6 +30,11 @@ vi.mock('./MonacoTextEditor', () => ({
 
 import { normalizeSettings, useAgentStore, type UIMessage } from '../store/agentStore';
 import { useCharactersStore } from '../store/charactersStore';
+import {
+  completeSubagentProgress,
+  resetSubagentProgress,
+  startSubagentProgress,
+} from '../utils/subagentProgress';
 import type { CharacterProfile } from '../utils/characterTypes';
 import type { WorkMode } from '../utils/agentPrompts';
 import type { IImageContent } from '@codepapr/types';
@@ -203,6 +208,7 @@ describe('ChatPanel', () => {
       characters: [],
       activeCharacterId: null,
     });
+    resetSubagentProgress();
   });
 
   it('renders user messages as bubbles, assistant replies as plain blocks, and keeps reasoning/tool details collapsed', async () => {
@@ -1460,6 +1466,69 @@ describe('ChatPanel', () => {
 
     // 切回执行中的会话 1：显示取消按钮
     expect(container.textContent).toContain('取消');
+  });
+
+  it('does not show leftover mentor progress on a newly created empty session', async () => {
+    const runId = startSubagentProgress('mentor', '架构评审', undefined, 'session-1');
+    completeSubagentProgress(runId, 'done');
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+    expect(container.textContent).toContain('Mentor 思考完成');
+
+    await act(async () => {
+      useAgentStore.getState().newSession();
+    });
+
+    expect(container.textContent).not.toContain('Mentor 思考完成');
+    expect(container.textContent).toContain('CodePapr');
+  });
+
+  it('does not carry mentor progress into another session that already has messages', async () => {
+    const runId = startSubagentProgress('mentor', '架构评审', undefined, 'session-1');
+    completeSubagentProgress(runId, 'done');
+    setTwoSessions({
+      messages: [
+        {
+          id: 'user-s1',
+          role: 'user',
+          content: '会话 1 的问题',
+          timestamp: 1,
+        },
+      ],
+      sessionMessages: {
+        'session-1': [
+          {
+            id: 'user-s1',
+            role: 'user',
+            content: '会话 1 的问题',
+            timestamp: 1,
+          },
+        ],
+        'session-2': [
+          {
+            id: 'user-s2',
+            role: 'user',
+            content: '会话 2 的问题',
+            timestamp: 2,
+          },
+        ],
+      },
+    });
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+    expect(container.textContent).toContain('Mentor 思考完成');
+    expect(container.textContent).toContain('会话 1 的问题');
+
+    await act(async () => {
+      useAgentStore.getState().selectSession('session-2');
+    });
+
+    expect(container.textContent).not.toContain('Mentor 思考完成');
+    expect(container.textContent).toContain('会话 2 的问题');
   });
 
   describe('QuestionCard (plan mode question tool)', () => {

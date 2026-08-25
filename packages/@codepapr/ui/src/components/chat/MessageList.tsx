@@ -131,7 +131,8 @@ export const MessageList = memo(function MessageList({
           )}
         </div>
       )}
-      {!deferMessages && subagentRuns.map((run) => (
+      {/* 空对话欢迎页不画折叠块：避免新任务/切会话时顶着上一轮 Mentor 标签。 */}
+      {!deferMessages && (sessionMessagesLoading || visibleMessagesCount > 0) && subagentRuns.map((run) => (
         <div key={run.id} className="mx-3 mb-3 rounded-xl border border-info-bg bg-base/60 overflow-hidden">
           <button
             type="button"
