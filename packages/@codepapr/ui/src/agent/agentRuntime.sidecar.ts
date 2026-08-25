@@ -2,9 +2,12 @@ import { createSidecarFetch } from './sidecarFetch';
 import { startAgentRuntime } from './agentRuntimeLoop';
 import type { AgentWorkerToMainMessage, MainToAgentWorkerMessage } from './agentWorkerProtocol';
 
+// stdout 是 sidecar NDJSON 协议，log/info 必须改走 stderr。
+// eslint-disable-next-line no-console
 console.log = (...args: unknown[]) => {
   console.error(...args);
 };
+// eslint-disable-next-line no-console
 console.info = (...args: unknown[]) => {
   console.error(...args);
 };
