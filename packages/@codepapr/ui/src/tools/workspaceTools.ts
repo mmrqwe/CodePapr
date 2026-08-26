@@ -103,11 +103,11 @@ export function registerWorkspaceTools(
   registerSharedMergeToolDispatchers({
     registry,
     terminalActionName: 'bash',
-    projectGraphHandler: async (args: Record<string, unknown>) => {
+    projectGraphHandler: async (args: Record<string, unknown>, context) => {
       const a = asString(args.action, 'action');
       const m: Record<string, string> = { full: 'workspace_project_graph', overview: 'workspace_project_graph', lookup: 'workspace_symbol_lookup', dependency: 'workspace_dependency_subgraph', entrypoints: 'workspace_entrypoints', impact: 'workspace_change_impact', implementations: 'workspace_symbol_implementations' };
       const target = m[a];
-      if (target) return await registry.execute(target, args);
+      if (target) return await registry.execute(target, args, context);
       const graph = await buildIntelligenceProjectGraph(args);
       if (a === 'smart_context') return await getWorkspaceSmartContext(graph, { query: asString(args.query, 'query'), relativePath: asOptionalString(args.relativePath), depth: asOptionalNumber(args.depth) ?? 2 });
       if (a === 'dead_code') return await detectDeadCode(graph);
@@ -118,7 +118,7 @@ export function registerWorkspaceTools(
       if (a === 'generate_tests') return await generateTestSkeletons(graph);
       throw new Error(`未知的 graph action: ${a}`);
     },
-    browserHandler: async (args: Record<string, unknown>) => {
+    browserHandler: async (args: Record<string, unknown>, context) => {
       const a = asString(args.action, 'action');
       const m: Record<string, string> = {
         open: 'browser_open_page',
@@ -133,7 +133,7 @@ export function registerWorkspaceTools(
       };
       const target = m[a];
       if (!target) throw new Error(`未知的 browser action: ${a}`);
-      return await registry.execute(target, args);
+      return await registry.execute(target, args, context);
     },
     questionHandler: async (args: Record<string, unknown>) => {
       const question = asString(args.question, 'question');

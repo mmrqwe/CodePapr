@@ -410,7 +410,7 @@ fn dispatch_tool_inner(
 ) -> Result<HostedOutcome, String> {
     let name = req.tool_name.as_str();
     let args = &req.arguments;
-    let include_apps = ctx.mode == "app";
+    let include_apps = allow_codepapr_apps(ctx, req);
 
     if cancel.load(Ordering::SeqCst) {
         return Err("已取消".to_string());
@@ -419,7 +419,7 @@ fn dispatch_tool_inner(
     match name {
         "read" | "workspace_read_file" => {
             let path = require_path(args)?;
-            ensure_codepapr_access(&path, "read", &ctx.mode)?;
+            ensure_codepapr_access(&path, "read", &ctx.mode, include_apps)?;
             ensure_external_allowed(app, runtime_id, ctx, req, &path, "read", cancel)?;
             let result = workspace_fs::read::read_text_file_impl(
                 ctx.workspace_path.clone(),
@@ -435,7 +435,7 @@ fn dispatch_tool_inner(
         "list" | "workspace_list_files" => {
             let path = extract_path(args, false)?;
             if let Some(path) = path.as_ref() {
-                ensure_codepapr_access(path, "list", &ctx.mode)?;
+                ensure_codepapr_access(path, "list", &ctx.mode, include_apps)?;
                 ensure_external_allowed(app, runtime_id, ctx, req, path, "list", cancel)?;
             }
             let result = workspace_fs::list::list_workspace_files_impl(
@@ -449,7 +449,7 @@ fn dispatch_tool_inner(
         "write" | "workspace_write_file" => {
             let path = require_path(args)?;
             let content = arg_string_req(args, &["content"])?;
-            ensure_codepapr_access(&path, "write", &ctx.mode)?;
+            ensure_codepapr_access(&path, "write", &ctx.mode, include_apps)?;
             ensure_external_allowed(app, runtime_id, ctx, req, &path, "write", cancel)?;
             let result = workspace_fs::write::write_text_file_impl(
                 ctx.workspace_path.clone(),
@@ -461,7 +461,7 @@ fn dispatch_tool_inner(
         }
         "edit" | "workspace_apply_patch" => {
             let path = require_path(args)?;
-            ensure_codepapr_access(&path, "write", &ctx.mode)?;
+            ensure_codepapr_access(&path, "write", &ctx.mode, include_apps)?;
             ensure_external_allowed(app, runtime_id, ctx, req, &path, "write", cancel)?;
             let current = workspace_fs::read::read_text_file_impl(
                 ctx.workspace_path.clone(),
@@ -603,7 +603,7 @@ fn dispatch_tool_inner(
         | "workspace_fix_diagnostics"
         | "workspace_format_files" => {
             if let Some(path) = extract_path(args, false)? {
-                ensure_codepapr_access(&path, "read", &ctx.mode)?;
+                ensure_codepapr_access(&path, "read", &ctx.mode, include_apps)?;
                 ensure_external_allowed(app, runtime_id, ctx, req, &path, "read", cancel)?;
             }
             let (value, mutated) =
@@ -642,7 +642,7 @@ fn apply_multi_patch(
     let mut planned: Vec<(String, String)> = Vec::new();
     for patch in patches {
         let path = require_path(patch)?;
-        ensure_codepapr_access(&path, "write", &ctx.mode)?;
+        ensure_codepapr_access(&path, "write", &ctx.mode, allow_codepapr_apps(ctx, req))?;
         ensure_external_allowed(app, runtime_id, ctx, req, &path, "write", cancel)?;
         let current = workspace_fs::read::read_text_file_impl(
             ctx.workspace_path.clone(),
@@ -727,10 +727,10 @@ fn dispatch_bash(
     let command = arg_string_req(args, &["command"])?;
     let workdir = arg_string(args, &["workdir"]);
     if let Some(dir) = workdir.as_deref() {
-        ensure_codepapr_access(dir, "execute", &ctx.mode)?;
+        ensure_codepapr_access(dir, "execute", &ctx.mode, allow_codepapr_apps(ctx, req))?;
         ensure_external_allowed(app, runtime_id, ctx, req, dir, "execute", cancel)?;
     }
-    ensure_shell_codepapr(&command, workdir.as_deref(), &ctx.mode)?;
+    ensure_shell_codepapr(&command, workdir.as_deref(), &ctx.mode, allow_codepapr_apps(ctx, req))?;
     for candidate in extract_absolute_command_paths(&command) {
         ensure_external_allowed(app, runtime_id, ctx, req, &candidate, "execute", cancel)?;
     }
@@ -970,7 +970,7 @@ fn dispatch_read_image(
     cancel: &Arc<AtomicBool>,
 ) -> Result<HostedOutcome, String> {
     let path = require_path(&req.arguments)?;
-    ensure_codepapr_access(&path, "read", &ctx.mode)?;
+    ensure_codepapr_access(&path, "read", &ctx.mode, allow_codepapr_apps(ctx, req))?;
     ensure_external_allowed(app, runtime_id, ctx, req, &path, "read", cancel)?;
     let result = workspace_fs::read::read_image_file_impl(
         ctx.workspace_path.clone(),
@@ -1194,7 +1194,7 @@ fn dispatch_shell(
                     .chain(command_args.iter().cloned())
                     .collect::<Vec<_>>()
                     .join(" ");
-                ensure_shell_codepapr(&joined, None, &ctx.mode)?;
+                ensure_shell_codepapr(&joined, None, &ctx.mode, allow_codepapr_apps(ctx, req))?;
                 for candidate in extract_absolute_command_paths(&joined) {
                     ensure_external_allowed(app, runtime_id, ctx, req, &candidate, "execute", cancel)?;
                 }
@@ -1202,7 +1202,7 @@ fn dispatch_shell(
                 return Ok(ok_result(result, Vec::new()));
             }
             let input = input.ok_or_else(|| "shell_send_input 必须提供 input 或 command".to_string())?;
-            ensure_shell_codepapr(&input, None, &ctx.mode)?;
+            ensure_shell_codepapr(&input, None, &ctx.mode, allow_codepapr_apps(ctx, req))?;
             for candidate in extract_absolute_command_paths(&input) {
                 ensure_external_allowed(app, runtime_id, ctx, req, &candidate, "execute", cancel)?;
             }
@@ -1383,8 +1383,16 @@ fn git_op_json(action: &str, result: crate::snapshot::types::GitOperationResult)
     })
 }
 
+fn allow_apps_for(mode: &str, access: Option<&AppAccess>) -> bool {
+    mode == "app" || access.map(|a| a.allow_codepapr_apps.unwrap_or(true)).unwrap_or(false)
+}
+
+fn allow_codepapr_apps(ctx: &RuntimeToolContext, req: &ToolRequest) -> bool {
+    allow_apps_for(&ctx.mode, req.app_access.as_ref())
+}
+
 fn sandbox_from_access(mode: &str, access: Option<&AppAccess>) -> SandboxAccessArgs {
-    let allow_apps = mode == "app" || access.map(|a| a.allow_codepapr_apps.unwrap_or(true)).unwrap_or(false);
+    let allow_apps = allow_apps_for(mode, access);
     if let Some(access) = access {
         SandboxAccessArgs {
             network: access.network.unwrap_or(true),
@@ -1665,11 +1673,11 @@ fn touches_memory_file(name: &str, args: &Value) -> bool {
     false
 }
 
-fn ensure_codepapr_access(path: &str, op: &str, mode: &str) -> Result<(), String> {
+fn ensure_codepapr_access(path: &str, op: &str, mode: &str, allow_apps: bool) -> Result<(), String> {
     let Some(suffix) = codepapr_suffix(path) else {
         return Ok(());
     };
-    if is_allowed_codepapr_suffix(&suffix, op, mode) {
+    if is_allowed_codepapr_suffix(&suffix, op, mode, allow_apps) {
         return Ok(());
     }
     Err(format!(
@@ -1677,16 +1685,21 @@ fn ensure_codepapr_access(path: &str, op: &str, mode: &str) -> Result<(), String
     ))
 }
 
-fn ensure_shell_codepapr(command: &str, workdir: Option<&str>, mode: &str) -> Result<(), String> {
+fn ensure_shell_codepapr(
+    command: &str,
+    workdir: Option<&str>,
+    mode: &str,
+    allow_apps: bool,
+) -> Result<(), String> {
     if let Some(dir) = workdir {
-        ensure_codepapr_access(dir, "execute", mode)?;
+        ensure_codepapr_access(dir, "execute", mode, allow_apps)?;
     }
     for token in command.split(|ch: char| " \t\"'`=<>|;&()".contains(ch)) {
         let token = token.trim_end_matches(|ch: char| ",.;".contains(ch));
         if token.is_empty() || codepapr_suffix(token).is_none() {
             continue;
         }
-        ensure_codepapr_access(token, "execute", mode)?;
+        ensure_codepapr_access(token, "execute", mode, allow_apps)?;
     }
     Ok(())
 }
@@ -1704,7 +1717,7 @@ fn codepapr_suffix(path: &str) -> Option<String> {
     Some(parts[index + 1..].join("/"))
 }
 
-fn is_allowed_codepapr_suffix(suffix: &str, op: &str, mode: &str) -> bool {
+fn is_allowed_codepapr_suffix(suffix: &str, op: &str, mode: &str, allow_apps: bool) -> bool {
     if suffix.is_empty() {
         return false;
     }
@@ -1713,7 +1726,7 @@ fn is_allowed_codepapr_suffix(suffix: &str, op: &str, mode: &str) -> bool {
         first.as_str(),
         "tmp" | "tool-output" | "downloads" | "screenshots" | "images" | "assets" | "fixtures"
     ) || (first == "skills" && op != "write")
-        || (first == "apps" && mode == "app")
+        || (first == "apps" && (mode == "app" || allow_apps))
 }
 
 fn is_absolute_path(path: &str) -> bool {
@@ -2034,10 +2047,13 @@ mod tests {
 
     #[test]
     fn codepapr_gate_blocks_config_and_allows_scratch() {
-        assert!(ensure_codepapr_access(".CodePapr/AGENTS.md", "read", "agent").is_err());
-        assert!(ensure_codepapr_access(".CodePapr/tmp/out.txt", "write", "agent").is_ok());
-        assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "agent").is_err());
-        assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "app").is_ok());
+        assert!(ensure_codepapr_access(".CodePapr/AGENTS.md", "read", "agent", false).is_err());
+        assert!(ensure_codepapr_access(".CodePapr/tmp/out.txt", "write", "agent", false).is_ok());
+        assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "agent", false).is_err());
+        assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "app", false).is_ok());
+        assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "agent", true).is_ok());
+        assert!(ensure_shell_codepapr("node server.js", Some(".CodePapr/apps/x"), "agent", true).is_ok());
+        assert!(ensure_shell_codepapr("node server.js", Some(".CodePapr/apps/x"), "agent", false).is_err());
     }
 
     #[test]

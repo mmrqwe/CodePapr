@@ -27,7 +27,7 @@ import {
   type ShellCloseSessionResult,
 } from './workspaceToolHelpers';
 import { type WorkspaceToolContext } from './workspaceToolContext';
-import { agentSandboxArgs, assertShellCodePaprAccess } from './codepaprAgentAccess';
+import { agentSandboxArgs, assertShellCodePaprAccess, effectiveCodePaprMode } from './codepaprAgentAccess';
 
 const SYSTEM_COMMAND_PATHS = [
   '/bin/',
@@ -93,6 +93,8 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     options,
   } = ctx;
   const agentMode = options.mode ?? 'agent';
+  const shellMode = (appAccess?: { allowCodepaprApps?: boolean }) =>
+    effectiveCodePaprMode(agentMode, appAccess);
 
   const ensureCommandPathsAllowed = async (
     command: string,
@@ -115,7 +117,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     };
     await ensureCommandPathsAllowed(parsed.command, parsed.args ?? [], context?.signal);
-    assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), agentMode);
+    assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), shellMode(context?.appAccess));
     // 取消通道：会话取消 / 工具超时（Agent 的 withTimeout）会 abort signal，
     // 此时通过 cancel_running_command 杀掉 Rust 侧正在执行的进程树，而不是
     // 让命令在后台继续跑完、副作用滞后落地。
@@ -139,7 +141,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     const command = asString(args.command, 'command');
     await ensureExternalPathAllowed(workdir, 'execute', context?.signal);
     await ensureCommandPathsAllowed(command, [], context?.signal);
-    assertShellCodePaprAccess(command, agentMode, workdir);
+    assertShellCodePaprAccess(command, shellMode(context?.appAccess), workdir);
     // app agent 调用时按两轴构建沙箱：网络关 → 无网络；local 非 write → 工作区只读
     const sandbox = agentSandboxArgs(agentMode, context?.appAccess);
     const cancelToken = context?.signal ? createCancelToken() : undefined;
@@ -163,7 +165,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     const command = asString(args.command, 'command');
     await ensureExternalPathAllowed(workdir, 'execute', context?.signal);
     await ensureCommandPathsAllowed(command, [], context?.signal);
-    assertShellCodePaprAccess(command, agentMode, workdir);
+    assertShellCodePaprAccess(command, shellMode(context?.appAccess), workdir);
     return await invoke<BackgroundCommandResult>('start_workspace_shell_background_command', {
       workspacePath: workspace(),
       command,
@@ -181,7 +183,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
       previewUrl: asOptionalString(args.previewUrl),
     };
     await ensureCommandPathsAllowed(parsed.command, parsed.args ?? [], context?.signal);
-    assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), agentMode);
+    assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), shellMode(context?.appAccess));
 
     return await invoke<BackgroundCommandResult>('start_workspace_background_command', {
       workspacePath: workspace(),
@@ -200,7 +202,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
       title: asOptionalString(args.title),
     };
     await ensureCommandPathsAllowed(parsed.command, parsed.args ?? [], context?.signal);
-    assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), agentMode);
+    assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), shellMode(context?.appAccess));
 
     const result = await invoke<BackgroundCommandResult>('start_workspace_background_command', {
       workspacePath: workspace(),
@@ -270,7 +272,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     });
   });
 
-  registry.register(toolByName('shell_send_input'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('shell_send_input'), async (args: Record<string, unknown>, context) => {
     const parsed: ShellSendInputArgs = {
       sessionId: asString(args.sessionId, 'sessionId'),
       input: asOptionalString(args.input),
@@ -283,7 +285,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     }
     if (parsed.command) {
       await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
-      assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), agentMode);
+      assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), shellMode(context?.appAccess));
       return await invoke<ShellSendInputResult>('send_shell_command', {
         sessionId: parsed.sessionId,
         command: parsed.command,
@@ -295,7 +297,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     }
 
     await ensureCommandPathsAllowed(parsed.input);
-    assertShellCodePaprAccess(parsed.input, agentMode);
+    assertShellCodePaprAccess(parsed.input, shellMode(context?.appAccess));
 
     return await invoke<ShellSendInputResult>('send_shell_input', {
       sessionId: parsed.sessionId,

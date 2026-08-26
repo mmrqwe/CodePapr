@@ -116,3 +116,11 @@ export function agentSandboxArgs(
     allowCodepaprApps,
   };
 }
+
+/** 文件闸门用的有效 mode：App 会话，或 in-app agent 带了 allowCodepaprApps。 */
+export function effectiveCodePaprMode(
+  mode: string | undefined,
+  appAccess?: { allowCodepaprApps?: boolean }
+): string {
+  return agentSandboxArgs(mode ?? 'agent', appAccess).allowCodepaprApps ? 'app' : (mode ?? 'agent');
+}

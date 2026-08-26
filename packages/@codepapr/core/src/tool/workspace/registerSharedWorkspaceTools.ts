@@ -18,7 +18,7 @@ function findTool(name: string): IToolDefinition {
 }
 
 function forward(registry: ToolRegistry, target: string): ToolHandler {
-  return async (args) => registry.execute(target, args);
+  return async (args, context) => registry.execute(target, args, context);
 }
 
 export interface SharedToolDispatcherOptions {
@@ -43,13 +43,13 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
   // ──── 文件系统 ────
   registry.register(findTool('read'), forward(registry, 'workspace_read_file'));
   registry.register(findTool('write'), forward(registry, 'workspace_write_file'));
-  registry.register(findTool('edit'), async (args) => {
-    return await registry.execute('workspace_apply_patch', args);
+  registry.register(findTool('edit'), async (args, context) => {
+    return await registry.execute('workspace_apply_patch', args, context);
   });
-  registry.register(findTool('patch'), async (args) => {
-    return await registry.execute('workspace_apply_diff', args);
+  registry.register(findTool('patch'), async (args, context) => {
+    return await registry.execute('workspace_apply_diff', args, context);
   });
-  registry.register(findTool('grep'), async (args) => {
+  registry.register(findTool('grep'), async (args, context) => {
     if (args.semantic === true) {
       const relativePath = typeof args.relativePath === 'string' ? args.relativePath : undefined;
       if (relativePath) {
@@ -57,21 +57,21 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
           const result = await registry.execute('workspace_workspace_symbol', {
             query: args.query,
             relativePath,
-          }) as { available?: boolean };
+          }, context) as { available?: boolean };
           if (result && result.available !== false) return result;
         } catch { /* LSP 不可用，降级正则 */ }
       }
-      const regexResult = await registry.execute('workspace_search_text', { ...args, isRegexp: true }) as Record<string, unknown>;
+      const regexResult = await registry.execute('workspace_search_text', { ...args, isRegexp: true }, context) as Record<string, unknown>;
       const semanticNote = '语义搜索不可用（无 LSP 或未指定锚点文件 relativePath），已降级正则搜索。';
       const innerNote = typeof regexResult.note === 'string' ? regexResult.note : '';
       return { ...regexResult, degraded: true, note: innerNote ? `${semanticNote} ${innerNote}` : semanticNote };
     }
-    return await registry.execute('workspace_search_text', { ...args, isRegexp: true });
+    return await registry.execute('workspace_search_text', { ...args, isRegexp: true }, context);
   });
-  registry.register(findTool('glob'), async (args) => {
+  registry.register(findTool('glob'), async (args, context) => {
     const rawQuery = asString(args.query, 'query');
     const regexQuery = globToRegex(rawQuery);
-    return await registry.execute('workspace_search_files', { ...args, query: regexQuery, isRegexp: true });
+    return await registry.execute('workspace_search_files', { ...args, query: regexQuery, isRegexp: true }, context);
   });
   registry.register(findTool('list'), forward(registry, 'workspace_list_files'));
 

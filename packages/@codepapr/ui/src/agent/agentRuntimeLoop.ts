@@ -62,6 +62,15 @@ import {
 // silently stripping tools the app's level does not grant).
 import { agentToolsFor, legacyLevelToAccess } from '../papr/levelGrants';
 import type { AgentRuntimeHost } from './agentRuntimeHost';
+import {
+  AgentIdleTimeoutError,
+  bindChatIdle,
+  onChatIdleFired,
+  pauseChatIdle,
+  resumeChatIdle,
+  unbindChatIdle,
+  wrapFetchForChatIdle,
+} from './chatIdleWatchdog';
 
 let runtimeHost: AgentRuntimeHost | null = null;
 
@@ -744,10 +753,12 @@ async function _refreshBootstrapRequest(requestId: string): Promise<string | nul
     bootstrapRequestId,
   });
 
+  pauseChatIdle();
   try {
     return await result;
   } finally {
     clearTimeout(timer);
+    resumeChatIdle();
   }
 }
 
@@ -816,6 +827,7 @@ async function _commitContextCompactionRequest(
     },
   });
 
+  pauseChatIdle();
   try {
     const response = await result;
     if (!response.success) {
@@ -823,6 +835,7 @@ async function _commitContextCompactionRequest(
     }
   } finally {
     clearTimeout(timer);
+    resumeChatIdle();
   }
 }
 
@@ -1536,10 +1549,14 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   });
 
   let compacted = false;
-  // Idle backstop: if the whole agent produces no stream/tool activity for this
-  // long, declare it hung and abort. Permission waits explicitly suspend this
-  // backstop; the timer still catches unrelated worker/tool hangs.
-  const CHAT_IDLE_TIMEOUT_MS = 300_000;
+  // Idle backstop: last-resort hang detector when no LLM fetch, tool, or
+  // UI RPC is in flight. Live HTTP silence is owned by stream idle +
+  // reconnect — aborting the chat signal here would look like user-cancel
+  // and kill retries. Permission waits still suspend it.
+  const CHAT_IDLE_TIMEOUT_MS = Math.max(
+    10_000,
+    payload.settings.streamIdleTimeoutMs || 300_000
+  );
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let rejectIdle: ((err: Error) => void) | undefined;
   const clearIdle = () => {
@@ -1557,22 +1574,36 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
         return;
       }
       idleTimer = undefined;
-      abortController.abort();
-      rejectIdle?.(
-        new Error(`Agent idle timeout: no activity for ${CHAT_IDLE_TIMEOUT_MS / 1000}s`)
-      );
+      onChatIdleFired({
+        rearm: armIdle,
+        abortTurn: () => {
+          // Reject first: abort() otherwise surfaces as AbortError and the
+          // chat catch swallows it as a user cancel.
+          rejectIdle?.(new AgentIdleTimeoutError(CHAT_IDLE_TIMEOUT_MS));
+          abortController.abort();
+        },
+      });
     }, CHAT_IDLE_TIMEOUT_MS);
   };
 
   // 工具执行（含子代理）期间暂停空闲兜底；结束时按正常节奏恢复。
+  // 必须走 pause/resume（带深度），不能只 clearIdle：sidecar 的 fetch
+  // wrap 会在子代理 LLM keepalive 上 pulse，否则会把父回合的 idle 重新武装。
   toolActivityNotifier = (phase) => {
     if (phase === 'start') {
-      clearIdle();
+      pauseChatIdle();
     } else {
-      armIdle();
+      resumeChatIdle();
     }
   };
 
+  // Bind before agent.chat() so native fetch keepalives can pulse idle
+  // during the first LLM round-trip (headers + SSE comments).
+  bindChatIdle(armIdle, clearIdle);
+  const idleRace = new Promise<never>((_, reject) => {
+    rejectIdle = reject;
+  });
+  armIdle();
   const chatPromise = agent.chat(
     payload.userInput,
     (event) => {
@@ -1595,7 +1626,6 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     payload.contextInsertions
   );
 
-  armIdle();
   let response: IAgentResponse;
   // PR5（ADR-009 第11条）：激活 re-recall 上下文——tool-response 分发时
   // 据此 push 新 insertion；每 chat 至多一次。
@@ -1605,12 +1635,11 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   try {
     response = await Promise.race([
       chatPromise,
-      new Promise<never>((_, reject) => {
-        rejectIdle = reject;
-      }),
+      idleRace,
     ]);
   } finally {
     clearIdle();
+    unbindChatIdle(armIdle);
     activeChatAgent = null;
     activeUserMessageId = null;
   }
@@ -1906,7 +1935,7 @@ export function startAgentRuntime(host: AgentRuntimeHost): void {
     throw new Error('Agent runtime host already started');
   }
   runtimeHost = host;
-  setGlobalFetchFn(host.fetch ?? proxyFetch);
+  setGlobalFetchFn(wrapFetchForChatIdle(host.fetch ?? proxyFetch));
   host.installFatalHandlers?.(reportDiagnostic);
   host.subscribe((message) => {
     try {

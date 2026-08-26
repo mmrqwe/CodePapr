@@ -101,7 +101,12 @@ class MockSidecarTransport implements AgentRuntimeTransport {
 
 function createAgent(
   initialMessages: IMessage[] = [],
-  overrides?: { multimodalEnabled?: boolean; mcpSearch?: boolean; transport?: AgentRuntimeTransport }
+  overrides?: {
+    multimodalEnabled?: boolean;
+    mcpSearch?: boolean;
+    transport?: AgentRuntimeTransport;
+    mode?: 'ask' | 'plan' | 'agent' | 'app';
+  }
 ): WorkerBackedAgent {
   return new WorkerBackedAgent({
     sessionId: 'session-1',
@@ -185,7 +190,9 @@ function createAgent(
       thinkingEnabled: true,
       reasoningEffort: 'max',
     },
-    runtime: {},
+    runtime: {
+      ...(overrides?.mode ? { mode: overrides.mode } : {}),
+    },
     ...(overrides?.transport ? { transport: overrides.transport } : {}),
   });
 }
@@ -220,6 +227,42 @@ describe('WorkerBackedAgent', () => {
     expect(initMessage.payload.workspacePath).toBe('/tmp/codepapr-worker-agent-test');
     expect(initMessage.payload.settings.model).toBe('deepseek-test');
     expect(initMessage.payload.toolDefinitions.length).toBeGreaterThan(0);
+  });
+
+  it('forwards runtime.mode on init, chat, and run-app-agent', async () => {
+    const agent = createAgent([], { mode: 'app' });
+    const worker = MockWorker.instances[0];
+    const initMessage = worker?.messages[0];
+    expect(initMessage?.type).toBe('init');
+    if (initMessage?.type !== 'init') throw new Error('expected init message');
+    expect(initMessage.payload.runtime.mode).toBe('app');
+
+    const chatPromise = agent.chat('hello');
+    const chatMessage = chatMessages(worker)[0];
+    expect(chatMessage?.type).toBe('chat');
+    if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
+    expect(chatMessage.payload.runtime.mode).toBe('app');
+    worker?.emit({
+      type: 'result',
+      requestId: chatMessage.payload.requestId,
+      response: { role: 'assistant', content: 'ok' },
+      deltaMessages: [],
+      logLength: 0,
+    });
+    await chatPromise;
+
+    const runPromise = agent.runAppAgent(
+      { appId: 'demo', agentName: 'assistant', task: 'read app files' },
+      undefined,
+      'run-mode',
+    );
+    const appMessage = worker?.messages.find(
+      (m): m is Extract<MainToAgentWorkerMessage, { type: 'run-app-agent' }> =>
+        m.type === 'run-app-agent' && m.requestId === 'run-mode',
+    );
+    expect(appMessage?.payload.mode).toBe('app');
+    worker?.emit({ type: 'app-agent-result', requestId: 'run-mode', content: 'done' });
+    await runPromise;
   });
 
   it('buffers content and reasoning deltas before flushing them to the UI', async () => {

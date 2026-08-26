@@ -49,6 +49,25 @@ export function formatProviderError(error: ProviderRequestError, lang: Lang): st
     : `错误：${providerLabel} 请求失败${error.status ? `（HTTP ${error.status}）` : ''}。${error.message}。${requestIdText}`;
 }
 
+function isAgentIdleTimeout(error: unknown): boolean {
+  if (
+    error instanceof Error &&
+    (error as Error & { name?: string }).name === 'AgentIdleTimeoutError'
+  ) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /Agent idle timeout/i.test(message);
+}
+
+function formatAgentIdleTimeout(lang: Lang): string {
+  return lang === 'en'
+    ? 'The model did not respond for a while, so this turn was stopped. Please try again.'
+    : lang === 'zh-TW'
+      ? '模型長時間沒有回應，已停止本回合。請再試一次。'
+      : '模型长时间没有响应，已停止本回合。请再试一次。';
+}
+
 export function formatAgentError(error: unknown, lang: Lang): string {
   if (error instanceof ProviderRequestError) {
     return formatProviderError(error, lang);
@@ -67,6 +86,10 @@ export function formatAgentError(error: unknown, lang: Lang): string {
     (error as Error & { name?: string }).name === 'StreamIdleTimeoutError'
   ) {
     return formatNetworkInterruption(lang);
+  }
+
+  if (isAgentIdleTimeout(error)) {
+    return formatAgentIdleTimeout(lang);
   }
 
   // PR2：ContextBudget reject-request 的结构化错误。Worker 边界只保留

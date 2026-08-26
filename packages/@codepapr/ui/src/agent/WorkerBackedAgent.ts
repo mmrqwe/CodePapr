@@ -305,6 +305,20 @@ export function getActiveAgent(): WorkerBackedAgent | null {
   return activeInstance;
 }
 
+function toWorkerRuntimePayload(
+  runtime: WorkerBackedAgentConfig['runtime']
+): WorkerAgentRuntimeConfig {
+  return {
+    rulesSection: runtime.rulesSection,
+    customPrompt: runtime.customPrompt,
+    memorySection: runtime.memorySection,
+    lang: runtime.lang,
+    mode: runtime.mode,
+    skillDefinitions: runtime.skillDefinitions,
+    agentDefinitions: runtime.agentDefinitions,
+  };
+}
+
 export class WorkerBackedAgent implements AgentRuntimeHandle {
   private readonly transport: AgentRuntimeTransport;
   private readonly logStore: AppendOnlyLog;
@@ -417,14 +431,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         settings: config.settings,
         toolDefinitions: this.toolDefinitions,
         workspacePath: config.workspacePath,
-        runtime: {
-          rulesSection: config.runtime.rulesSection,
-          customPrompt: config.runtime.customPrompt,
-          memorySection: config.runtime.memorySection,
-          lang: config.runtime.lang,
-          skillDefinitions: config.runtime.skillDefinitions,
-          agentDefinitions: config.runtime.agentDefinitions,
-        },
+        runtime: toWorkerRuntimePayload(config.runtime),
       },
     } satisfies MainToAgentWorkerMessage);
     if (isPermissionWaitActive()) {
@@ -715,14 +722,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       systemPrompt: this.config.systemPrompt,
       parameters: this.config.parameters,
       toolDefinitions: this.toolDefinitions,
-      runtime: {
-        rulesSection: this.config.runtime.rulesSection,
-        customPrompt: this.config.runtime.customPrompt,
-        memorySection: this.config.runtime.memorySection,
-        lang: this.config.runtime.lang,
-        skillDefinitions: this.config.runtime.skillDefinitions,
-        agentDefinitions: this.config.runtime.agentDefinitions,
-      },
+      runtime: toWorkerRuntimePayload(this.config.runtime),
     };
 
     const response = await new Promise<IAgentResponse>((resolve, reject) => {
@@ -768,7 +768,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       this.postToWorker({
         type: 'run-app-agent',
         requestId,
-        payload,
+        payload: {
+          ...payload,
+          mode: payload.mode ?? this.config.runtime.mode ?? 'app',
+        },
       } satisfies MainToAgentWorkerMessage);
     });
 

@@ -1531,6 +1531,22 @@ describe('ChatPanel', () => {
     expect(container.textContent).toContain('会话 2 的问题');
   });
 
+  it('renders explore progress after the conversation, not above it', async () => {
+    const runId = startSubagentProgress('explore', '查找入口', undefined, 'session-1');
+    completeSubagentProgress(runId, 'found it');
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const text = container.textContent ?? '';
+    const userAt = text.indexOf('把回复布局改成 VS Code 那样');
+    const exploreAt = text.indexOf('Explore 分析完成');
+    expect(userAt).toBeGreaterThan(-1);
+    expect(exploreAt).toBeGreaterThan(userAt);
+    expect(container.querySelector('[data-subagent-run="explore"]')).not.toBeNull();
+  });
+
   describe('QuestionCard (plan mode question tool)', () => {
     type SendMessageSpy = (
       input: string,

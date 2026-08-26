@@ -69,6 +69,7 @@ export function createUiWorkspaceHost(params: {
         workspacePath: params.workspacePath,
         relativePath: options.relativePath,
         maxDepth: options.maxDepth,
+        includeCodePaprApps: mode === 'app',
       });
     },
     async readTextFile(options) {

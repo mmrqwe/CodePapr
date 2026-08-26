@@ -27,6 +27,7 @@ import {
 import { useAgentStore } from '../store/agentStore';
 import { resolveSkillFilePath } from '../utils/projectConfigLoader';
 import { type WorkspaceToolContext } from './workspaceToolContext';
+import { effectiveCodePaprMode } from './codepaprAgentAccess';
 
 export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void {
   const {
@@ -35,10 +36,10 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
     notifyWorkspaceMutation,
     options,
   } = ctx;
-  // app 模式下放行 .CodePapr/apps（Papr 应用源码存放处），其余模式保持屏蔽
-  const includeCodePaprApps = options.mode === 'app';
+  const includeCodePaprAppsFor = (appAccess?: { allowCodepaprApps?: boolean }): boolean =>
+    effectiveCodePaprMode(options.mode, appAccess) === 'app';
 
-  registry.register(toolByName('workspace_search_text'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_search_text'), async (args: Record<string, unknown>, context) => {
     const parsed: SearchTextArgs = {
       query: asString(args.query, 'query'),
       caseSensitive: asOptionalBoolean(args.caseSensitive, 'caseSensitive'),
@@ -58,12 +59,12 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       maxResults: parsed.maxResults,
       maxMatchesPerFile: parsed.maxMatchesPerFile,
       maxBytesPerFile: parsed.maxBytesPerFile,
-      includeCodePaprApps,
+      includeCodePaprApps: includeCodePaprAppsFor(context?.appAccess),
       includeIgnoredDirs: parsed.includeIgnoredDirs,
     });
   });
 
-  registry.register(toolByName('workspace_search_files'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_search_files'), async (args: Record<string, unknown>, context) => {
     const parsed: SearchFilesArgs = {
       query: asString(args.query, 'query'),
       caseSensitive: asOptionalBoolean(args.caseSensitive, 'caseSensitive'),
@@ -77,7 +78,7 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       caseSensitive: parsed.caseSensitive,
       isRegexp: parsed.isRegexp,
       maxResults: parsed.maxResults,
-      includeCodePaprApps,
+      includeCodePaprApps: includeCodePaprAppsFor(context?.appAccess),
       includeIgnoredDirs: parsed.includeIgnoredDirs,
     });
   });

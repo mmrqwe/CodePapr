@@ -1536,4 +1536,14 @@ describe('Agent .CodePapr isolation', () => {
       build({ mode: 'app' }).execute('bash', { command: 'node server.js', workdir: '.CodePapr/apps/demo' })
     ).resolves.toBeTruthy();
   });
+
+  it('allows .CodePapr/apps for in-app agents via appAccess even outside app mode', async () => {
+    const appAccess = { network: false, workspaceWrite: true, allowCodepaprApps: true };
+    await expect(
+      build().execute('list', { relativePath: '.CodePapr/apps/demo' }, { appAccess })
+    ).resolves.toBeTruthy();
+    await expect(
+      build().execute('bash', { command: 'node server.js', workdir: '.CodePapr/apps/demo' }, { appAccess })
+    ).resolves.toBeTruthy();
+  });
 });

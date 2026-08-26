@@ -10,6 +10,80 @@ import { MessageBubble } from './MessageBubble';
 import { ExecutionProcessPanel } from './ExecutionProcessPanel';
 import { TaskChecklist } from '../TaskChecklist';
 
+function subagentRunLabel(run: SubAgentRun): string {
+  if (run.agent === 'explore') {
+    return run.state === 'running' ? 'Explore 正在分析代码...' : 'Explore 分析完成';
+  }
+  if (run.agent === 'scout') {
+    return run.state === 'running' ? 'Scout 正在搜索网络...' : 'Scout 搜索完成';
+  }
+  if (run.agent === 'mentor') {
+    return run.state === 'running' ? 'Mentor 正在思考...' : 'Mentor 思考完成';
+  }
+  return run.state === 'running' ? `${run.agent} 正在执行...` : `${run.agent} 执行完成`;
+}
+
+function SubagentRunPanels({
+  runs,
+  onToggle,
+}: {
+  runs: SubAgentRun[];
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <>
+      {runs.map((run) => (
+        <div
+          key={run.id}
+          data-subagent-run={run.agent}
+          className="mx-3 mb-3 rounded-xl border border-info-bg bg-base/60 overflow-hidden"
+        >
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-base/50"
+            onClick={() => onToggle(run.id)}
+          >
+            <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${run.state === 'running' ? 'animate-pulse bg-info' : 'bg-ok'}`} />
+            <span className="flex-1 min-w-0">
+              <span className="text-xs font-semibold text-info">{subagentRunLabel(run)}</span>
+              {run.prompt && (
+                <span className="block mt-0.5 text-[11px] text-fg-muted truncate">{run.prompt}</span>
+              )}
+            </span>
+            <span className="text-[9px] text-fg-dim transition-transform flex-shrink-0" style={{ transform: run.collapsed ? 'rotate(-90deg)' : 'none' }}>
+              ▼
+            </span>
+          </button>
+          {!run.collapsed && (
+            <div className="border-t border-info-bg px-3.5 py-2.5">
+              {run.content && run.state === 'completed' && (
+                <div className="mb-2 max-h-32 overflow-y-auto rounded-lg bg-base px-3 py-2 text-[11px] leading-relaxed text-fg-muted whitespace-pre-wrap">
+                  {run.content.length > 600 ? `${run.content.slice(0, 600)}...` : run.content}
+                </div>
+              )}
+              {run.steps.length > 0 && (
+                <div className="space-y-0.5">
+                  {run.steps.map((step, i) => (
+                    <div key={`${step.name}-${i}`} className="flex items-center gap-2 text-[10px]">
+                      <span className={step.status === 'error' ? 'text-danger' : 'text-ok'}>
+                        {step.status === 'error' ? '✗' : '✓'}
+                      </span>
+                      <span className="font-mono text-fg-muted">{step.name}</span>
+                      {step.summary && step.summary !== step.name && (
+                        <span className="truncate text-fg-muted">· {step.summary}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 interface MessageListProps {
   deferMessages: boolean;
   effectiveRoundWindow: RoundWindow;
@@ -131,56 +205,6 @@ export const MessageList = memo(function MessageList({
           )}
         </div>
       )}
-      {/* 空对话欢迎页不画折叠块：避免新任务/切会话时顶着上一轮 Mentor 标签。 */}
-      {!deferMessages && (sessionMessagesLoading || visibleMessagesCount > 0) && subagentRuns.map((run) => (
-        <div key={run.id} className="mx-3 mb-3 rounded-xl border border-info-bg bg-base/60 overflow-hidden">
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-base/50"
-            onClick={() => onToggleSubagentCollapse(run.id)}
-          >
-            <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${run.state === 'running' ? 'animate-pulse bg-info' : 'bg-ok'}`} />
-            <span className="flex-1 min-w-0">
-              <span className="text-xs font-semibold text-info">
-                {run.agent === 'explore' ? (run.state === 'running' ? 'Explore 正在分析代码...' : 'Explore 分析完成') :
-                 run.agent === 'scout' ? (run.state === 'running' ? 'Scout 正在搜索网络...' : 'Scout 搜索完成') :
-                 run.agent === 'mentor' ? (run.state === 'running' ? 'Mentor 正在思考...' : 'Mentor 思考完成') :
-                 (run.state === 'running' ? `${run.agent} 正在执行...` : `${run.agent} 执行完成`)}
-              </span>
-              {run.prompt && (
-                <span className="block mt-0.5 text-[11px] text-fg-muted truncate">{run.prompt}</span>
-              )}
-            </span>
-            <span className="text-[9px] text-fg-dim transition-transform flex-shrink-0" style={{ transform: run.collapsed ? 'rotate(-90deg)' : 'none' }}>
-              ▼
-            </span>
-          </button>
-          {!run.collapsed && (
-            <div className="border-t border-info-bg px-3.5 py-2.5">
-              {run.content && run.state === 'completed' && (
-                <div className="mb-2 max-h-32 overflow-y-auto rounded-lg bg-base px-3 py-2 text-[11px] leading-relaxed text-fg-muted whitespace-pre-wrap">
-                  {run.content.length > 600 ? `${run.content.slice(0, 600)}...` : run.content}
-                </div>
-              )}
-              {run.steps.length > 0 && (
-                <div className="space-y-0.5">
-                  {run.steps.map((step, i) => (
-                    <div key={`${step.name}-${i}`} className="flex items-center gap-2 text-[10px]">
-                      <span className={step.status === 'error' ? 'text-danger' : 'text-ok'}>
-                        {step.status === 'error' ? '✗' : '✓'}
-                      </span>
-                      <span className="font-mono text-fg-muted">{step.name}</span>
-                      {step.summary && step.summary !== step.name && (
-                        <span className="truncate text-fg-muted">· {step.summary}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
       {!deferMessages && renderedMessages.map((m) => {
         const isUserMsg = m.role === 'user';
         const showUserActions = isUserMsg && !isLoading;
@@ -318,6 +342,10 @@ export const MessageList = memo(function MessageList({
       )}
       {bottomSpacerHeight > 0 && (
         <div aria-hidden style={{ height: bottomSpacerHeight }} />
+      )}
+      {/* 钉在当前回合底部：空欢迎页不画，避免新任务/切会话时顶着上一轮标签。 */}
+      {!deferMessages && (sessionMessagesLoading || visibleMessagesCount > 0) && (
+        <SubagentRunPanels runs={subagentRuns} onToggle={onToggleSubagentCollapse} />
       )}
       {activeSessionId && taskChecklists[activeSessionId] ? (
         <div className="mx-3 mb-4 rounded-2xl border border-line bg-base">

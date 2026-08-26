@@ -4,6 +4,7 @@ import {
   assertAgentCodePaprAccess,
   assertShellCodePaprAccess,
   codePaprSuffix,
+  effectiveCodePaprMode,
 } from './codepaprAgentAccess';
 
 describe('codePaprSuffix', () => {
@@ -109,5 +110,11 @@ describe('agentSandboxArgs', () => {
     expect(
       agentSandboxArgs('agent', { network: false, workspaceWrite: true }).allowCodepaprApps
     ).toBe(true);
+  });
+
+  it('promotes file-gate mode to app when allowCodepaprApps is set', () => {
+    expect(effectiveCodePaprMode('agent')).toBe('agent');
+    expect(effectiveCodePaprMode('app')).toBe('app');
+    expect(effectiveCodePaprMode('agent', { allowCodepaprApps: true })).toBe('app');
   });
 });

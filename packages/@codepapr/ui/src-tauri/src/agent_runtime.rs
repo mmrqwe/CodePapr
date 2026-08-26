@@ -277,8 +277,13 @@ fn note_outbound_message(runtime_id: &str, line: &str) {
         _ => None,
     };
     let mode = match ty {
-        "init" | "chat" | "run-app-agent" => value
+        "init" | "chat" => value
             .pointer("/payload/runtime/mode")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        "run-app-agent" => value
+            .pointer("/payload/mode")
+            .or_else(|| value.pointer("/payload/runtime/mode"))
             .and_then(|v| v.as_str())
             .map(str::to_string),
         _ => None,
