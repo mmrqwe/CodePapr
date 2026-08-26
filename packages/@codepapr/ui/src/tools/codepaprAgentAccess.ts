@@ -96,11 +96,18 @@ export function assertShellCodePaprAccess(
   }
 }
 
+function allowsCodePaprApps(
+  mode: string | undefined,
+  appAccess?: { allowCodepaprApps?: boolean } | null
+): boolean {
+  return mode === 'app' || appAccess?.allowCodepaprApps === true || Boolean(appAccess);
+}
+
 export function agentSandboxArgs(
   mode: string,
   appAccess?: { network: boolean; workspaceWrite: boolean; allowCodepaprApps?: boolean }
 ): { network: boolean; workspaceWrite: boolean; allowBind: boolean; allowCodepaprApps: boolean } {
-  const allowCodepaprApps = mode === 'app' || appAccess?.allowCodepaprApps === true || Boolean(appAccess);
+  const allowCodepaprApps = allowsCodePaprApps(mode, appAccess);
   if (appAccess) {
     return {
       network: appAccess.network,
@@ -122,5 +129,5 @@ export function effectiveCodePaprMode(
   mode: string | undefined,
   appAccess?: { allowCodepaprApps?: boolean }
 ): string {
-  return agentSandboxArgs(mode ?? 'agent', appAccess).allowCodepaprApps ? 'app' : (mode ?? 'agent');
+  return allowsCodePaprApps(mode, appAccess) ? 'app' : (mode ?? 'agent');
 }
