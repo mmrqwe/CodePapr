@@ -158,17 +158,53 @@ async function downloadFileWindows(url, outputPath) {
   ]);
 }
 
+function readJsonFile(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function getLockfilePackageVersion(packageName) {
+  const lockfilePath = path.resolve(repoRoot, 'package-lock.json');
+  if (!fs.existsSync(lockfilePath)) {
+    return null;
+  }
+
+  const lockfile = readJsonFile(lockfilePath);
+  return lockfile.packages?.[`node_modules/${packageName}`]?.version ?? null;
+}
+
+function getInstalledPackageVersion(packageName) {
+  const packageJsonPath = path.resolve(repoRoot, 'node_modules', packageName, 'package.json');
+  if (!fs.existsSync(packageJsonPath)) {
+    return null;
+  }
+
+  return readJsonFile(packageJsonPath).version ?? null;
+}
+
 async function ensureNodeDependencies() {
   const requiredPackages = [
-    path.resolve(repoRoot, 'node_modules/typescript/package.json'),
-    path.resolve(repoRoot, 'node_modules/@tauri-apps/cli/package.json'),
+    'typescript',
+    '@tauri-apps/cli',
+    'eslint',
+    'typescript-eslint',
+    '@eslint/js',
   ];
 
-  if (requiredPackages.every((packagePath) => fs.existsSync(packagePath))) {
+  const stalePackages = requiredPackages.filter((packageName) => {
+    const installedVersion = getInstalledPackageVersion(packageName);
+    if (!installedVersion) {
+      return true;
+    }
+
+    const lockedVersion = getLockfilePackageVersion(packageName);
+    return Boolean(lockedVersion) && lockedVersion !== installedVersion;
+  });
+
+  if (stalePackages.length === 0) {
     return;
   }
 
-  console.log('[desktop-workflow] Installing workspace npm dependencies...');
+  console.log(`[desktop-workflow] Installing workspace npm dependencies (${stalePackages.join(', ')} missing or stale)...`);
   await runNpm(['install'], repoRoot);
 }
 
