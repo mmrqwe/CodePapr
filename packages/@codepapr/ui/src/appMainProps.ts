@@ -1,7 +1,8 @@
 import type { GitFileSelection } from './utils/workspaceGitPanel';
 import type { ReviewScope } from './utils/codeReview';
 import type { PreviewLocation } from './utils/projectDiagnosticLocations';
-import { getTranslation, type Lang } from './utils/i18n';
+import type { Settings } from './store/agentStore';
+import { getTranslation } from './utils/i18n';
 
 export type AppMainProps = {
   projectGraphLoading: boolean;
@@ -10,7 +11,7 @@ export type AppMainProps = {
   t: ReturnType<typeof getTranslation>;
   openedAppId: string | null;
   isGitPanelExpanded: boolean;
-  settings: { lang: Lang; experimentalCharacters?: boolean };
+  settings: Settings;
   selectedPath: string | null;
   selectedGitFile: GitFileSelection | null;
   handleSelectPath: (path: string | null) => void;

@@ -5,9 +5,8 @@ import { PermissionDialog } from './components/PermissionDialog';
 import { McpConfirmDialog } from './components/McpConfirmDialog';
 import { ProjectSwitcherModal } from './components/ProjectSwitcherModal';
 import { ToastContainer } from './components/ToastContainer';
-import { isApiConfigured } from './store/agentStore';
+import { isApiConfigured, type Settings } from './store/agentStore';
 import type { ReviewScope } from './utils/codeReview';
-import type { Lang } from './utils/i18n';
 
 const SettingsModal = lazy(() =>
   import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
@@ -42,11 +41,12 @@ const OnboardingPanel = lazy(() =>
 
 export function AppOverlays(p: {
   workspacePath: string;
-  settings: { lang: Lang; experimentalCharacters?: boolean };
+  settings: Settings;
   openedAppId: string | null;
   showSettings: boolean;
   showCharacters: boolean;
   showAbout: boolean;
+  setShowAbout: (v: boolean) => void;
   showProjectSwitcher: boolean;
   setShowProjectSwitcher: (v: boolean) => void;
   showStats: boolean;
@@ -69,7 +69,7 @@ export function AppOverlays(p: {
 }): JSX.Element {
   const {
     workspacePath, settings, openedAppId, showSettings, showCharacters, showAbout,
-    showProjectSwitcher, setShowProjectSwitcher, showStats, setShowStats,
+    setShowAbout, showProjectSwitcher, setShowProjectSwitcher, showStats, setShowStats,
     showProjectConfig, setShowProjectConfig, setShowSkillMarket, showSkillMarket,
     showCodeReview, setShowCodeReview, settingsLoaded, onboardingDismissed,
     setOnboardingDismissed, setShowSettings, setShowCharacters, nativeLayerBlocked,

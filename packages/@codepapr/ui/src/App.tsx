@@ -222,7 +222,7 @@ export default function App() {
       projectGraphLoading={projectGraphLoading}
       projectGraphPhase={projectGraphPhase}
       workspacePath={workspacePath}
-      t={t as Record<string, string>}
+      t={t}
       openedAppId={openedAppId}
       isGitPanelExpanded={isGitPanelExpanded}
       settings={settings}

@@ -67,6 +67,7 @@ export function AppMainView(p: AppMainProps) {
         showSettings={p.showSettings}
         showCharacters={p.showCharacters}
         showAbout={p.showAbout}
+        setShowAbout={p.setShowAbout}
         showProjectSwitcher={p.showProjectSwitcher}
         setShowProjectSwitcher={p.setShowProjectSwitcher}
         showStats={p.showStats}

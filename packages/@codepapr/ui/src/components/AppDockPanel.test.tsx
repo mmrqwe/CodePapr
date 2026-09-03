@@ -106,10 +106,26 @@ describe('AppDockPanel', () => {
     });
   }
 
+  function confirmDialogButton(): HTMLButtonElement {
+    const button = container.querySelector<HTMLButtonElement>('[data-action="confirm-delete"]');
+    if (!button) throw new Error('Confirm delete button not found');
+    return button;
+  }
+
+  function cancelDialogButton(): HTMLButtonElement {
+    const button = Array.from(container.querySelectorAll('button')).find(
+      (el) => el.textContent?.trim() === '取消',
+    );
+    if (!button) throw new Error('Cancel delete button not found');
+    return button;
+  }
+
   it('N13：确认后删除成功才从 UI 移除', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderPanel();
     await clickDelete();
+    act(() => {
+      confirmDialogButton().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -119,20 +135,20 @@ describe('AppDockPanel', () => {
   });
 
   it('N13：取消确认时不做任何事', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     renderPanel();
     await clickDelete();
+    act(() => {
+      cancelDialogButton().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(invokeMock).not.toHaveBeenCalledWith('papr_delete_app', expect.anything());
     expect(useAppRuntimeStore.getState().apps).toHaveLength(1);
   });
 
   it('N13：删除失败时 app 保留在 UI 并显示错误（不假删除）', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     invokeMock.mockImplementation(async (command?: string) => {
       if (command === 'papr_delete_app') {
         throw new Error('permission denied');
@@ -141,6 +157,9 @@ describe('AppDockPanel', () => {
     });
     renderPanel();
     await clickDelete();
+    act(() => {
+      confirmDialogButton().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
