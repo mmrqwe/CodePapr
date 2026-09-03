@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/codepapr-core",
     "crates/codepapr-server",
+    "crates/codepapr-cli",
     "packages/@codepapr/ui/src-tauri",
 ]
 

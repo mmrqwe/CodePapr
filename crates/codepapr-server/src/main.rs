@@ -48,9 +48,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let workspace = cli.workspace.map(|ws| {
         let p = std::path::PathBuf::from(&ws);
-        std::fs::canonicalize(&p)
+        let s = std::fs::canonicalize(&p)
             .map(|c| c.to_string_lossy().to_string())
-            .unwrap_or(ws)
+            .unwrap_or(ws);
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            stripped.to_string()
+        } else {
+            s
+        }
     });
 
     if let Some(port) = cli.port {

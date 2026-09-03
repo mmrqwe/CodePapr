@@ -10,4 +10,5 @@ pub mod types;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use types::CommandResult;
+pub use background::run_workspace_command;
+pub use types::CommandResult;

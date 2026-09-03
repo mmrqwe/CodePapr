@@ -8,12 +8,12 @@ use std::{
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandResult {
-    pub(crate) command: String,
-    pub(crate) args: Vec<String>,
-    pub(crate) status: Option<i32>,
-    pub(crate) stdout: String,
-    pub(crate) stderr: String,
-    pub(crate) timed_out: bool,
+    pub command: String,
+    pub args: Vec<String>,
+    pub status: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub timed_out: bool,
 }
 
 #[derive(Serialize)]

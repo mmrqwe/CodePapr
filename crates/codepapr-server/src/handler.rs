@@ -175,6 +175,21 @@ pub async fn handle_request(ctx: &Arc<ServerContext>, method: &str, params: Valu
         }
 
         // ── Shell ─────────────────────────────────────────────────────────
+        "shell/execute" => {
+            let ws = require_workspace(ctx, &params)?;
+            let command = require_str(&params, "command")?;
+            let args = parse_string_vec(&params, "args");
+            let timeout = params.get("timeoutSeconds").and_then(|v| v.as_u64());
+            let res = codepapr_core::shell::run_workspace_command(
+                ws,
+                command.to_string(),
+                args,
+                timeout,
+                None,
+                None,
+            ).await?;
+            serde_json::to_value(res).map_err(|e| e.to_string())
+        }
         "shell/openSession" => {
             let ws = require_workspace(ctx, &params)?;
             let shell = params.get("shell").and_then(|v| v.as_str()).map(String::from);

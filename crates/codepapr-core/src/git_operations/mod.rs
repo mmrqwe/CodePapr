@@ -12,14 +12,20 @@ use git2::Repository;
 use std::path::Path;
 
 pub(crate) fn open_repo(workspace: &Path) -> Result<Repository, String> {
-    let git_path = workspace.join(".CodePapr/git");
-    // 清理可能因崩溃遗留的锁文件（config/index/HEAD/packed-refs .lock）。
-    // 只删可证明陈旧的（存活超阈值）：无条件删除会把并发操作正在使用的
-    // 活锁删掉，破坏写到一半的 index/ref。
-    crate::shared::remove_stale_git_locks(&git_path.join(".git"));
-    let repo = Repository::open(&git_path).map_err(|e| format!("open repo: {}", e.message()))?;
-    let _ = repo.set_workdir(workspace, false);
-    Ok(repo)
+    let shadow_git = workspace.join(".CodePapr/git");
+    if shadow_git.exists() {
+        // 清理可能因崩溃遗留的锁文件（config/index/HEAD/packed-refs .lock）。
+        // 只删可证明陈旧的（存活超阈值）：无条件删除会把并发操作正在使用的
+        // 活锁删掉，破坏写到一半的 index/ref。
+        crate::shared::remove_stale_git_locks(&shadow_git.join(".git"));
+        let repo = Repository::open(&shadow_git).map_err(|e| format!("open repo: {}", e.message()))?;
+        let _ = repo.set_workdir(workspace, false);
+        Ok(repo)
+    } else {
+        crate::shared::remove_stale_git_locks(&workspace.join(".git"));
+        let repo = Repository::discover(workspace).map_err(|e| format!("open repo: {}", e.message()))?;
+        Ok(repo)
+    }
 }
 
 /// 校验 git 引用（分支名、tag、SHA、HEAD 等），作为纵深防御。
