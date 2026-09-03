@@ -3,6 +3,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod app_runtime;
+mod app_market_install;
 mod asset_scope;
 mod browser;
 mod character_card;
@@ -327,8 +328,8 @@ fn main() {
             app_runtime::app_frontend_mtime,
             app_runtime::install_app_npm_deps,
             app_runtime::papr_snapshot_app,
-            app_runtime::papr_install_app_files,
-            app_runtime::papr_uninstall_app,
+            app_market_install::papr_install_app_files,
+            app_market_install::papr_uninstall_app,
             app_runtime::papr_export_app,
             app_runtime::check_port_available,
             app_runtime::check_port_available_detail,
