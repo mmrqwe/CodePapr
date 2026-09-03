@@ -5,6 +5,14 @@ use std::{env, fs};
 
 static EXPANDED_PATH: OnceLock<String> = OnceLock::new();
 
+#[cfg(test)]
+use std::sync::Mutex;
+
+/// Serializes tests that override `CODEPAPR_TEST_HOME` so they do not leak into
+/// parallel tests that also call `home_dir()`.
+#[cfg(test)]
+pub static TEST_HOME_LOCK: Mutex<()> = Mutex::new(());
+
 fn append_if_dir(paths: &mut Vec<PathBuf>, path: impl Into<PathBuf>) {
     let path = path.into();
     if path.is_dir() && !paths.iter().any(|existing| existing == &path) {
@@ -102,6 +110,15 @@ pub struct PathLocationInput {
 
 /// Resolve the user's home directory from environment variables.
 pub fn home_dir() -> Result<PathBuf, String> {
+    #[cfg(test)]
+    {
+        if let Some(home) = std::env::var_os("CODEPAPR_TEST_HOME") {
+            if !home.is_empty() {
+                return Ok(PathBuf::from(home));
+            }
+        }
+    }
+
     #[cfg(target_os = "windows")]
     {
         if let Some(profile) = std::env::var_os("USERPROFILE") {

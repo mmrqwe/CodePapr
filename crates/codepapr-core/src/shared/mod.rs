@@ -13,6 +13,8 @@ pub mod time;
 
 pub use git_guard::{with_workspace_git_read_lock, with_workspace_git_write_lock};
 pub use git_locks::remove_stale_git_locks;
+#[cfg(test)]
+pub use paths::TEST_HOME_LOCK;
 pub use paths::{
     canonical_workspace, expanded_path, home_dir, normalize_relative_path,
     ensure_path_accessible, ensure_path_accessible_with_policy, ensure_write_path_accessible,

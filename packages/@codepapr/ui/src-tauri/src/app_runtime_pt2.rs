@@ -336,29 +336,21 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
     };
     drop(map);
 
-    let workspace_app = format!("{}/.CodePapr/apps/{}", workspace, app_id);
-    let app_base = if std::path::Path::new(&workspace_app).is_dir() {
-        workspace_app
-    } else if let Ok(global_dir) = global_apps_dir() {
-        let global_app = global_dir.join(app_id);
-        if global_app.is_dir() {
-            global_app.to_string_lossy().into_owned()
-        } else {
+    let app_base_dir = match codepapr_core::db::resolve_app_dir(&workspace, app_id) {
+        Ok(dir) => dir,
+        Err(_) => {
             return resp(StatusCode::NOT_FOUND, "app not found".to_string());
         }
-    } else {
-        return resp(StatusCode::NOT_FOUND, "app not found".to_string());
     };
-    let raw_path = format!("{}/{}", app_base, file_path);
-
-    let canonical_base = match std::path::Path::new(&app_base).canonicalize() {
+    let canonical_base = match app_base_dir.canonicalize() {
         Ok(p) => p,
         Err(_) => {
             return resp(StatusCode::NOT_FOUND, "app not found".to_string());
         }
     };
+    let raw_path = app_base_dir.join(file_path);
 
-    let canonical_path = match std::path::Path::new(&raw_path).canonicalize() {
+    let canonical_path = match raw_path.canonicalize() {
         Ok(p) => p,
         Err(_) => {
             return resp(StatusCode::NOT_FOUND, "file not found".to_string());

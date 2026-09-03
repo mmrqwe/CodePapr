@@ -711,11 +711,7 @@ pub fn papr_delete_app(app_id: String) -> Result<(), String> {
         }
     }
 
-    let workspace = codepapr_core::shared::canonical_workspace(&ctx.workspace_path)?;
-    let app_dir = workspace
-        .join(".CodePapr")
-        .join("apps")
-        .join(&app_id);
+    let app_dir = codepapr_core::db::resolve_app_dir(&ctx.workspace_path, &app_id)?;
 
     if app_dir.exists() {
         fs::remove_dir_all(&app_dir)

@@ -63,7 +63,7 @@ fn is_unservable_app_file(file_path: &str) -> bool {
 }
 
 fn global_apps_dir() -> Result<std::path::PathBuf, String> {
-    Ok(codepapr_core::shared::home_dir()?.join(".codepapr").join("apps"))
+    codepapr_core::db::global_apps_dir()
 }
 
 #[tauri::command]

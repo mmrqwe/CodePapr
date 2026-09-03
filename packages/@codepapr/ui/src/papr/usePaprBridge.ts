@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { PaprManifest, PaprAgentDef, PaprAppSettings } from '@codepapr/types';
 import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
+import { normalizeWorkspaceId } from './projectRecordScope';
 import { accessAllows, resolveEffectiveAccess } from './levelGrants';
 import { registerAppPoster } from './appChannelHub';
 import { useAgentStore } from '../store/agentStore';
@@ -267,6 +268,8 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
       if (type === 'papr://app.info') {
         const running = useAppRuntimeStore.getState().apps.find((a) => a.appId === appId);
         const runningUrl = running?.url?.replace(/\/$/, '') ?? null;
+        const workspaceId = normalizeWorkspaceId(useAgentStore.getState().workspacePath);
+        const workspaceName = workspaceId.split(/[/\\]/).pop() || '';
         respond({
           appId,
           name: resolvedManifest.name,
@@ -274,6 +277,11 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
           permissions,
           local: currentAccess.local,
           network: currentAccess.network,
+          workspaceId,
+          workspaceName,
+          workspacePath: workspaceId,
+          lang: useAgentStore.getState().settings.lang ?? 'zh-CN',
+          scope: running?.scope ?? 'workspace',
           backendUrl: runningUrl
             ?? (resolvedManifest.port ? `http://127.0.0.1:${resolvedManifest.port}` : null),
         });

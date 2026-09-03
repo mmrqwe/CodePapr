@@ -3,9 +3,10 @@
 //! Three database locations:
 //! - **App DB** (`~/.codepapr/codepapr.sqlite`): global UI settings
 //! - **Project DB** (`<workspace>/.CodePapr/project.sqlite`): per-workspace state + ProjectGraph cache
-//! - **Papr App DB** (`<workspace>/.CodePapr/apps/<appId>/db.sqlite`): per-app key-value
-//!   storage backing `papr.db`. Kept inside the app folder so each app stays
-//!   self-contained and isolated from CodePapr internal state.
+//! - **Papr App DB** (`<appDir>/db.sqlite`): per-app key-value storage backing
+//!   `papr.db`. Lives next to the app's `manifest.json` — workspace install at
+//!   `<workspace>/.CodePapr/apps/<appId>/`, global install at `~/.codepapr/apps/<appId>/`.
+//!   A leftover workspace folder without `manifest.json` must not steal a global plugin.
 //!
 //! This module is pure Rust (rusqlite); no FFI, so unsafe is forbidden.
 
@@ -657,14 +658,61 @@ fn migrate_project_db_v4_papr_storage(conn: &Connection, workspace: &Path) -> Re
 
 // ── Papr per-app DB helpers ─────────────────────────────────────────
 
-/// Opens (and initializes) the per-app papr database at
-/// `<workspace>/.CodePapr/apps/<app_id>/db.sqlite`.
-fn open_papr_app_db(workspace_path: &str, app_id: &str) -> Result<(Connection, PathBuf), String> {
-    if app_id.is_empty() || app_id.contains("..") || app_id.contains('/') || app_id.contains('\\') {
+pub fn global_apps_dir() -> Result<PathBuf, String> {
+    Ok(home_dir()?.join(APP_DATA_DIR).join("apps"))
+}
+
+fn is_real_workspace(workspace_path: &str) -> bool {
+    !workspace_path.is_empty() && workspace_path != "__global__"
+}
+
+fn workspace_apps_dir(workspace: &Path, app_id: &str) -> PathBuf {
+    workspace.join(PROJECT_STORAGE_DIR).join("apps").join(app_id)
+}
+
+fn app_dir_has_manifest(dir: &Path) -> bool {
+    dir.join("manifest.json").is_file()
+}
+
+fn is_valid_papr_app_id(app_id: &str) -> bool {
+    !app_id.is_empty() && !app_id.contains("..") && !app_id.contains('/') && !app_id.contains('\\')
+}
+
+/// Resolve the on-disk app directory.
+///
+/// Workspace install wins only when it has `manifest.json`. A leftover folder
+/// that only contains `db.sqlite` (created by a previous bug) must not shadow
+/// `~/.codepapr/apps/<id>/`. If neither side has a manifest yet, new data
+/// falls back to the workspace app dir.
+pub fn resolve_app_dir(workspace_path: &str, app_id: &str) -> Result<PathBuf, String> {
+    if !is_valid_papr_app_id(app_id) {
         return Err(format!("非法的 appId: {app_id}"));
     }
-    let workspace = canonical_workspace(workspace_path)?;
-    let app_dir = workspace.join(PROJECT_STORAGE_DIR).join("apps").join(app_id);
+    if is_real_workspace(workspace_path) {
+        if let Ok(workspace) = canonical_workspace(workspace_path) {
+            let ws_app_dir = workspace_apps_dir(&workspace, app_id);
+            if app_dir_has_manifest(&ws_app_dir) {
+                return Ok(ws_app_dir);
+            }
+        }
+    }
+    if let Ok(global_dir) = global_apps_dir() {
+        let global_app_dir = global_dir.join(app_id);
+        if app_dir_has_manifest(&global_app_dir) {
+            return Ok(global_app_dir);
+        }
+    }
+    if is_real_workspace(workspace_path) {
+        let workspace = canonical_workspace(workspace_path)?;
+        Ok(workspace_apps_dir(&workspace, app_id))
+    } else {
+        Ok(global_apps_dir()?.join(app_id))
+    }
+}
+
+/// Opens (and initializes) the per-app papr database next to the resolved app.
+fn open_papr_app_db(workspace_path: &str, app_id: &str) -> Result<(Connection, PathBuf), String> {
+    let app_dir = resolve_app_dir(workspace_path, app_id)?;
     open_papr_app_db_at(&app_dir)
 }
 
@@ -2351,10 +2399,20 @@ fn papr_inbox_lock() -> &'static Mutex<()> {
 
 pub(crate) const PAPR_INBOX_DEFAULT_CAP: usize = 200;
 
+fn inbox_workspace_id(workspace_path: &str) -> String {
+    // 与前端 normalizeWorkspaceId / papr.app.info().workspaceId 同一规则：
+    // 用打开的工作区路径作身份，不去 canonicalize（避免 /tmp vs /private/tmp 对不上）。
+    workspace_path
+        .trim()
+        .trim_end_matches(['/', '\\'])
+        .to_string()
+}
+
 /// 向 app 的 inbox 频道原子追加一条事件，key = `inbox:<channel>`。
 ///
-/// 存储为 JSON 数组 `[{seq, ts, payload}, ...]`，只保留最近 `cap` 条；
+/// 存储为 JSON 数组 `[{seq, ts, payload, workspaceId}, ...]`，只保留最近 `cap` 条；
 /// seq 在锁内取「现有最大 seq + 1」分配，单调无冲突。返回 (seq, ts)。
+/// `workspaceId` 标记事件所属项目，供看板等按记录过滤（数据仍与插件同目录）。
 ///
 /// 原子性：进程内 Mutex + 跨进程 `BEGIN IMMEDIATE`（WAL 下全局单 writer，
 /// busy_timeout=5000 使竞争方等待而非失败）。
@@ -2398,7 +2456,13 @@ pub fn papr_inbox_append(
         .find_map(|event| event.get("seq").and_then(|value| value.as_u64()))
         .map_or(1, |last| last + 1);
     let ts = unix_millis()?;
-    events.push(serde_json::json!({ "seq": seq, "ts": ts, "payload": payload }));
+    let workspace_id = inbox_workspace_id(workspace_path);
+    events.push(serde_json::json!({
+        "seq": seq,
+        "ts": ts,
+        "payload": payload,
+        "workspaceId": workspace_id,
+    }));
     if events.len() > cap {
         let overflow = events.len() - cap;
         events.drain(0..overflow);
@@ -4496,6 +4560,133 @@ mod tests {
         );
     }
 
+    struct RestoreTestHome;
+    impl Drop for RestoreTestHome {
+        fn drop(&mut self) {
+            std::env::remove_var("CODEPAPR_TEST_HOME");
+        }
+    }
+
+    #[test]
+    fn papr_storage_global_plugin_ignores_workspace_stub_without_manifest() {
+        let _guard = crate::shared::TEST_HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let fake_home = TestWorkspace::new("papr-global-home");
+        std::env::set_var("CODEPAPR_TEST_HOME", fake_home.workspace_arg());
+        let _restore = RestoreTestHome;
+
+        let global_app = fake_home.path.join(".codepapr/apps/cursor-canvas");
+        fs::create_dir_all(&global_app).unwrap();
+        fs::write(
+            global_app.join("manifest.json"),
+            r#"{"spec":"papr/0.1","name":"看板","kind":"plugin"}"#,
+        )
+        .unwrap();
+        fs::write(global_app.join("index.html"), "<html></html>").unwrap();
+
+        let workspace = TestWorkspace::new("papr-kanban-stub");
+        let ws = workspace.workspace_arg();
+        let stub = workspace.file_path(".CodePapr/apps/cursor-canvas");
+        fs::create_dir_all(&stub).unwrap();
+        fs::write(stub.join("db.sqlite"), b"").unwrap();
+
+        let resolved = resolve_app_dir(&ws, "cursor-canvas").unwrap();
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            global_app.canonicalize().unwrap()
+        );
+
+        papr_storage_set(&ws, "cursor-canvas", "board:history", r#"[{"title":"ok"}]"#).unwrap();
+        assert!(global_app.join("db.sqlite").exists());
+        assert_eq!(
+            papr_storage_get(&ws, "cursor-canvas", "board:history")
+                .unwrap()
+                .as_deref(),
+            Some(r#"[{"title":"ok"}]"#)
+        );
+        // leftover stub must not receive the write
+        let stub_len = fs::metadata(stub.join("db.sqlite")).unwrap().len();
+        assert_eq!(stub_len, 0);
+    }
+
+    #[test]
+    fn papr_storage_workspace_manifest_wins_over_global() {
+        let _guard = crate::shared::TEST_HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let fake_home = TestWorkspace::new("papr-ws-wins-home");
+        std::env::set_var("CODEPAPR_TEST_HOME", fake_home.workspace_arg());
+        let _restore = RestoreTestHome;
+
+        let global_app = fake_home.path.join(".codepapr/apps/local-tool");
+        fs::create_dir_all(&global_app).unwrap();
+        fs::write(
+            global_app.join("manifest.json"),
+            r#"{"spec":"papr/0.1","name":"Global"}"#,
+        )
+        .unwrap();
+
+        let workspace = TestWorkspace::new("papr-ws-install");
+        let ws = workspace.workspace_arg();
+        let app_dir = workspace.file_path(".CodePapr/apps/local-tool");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(
+            app_dir.join("manifest.json"),
+            r#"{"spec":"papr/0.1","name":"Local"}"#,
+        )
+        .unwrap();
+
+        papr_storage_set(&ws, "local-tool", "k", "workspace").unwrap();
+        assert!(workspace.file_path(".CodePapr/apps/local-tool/db.sqlite").exists());
+        assert!(!global_app.join("db.sqlite").exists());
+        assert_eq!(
+            papr_storage_get(&ws, "local-tool", "k").unwrap().as_deref(),
+            Some("workspace")
+        );
+    }
+
+    #[test]
+    fn papr_inbox_global_plugin_stamps_distinct_workspace_ids() {
+        let _guard = crate::shared::TEST_HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let fake_home = TestWorkspace::new("papr-inbox-home");
+        std::env::set_var("CODEPAPR_TEST_HOME", fake_home.workspace_arg());
+        let _restore = RestoreTestHome;
+
+        let global_app = fake_home.path.join(".codepapr/apps/cursor-canvas");
+        fs::create_dir_all(&global_app).unwrap();
+        fs::write(
+            global_app.join("manifest.json"),
+            r#"{"spec":"papr/0.1","name":"看板","kind":"plugin"}"#,
+        )
+        .unwrap();
+
+        let ws_a = TestWorkspace::new("papr-inbox-a");
+        let ws_b = TestWorkspace::new("papr-inbox-b");
+        papr_inbox_append(&ws_a.workspace_arg(), "cursor-canvas", "board", r#"{"title":"A"}"#, None)
+            .unwrap();
+        papr_inbox_append(&ws_b.workspace_arg(), "cursor-canvas", "board", r#"{"title":"B"}"#, None)
+            .unwrap();
+
+        let raw = papr_storage_get(&ws_a.workspace_arg(), "cursor-canvas", "inbox:board")
+            .unwrap()
+            .expect("shared inbox");
+        let events: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(events.len(), 2);
+        let id_a = events[0]["workspaceId"].as_str().unwrap();
+        let id_b = events[1]["workspaceId"].as_str().unwrap();
+        assert_ne!(id_a, id_b);
+        let expected_a = ws_a.workspace_arg();
+        let expected_b = ws_b.workspace_arg();
+        assert_eq!(id_a, expected_a.trim().trim_end_matches(['/', '\\']));
+        assert_eq!(id_b, expected_b.trim().trim_end_matches(['/', '\\']));
+        assert_eq!(events[0]["payload"]["title"], "A");
+        assert_eq!(events[1]["payload"]["title"], "B");
+        assert!(global_app.join("db.sqlite").exists());
+    }
+
     #[test]
     fn papr_storage_app_isolation() {
         let workspace = TestWorkspace::new("papr-storage-isolation");
@@ -4546,7 +4737,7 @@ mod tests {
             papr_inbox_append(&ws, app_id, "log", r#"{"level":"ok"}"#, None).unwrap();
         assert_eq!(other_seq, 1);
 
-        // 落库格式：inbox:<channel> → [{seq, ts, payload}]
+        // 落库格式：inbox:<channel> → [{seq, ts, payload, workspaceId}]
         let raw = papr_storage_get(&ws, app_id, "inbox:cards")
             .unwrap()
             .expect("inbox key should exist");
@@ -4556,6 +4747,10 @@ mod tests {
         assert_eq!(events[0]["payload"]["op"], "add");
         assert_eq!(events[1]["seq"], 2);
         assert_eq!(events[1]["payload"]["op"], "move");
+        let ws_id = events[0]["workspaceId"].as_str().unwrap_or("");
+        let expected_id = ws.trim().trim_end_matches(['/', '\\']);
+        assert_eq!(ws_id, expected_id, "inbox workspaceId must match the open workspace path");
+        assert_eq!(events[1]["workspaceId"], ws_id);
     }
 
     #[test]
