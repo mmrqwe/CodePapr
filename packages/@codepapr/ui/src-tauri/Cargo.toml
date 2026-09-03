@@ -7,6 +7,9 @@ license = "MIT"
 repository = ""
 edition = "2021"
 default-run = "codepapr"
+# Tauri 2 bundler still disk-scans src/bin/ even with autobins=false and then
+# tries to copy those names into the .app. Keep developer-only helpers in
+# dev-bin/ so release packaging only ships the codepapr binary.
 autobins = false
 
 [[bin]]
