@@ -34,22 +34,22 @@ libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "cookies", "gzip", "brotli", "deflate", "stream", "json"] }
 url = "2"
 
-tree-sitter = "0.24"
+tree-sitter = "0.27"
 tree-sitter-typescript = "0.23"
-tree-sitter-javascript = "0.23"
-tree-sitter-python = "0.23"
-tree-sitter-rust = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-rust = "0.24"
 tree-sitter-java = "0.23"
-tree-sitter-go = "0.23"
+tree-sitter-go = "0.25"
 tree-sitter-cpp = "0.23"
-tree-sitter-bash = "0.23"
-
-tree-sitter-php = { path = "../../.cargo-vendor/php" }
-tree-sitter-c-sharp = { path = "../../.cargo-vendor/c-sharp" }
-tree-sitter-css = { path = "../../.cargo-vendor/css" }
-tree-sitter-html = { path = "../../.cargo-vendor/html" }
-tree-sitter-json = { path = "../../.cargo-vendor/json" }
-tree-sitter-ruby = { path = "../../.cargo-vendor/ruby" }
-tree-sitter-kotlin = { path = "../../.cargo-vendor/kotlin" }
-tree-sitter-swift = { path = "../../.cargo-vendor/swift" }
-tree-sitter-sql = { path = "../../.cargo-vendor/sql", package = "tree-sitter-sequel" }
+tree-sitter-bash = "0.25"
+tree-sitter-php = "0.24"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-css = "0.25"
+tree-sitter-html = "0.23"
+tree-sitter-json = "0.24"
+tree-sitter-ruby = "0.23"
+# crates.io 仍停在 0.3.x（旧 language() API + tree-sitter 0.20）。0.4 已发布到 GitHub。
+tree-sitter-kotlin = { git = "https://github.com/fwcd/tree-sitter-kotlin" }
+tree-sitter-swift = "0.7"
+tree-sitter-sql = { version = "0.3", package = "tree-sitter-sequel" }

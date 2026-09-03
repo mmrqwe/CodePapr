@@ -67,13 +67,12 @@ CodePapr 是一个基于 LLM 前缀缓存优化的本地编码 Agent 系统。�
 ### 安装
 
 ```bash
-git submodule update --init --recursive   # 首次克隆：拉取 .cargo-vendor 下的 tree-sitter 语法解析库
 npm install
 npm run build
 npm run verify
 ```
 
-> 桌面端构建依赖 `.cargo-vendor/*` 下的 9 个 tree-sitter 语法子模块。克隆时需带 `--recurse-submodules` 或执行上述子模块初始化命令，否则 Cargo 构建会报依赖路径缺失错误（`npm run debug`/`release`/`publish` 脚本也会自动检测并尝试初始化）。
+> Tree-sitter 语法包从 crates.io 拉取最新兼容版本。桌面端 / CLI 构建不再依赖 `--recurse-submodules`。
 
 ### 启动桌面端
 

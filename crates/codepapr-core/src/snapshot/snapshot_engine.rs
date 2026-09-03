@@ -52,6 +52,18 @@ fn ensure_signature(repo: &Repository) -> Result<Signature<'static>, git2::Error
     repo.signature()
 }
 
+/// 影子仓库必须按入库字节写回工作区。Windows 上全局 `core.autocrlf=true`
+/// 会让 checkout/reset 把 LF 转成 CRLF，破坏快照/恢复的字节级契约。
+fn apply_shadow_git_config(repo: &Repository, workspace: &Path) {
+    let _ = repo.set_workdir(workspace, false);
+    if let Ok(mut config) = repo.config() {
+        let _ = config.set_str("core.worktree", &workspace.to_string_lossy());
+        let _ = config.set_bool("core.autocrlf", false);
+        let _ = config.set_str("core.eol", "lf");
+    }
+    let _ = ensure_codepapr_excluded(repo);
+}
+
 fn ensure_codepapr_excluded(repo: &Repository) -> std::io::Result<()> {
     use std::fs;
     use std::io::Write;
@@ -111,8 +123,7 @@ impl SnapshotEngine {
         if dot_git.is_dir() {
             match Repository::open(&git_path) {
                 Ok(repo) => {
-                    let _ = repo.set_workdir(&self.workspace, false);
-                    let _ = ensure_codepapr_excluded(&repo);
+                    apply_shadow_git_config(&repo, &self.workspace);
                     let head_sha = repo.head().ok()
                         .and_then(|h| h.target())
                         .map(|oid| oid.to_string());
@@ -165,19 +176,7 @@ impl SnapshotEngine {
             },
         };
 
-        {
-            let mut config = match repo.config() {
-                Ok(c) => c,
-                Err(e) => return EnsureResult {
-                    ready: false, created_repo: false, rebuilt: false, head_sha: None,
-                    error: Some(e.message().to_string()),
-                },
-            };
-            let _ = config.set_str("core.worktree", &self.workspace.to_string_lossy());
-        }
-
-        let _ = repo.set_workdir(&self.workspace, false);
-        let _ = ensure_codepapr_excluded(&repo);
+        apply_shadow_git_config(&repo, &self.workspace);
 
         if repo.head().is_err() {
             let _ = ensure_signature(&repo);

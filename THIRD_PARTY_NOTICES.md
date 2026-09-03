@@ -25,23 +25,24 @@ This application includes code from the following open source projects.
 | base64 | 0.22 | MIT OR Apache-2.0 |
 | tokio-tungstenite | 0.24 | MIT |
 | futures-util | 0.3 | MIT OR Apache-2.0 |
-| tree-sitter | 0.24 | MIT |
+| tree-sitter | 0.27 | MIT |
 | tree-sitter-typescript | 0.23 | MIT |
-| tree-sitter-javascript | 0.23 | MIT |
-| tree-sitter-python | 0.23 | MIT |
-| tree-sitter-rust | 0.23 | MIT |
+| tree-sitter-javascript | 0.25 | MIT |
+| tree-sitter-python | 0.25 | MIT |
+| tree-sitter-rust | 0.24 | MIT |
 | tree-sitter-java | 0.23 | MIT |
-| tree-sitter-go | 0.23 | MIT |
+| tree-sitter-go | 0.25 | MIT |
 | tree-sitter-cpp | 0.23 | MIT |
-| tree-sitter-bash | 0.23 | MIT |
-| tree-sitter-c-sharp | — | MIT |
-| tree-sitter-css | — | MIT |
-| tree-sitter-html | — | MIT |
-| tree-sitter-json | — | MIT |
-| tree-sitter-php | — | MIT |
-| tree-sitter-ruby | — | MIT |
-| tree-sitter-kotlin | — | MIT |
-| tree-sitter-swift | — | MIT |
+| tree-sitter-bash | 0.25 | MIT |
+| tree-sitter-c-sharp | 0.23 | MIT |
+| tree-sitter-css | 0.25 | MIT |
+| tree-sitter-html | 0.23 | MIT |
+| tree-sitter-json | 0.24 | MIT |
+| tree-sitter-php | 0.24 | MIT |
+| tree-sitter-ruby | 0.23 | MIT |
+| tree-sitter-kotlin | 0.4 (git) | MIT |
+| tree-sitter-swift | 0.7 | MIT |
+| tree-sitter-sequel | 0.3 | MIT |
 | flate2 | 1.x | MIT OR Apache-2.0 |
 | tar | 0.4 | MIT OR Apache-2.0 |
 | xz2 | 0.1 | MIT OR Apache-2.0 |

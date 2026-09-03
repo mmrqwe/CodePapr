@@ -67,13 +67,12 @@ CodePapr is a local coding agent system built with LLM prefix cache optimization
 ### Install
 
 ```bash
-git submodule update --init --recursive   # first clone: tree-sitter grammars under .cargo-vendor
 npm install
 npm run build
 npm run verify
 ```
 
-> Desktop builds depend on the nine tree-sitter grammar submodules under `.cargo-vendor/*`. Clone with `--recurse-submodules` or run the command above; without them Cargo fails with a cryptic path-dependency error (the `npm run debug`/`release`/`publish` entry points detect and initialize them automatically).
+> Tree-sitter grammars are pulled from crates.io (latest compatible releases). A git clone no longer needs `--recurse-submodules` for the desktop/CLI build.
 
 ### Launch Desktop
 

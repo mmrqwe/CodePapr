@@ -20,6 +20,10 @@ pub(crate) fn open_repo(workspace: &Path) -> Result<Repository, String> {
         crate::shared::remove_stale_git_locks(&shadow_git.join(".git"));
         let repo = Repository::open(&shadow_git).map_err(|e| format!("open repo: {}", e.message()))?;
         let _ = repo.set_workdir(workspace, false);
+        if let Ok(mut config) = repo.config() {
+            let _ = config.set_bool("core.autocrlf", false);
+            let _ = config.set_str("core.eol", "lf");
+        }
         Ok(repo)
     } else {
         crate::shared::remove_stale_git_locks(&workspace.join(".git"));
