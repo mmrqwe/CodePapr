@@ -35,16 +35,65 @@ function sanitizeSpawnEnv(env) {
   return nextEnv;
 }
 
+function resolveCargoTargetDir() {
+  const manifestPath = path.resolve(uiDir, 'src-tauri/Cargo.toml');
+  try {
+    const output = execSync(
+      `cargo metadata --format-version 1 --no-deps --manifest-path ${JSON.stringify(manifestPath)}`,
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: sanitizeSpawnEnv(process.env),
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }
+    );
+    const metadata = JSON.parse(output);
+    if (typeof metadata.target_directory === 'string' && metadata.target_directory.trim()) {
+      return path.resolve(metadata.target_directory);
+    }
+  } catch {
+    // cargo metadata unavailable; fall through
+  }
+
+  if (process.env.CARGO_TARGET_DIR) {
+    return path.resolve(process.env.CARGO_TARGET_DIR);
+  }
+
+  return path.resolve(repoRoot, 'target');
+}
+
+function candidateCargoTargetDirs() {
+  const dirs = [];
+  const seen = new Set();
+  const add = (dirPath) => {
+    if (!dirPath) {
+      return;
+    }
+    const resolved = path.resolve(dirPath);
+    if (seen.has(resolved) || !fs.existsSync(resolved)) {
+      return;
+    }
+    seen.add(resolved);
+    dirs.push(resolved);
+  };
+
+  add(resolveCargoTargetDir());
+  add(process.env.CARGO_TARGET_DIR);
+  add(path.resolve(repoRoot, 'target'));
+  add(path.resolve(uiDir, 'src-tauri/target'));
+  return dirs;
+}
+
 function cleanupStaleMacOsBundleArtifacts(args) {
   if (process.platform !== 'darwin' || args[0] !== 'build') {
     return;
   }
 
   const profileDir = args.includes('--debug') ? 'debug' : 'release';
-  const bundleDirs = [
-    path.resolve(scriptDir, `../src-tauri/target/${profileDir}/bundle/macos`),
-    path.resolve(scriptDir, `../src-tauri/target/${profileDir}/bundle/dmg`),
-  ];
+  const bundleDirs = candidateCargoTargetDirs().flatMap((targetDir) => [
+    path.join(targetDir, profileDir, 'bundle/macos'),
+    path.join(targetDir, profileDir, 'bundle/dmg'),
+  ]);
   const removablePatterns = [/\.dmg$/i, /^rw\..*\.dmg$/i];
   let removedCount = 0;
 
@@ -217,33 +266,42 @@ function collectReleaseArtifacts(args) {
   }
 
   const profileDir = 'release';
-  const bundleRoot = path.resolve(uiDir, `src-tauri/target/${profileDir}/bundle`);
-  hideDmgVolumeIcons(bundleRoot);
-  const binaryCandidates = [
-    path.resolve(uiDir, 'src-tauri/target/release/codepapr'),
-    path.resolve(uiDir, 'src-tauri/target/release/codepapr.exe'),
-  ];
-  const existingArtifacts = [];
+  const targetDirs = candidateCargoTargetDirs();
+  for (const targetDir of targetDirs) {
+    hideDmgVolumeIcons(path.join(targetDir, profileDir, 'bundle'));
+  }
 
-  if (fs.existsSync(bundleRoot)) {
-    for (const artifactPath of collectBundleArtifacts(bundleRoot)) {
-      existingArtifacts.push({
-        source: artifactPath,
-        target: path.join(releaseDir, path.basename(artifactPath)),
+  const newestByName = new Map();
+  const consider = (sourcePath) => {
+    const stat = fs.statSync(sourcePath);
+    const name = path.basename(sourcePath);
+    const previous = newestByName.get(name);
+    if (!previous || stat.mtimeMs > previous.mtimeMs) {
+      newestByName.set(name, {
+        source: sourcePath,
+        target: path.join(releaseDir, name),
+        mtimeMs: stat.mtimeMs,
       });
     }
-  }
+  };
 
-  for (const candidate of binaryCandidates) {
-    if (!fs.existsSync(candidate)) {
-      continue;
+  for (const targetDir of targetDirs) {
+    const bundleRoot = path.join(targetDir, profileDir, 'bundle');
+    if (fs.existsSync(bundleRoot)) {
+      for (const artifactPath of collectBundleArtifacts(bundleRoot)) {
+        consider(artifactPath);
+      }
     }
-    existingArtifacts.push({
-      source: candidate,
-      target: path.join(releaseDir, path.basename(candidate)),
-    });
+
+    for (const binaryName of ['codepapr', 'codepapr.exe']) {
+      const candidate = path.join(targetDir, 'release', binaryName);
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        consider(candidate);
+      }
+    }
   }
 
+  const existingArtifacts = [...newestByName.values()];
   if (existingArtifacts.length === 0) {
     console.warn('[tauri-cli] No release artifacts found to stage into Release/.');
     return;
@@ -252,6 +310,7 @@ function collectReleaseArtifacts(args) {
   ensureCleanDir(releaseDir);
   for (const artifact of existingArtifacts) {
     copyRecursive(artifact.source, artifact.target);
+    console.log(`[tauri-cli] Staged ${path.basename(artifact.target)} from ${artifact.source}`);
   }
 
   console.log(`[tauri-cli] Staged release artifacts to ${releaseDir}`);
@@ -297,8 +356,9 @@ function resolveMacOsDmgFallbackPlan(args) {
   }
 
   const bundleArch = resolveBundleArch(process.arch);
-  const dmgDir = path.resolve(uiDir, 'src-tauri/target/release/bundle/dmg');
-  const macosDir = path.resolve(uiDir, 'src-tauri/target/release/bundle/macos');
+  const cargoTargetDir = resolveCargoTargetDir();
+  const dmgDir = path.join(cargoTargetDir, 'release/bundle/dmg');
+  const macosDir = path.join(cargoTargetDir, 'release/bundle/macos');
   const scriptPath = path.join(dmgDir, 'bundle_dmg.sh');
   const appPath = path.join(macosDir, `${metadata.productName}.app`);
   const dmgName = `${metadata.productName}_${metadata.version}_${bundleArch}.dmg`;

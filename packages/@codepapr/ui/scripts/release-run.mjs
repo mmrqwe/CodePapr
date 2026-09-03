@@ -9,10 +9,19 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const uiDir = path.resolve(scriptDir, '..');
 const repoRoot = path.resolve(uiDir, '../../..');
 const tauriCliScript = path.resolve(scriptDir, 'tauri-cli.mjs');
-const macOsAppBundlePath = path.resolve(uiDir, 'src-tauri/target/release/bundle/macos/CodePapr.app');
-const releaseBinaryPath = path.resolve(
-  uiDir,
-  process.platform === 'win32' ? 'src-tauri/target/release/codepapr.exe' : 'src-tauri/target/release/codepapr'
+
+function resolveCargoTargetDir() {
+  if (process.env.CARGO_TARGET_DIR) {
+    return path.resolve(process.env.CARGO_TARGET_DIR);
+  }
+  return path.resolve(repoRoot, 'target');
+}
+
+const cargoTargetDir = resolveCargoTargetDir();
+const macOsAppBundlePath = path.join(cargoTargetDir, 'release/bundle/macos/CodePapr.app');
+const releaseBinaryPath = path.join(
+  cargoTargetDir,
+  process.platform === 'win32' ? 'release/codepapr.exe' : 'release/codepapr'
 );
 
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
