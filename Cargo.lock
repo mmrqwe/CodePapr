@@ -6741,7 +6741,6 @@ name = "tree-sitter-c-sharp"
 version = "0.23.5"
 dependencies = [
  "cc",
- "tree-sitter",
  "tree-sitter-language",
 ]
 
@@ -6760,7 +6759,6 @@ name = "tree-sitter-css"
 version = "0.25.0"
 dependencies = [
  "cc",
- "tree-sitter",
  "tree-sitter-language",
 ]
 
@@ -6779,7 +6777,6 @@ name = "tree-sitter-html"
 version = "0.23.2"
 dependencies = [
  "cc",
- "tree-sitter",
  "tree-sitter-language",
 ]
 
@@ -6808,7 +6805,6 @@ name = "tree-sitter-json"
 version = "0.24.8"
 dependencies = [
  "cc",
- "tree-sitter",
  "tree-sitter-language",
 ]
 
@@ -6817,7 +6813,6 @@ name = "tree-sitter-kotlin"
 version = "0.4.0"
 dependencies = [
  "cc",
- "tree-sitter",
  "tree-sitter-language",
 ]
 
@@ -6832,7 +6827,6 @@ name = "tree-sitter-php"
 version = "0.24.2"
 dependencies = [
  "cc",
- "tree-sitter",
  "tree-sitter-language",
 ]
 
@@ -6851,7 +6845,6 @@ name = "tree-sitter-ruby"
 version = "0.23.1"
 dependencies = [
  "cc",
- "tree-sitter",
  "tree-sitter-language",
 ]
 
@@ -6870,7 +6863,6 @@ name = "tree-sitter-sequel"
 version = "0.3.11"
 dependencies = [
  "cc",
- "tree-sitter",
  "tree-sitter-language",
 ]
 
@@ -6879,7 +6871,6 @@ name = "tree-sitter-swift"
 version = "0.7.0"
 dependencies = [
  "cc",
- "tree-sitter",
  "tree-sitter-language",
 ]
 
