@@ -1,13 +1,13 @@
 import type { GitFileSelection } from './utils/workspaceGitPanel';
 import type { ReviewScope } from './utils/codeReview';
 import type { PreviewLocation } from './utils/projectDiagnosticLocations';
-import type { Lang } from './utils/i18n';
+import { getTranslation, type Lang } from './utils/i18n';
 
 export type AppMainProps = {
   projectGraphLoading: boolean;
-  projectGraphPhase: any;
+  projectGraphPhase: null | { phase: string; current: number; total: number };
   workspacePath: string;
-  t: Record<string, any>;
+  t: ReturnType<typeof getTranslation>;
   openedAppId: string | null;
   isGitPanelExpanded: boolean;
   settings: { lang: Lang; experimentalCharacters?: boolean };

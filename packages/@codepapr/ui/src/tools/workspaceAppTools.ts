@@ -1,30 +1,22 @@
 import { invoke } from '@tauri-apps/api/core';
 import { asString } from '@codepapr/core';
 import { toolByName } from './workspaceToolDefinitions';
-import {
-  type BackgroundProcessExitInfo,
-  type ReadFileResult,
-} from './workspaceToolHelpers';
+import { type ReadFileResult } from './workspaceToolHelpers';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
-import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
 import type { PaprAppSettings, PaprManifest } from '@codepapr/types';
 import {
   LOCAL_ORDER,
   accessMeetsTool,
   legacyLevelToAccess,
-  resolveEffectiveAccess,
   type PaprAccess,
   type PaprLocalAccess,
 } from '../papr/levelGrants';
-import { isPluginApp, parsePaprKind, parsePluginSurfaceArg, pluginIsEnabled, readAppManifest, resolvePaprEntryFile, shouldRevealOnPublish } from '../papr/pluginSurface';
+import { parsePaprKind, parsePluginSurfaceArg, resolvePaprEntryFile } from '../papr/pluginSurface';
 import { postAppEvent } from '../papr/appChannelHub';
 import { type WorkspaceToolContext } from './workspaceToolContext';
-import { findPreviewProcessForPort, processPreviewUrl } from '../utils/loopbackPreview';
 
 const APP_RENDER_WRITE_ARG_KEYS = ['html','files','title','kind','surface','agents','local','network','command','args','port','icon','permissions','level'] as const;
-const LOCAL_LABEL: Record<PaprLocalAccess, string> = { none: '无', read: '只读', write: '读写执行' };
 const APP_PUBLISH_CHANNEL_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
-const APP_PUBLISH_MAX_PAYLOAD_BYTES = 256 * 1024;
 
 function normalizeAppIcon(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined;
