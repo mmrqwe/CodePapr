@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runProjectDiagnostics } from '../src/tool/workspace/diagnostics';
 import type { WorkspaceHost } from '../src/tool/workspace/host';
 
@@ -278,5 +282,114 @@ describe('runProjectDiagnostics monorepo nested package.json', () => {
     expect(report.packageJsonPath).toBe('packages/b/package.json');
     const lint = report.stages.find((s) => s.id === 'lint');
     expect(lint?.workdir).toBe('packages/b');
+  });
+});
+
+describe('runProjectDiagnostics node syntax fallback', () => {
+  function createJsProjectHost(fixtureDir: string, files: string[]): DiagHost {
+    return {
+      workspacePath: fixtureDir,
+      async listFiles() {
+        return {
+          entries: [
+            { path: 'package.json', name: 'package.json', isDir: false, bytes: 10 },
+            ...files.map((path) => ({
+              path,
+              name: path.split('/').pop() as string,
+              isDir: false,
+              bytes: 10,
+            })),
+          ],
+        };
+      },
+      async readTextFile() {
+        return { content: JSON.stringify({ name: 'no-scripts-project' }), bytes: 20 };
+      },
+      async runCommand({ command, args }) {
+        if (command === 'node' && args?.[0] === '-e') {
+          const result = spawnSync('node', ['-e', String(args[1])], {
+            cwd: fixtureDir,
+            encoding: 'utf8',
+          });
+          return {
+            command,
+            args: args ?? [],
+            status: result.status,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            timedOut: false,
+          };
+        }
+        return { command, args: args ?? [], status: 0, stdout: '', stderr: '', timedOut: false };
+      },
+    };
+  }
+
+  function createJsFixture(sources: Record<string, string>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'diag-node-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture' }));
+    for (const [rel, content] of Object.entries(sources)) {
+      const target = join(dir, rel);
+      mkdirSync(join(target, '..'), { recursive: true });
+      writeFileSync(target, content);
+    }
+    return dir;
+  }
+
+  it('falls back to node --check instead of unavailable for a script-less JS project', async () => {
+    const dir = createJsFixture({
+      'js/main.js': 'import { helper } from "./helper.js";\nconsole.log(helper(1));\n',
+      'js/helper.mjs': 'export const helper = (x) => x + 1;\n',
+      'node_modules/pkg/index.js': 'this is ( not valid js',
+    });
+    try {
+      const report = await runProjectDiagnostics(createJsProjectHost(dir, ['js/main.js', 'js/helper.mjs']));
+      expect(report.available).toBe(true);
+      const stage = report.stages.find((s) => s.id === 'node-syntax');
+      expect(stage).toBeDefined();
+      expect(stage?.category).toBe('syntax');
+      expect(stage?.success).toBe(true);
+      expect(report.overallStatus).toBe('passed');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports syntax errors (exit failure) for a broken JS file', async () => {
+    const dir = createJsFixture({ 'js/bad.js': 'const a =;\n' });
+    try {
+      const report = await runProjectDiagnostics(createJsProjectHost(dir, ['js/bad.js']));
+      expect(report.available).toBe(true);
+      const stage = report.stages.find((s) => s.id === 'node-syntax');
+      expect(stage?.success).toBe(false);
+      expect(stage?.failureReason).toBe('exit');
+      expect(stage?.excerpt).toContain('js/bad.js');
+      expect(report.overallStatus).toBe('failed');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips the node fallback when package scripts already check the code', async () => {
+    const host: DiagHost = {
+      workspacePath: '/proj',
+      async listFiles() {
+        return {
+          entries: [
+            { path: 'package.json', name: 'package.json', isDir: false, bytes: 10 },
+            { path: 'src/main.js', name: 'main.js', isDir: false, bytes: 10 },
+          ],
+        };
+      },
+      async readTextFile() {
+        return { content: JSON.stringify({ scripts: { lint: 'eslint .' } }), bytes: 100 };
+      },
+      async runCommand({ command, args }) {
+        return { command, args: args ?? [], status: 0, stdout: 'ok', stderr: '', timedOut: false };
+      },
+    };
+    const report = await runProjectDiagnostics(host);
+    expect(report.stages.some((s) => s.id === 'node-syntax')).toBe(false);
+    expect(report.stages.some((s) => s.id === 'lint')).toBe(true);
   });
 });

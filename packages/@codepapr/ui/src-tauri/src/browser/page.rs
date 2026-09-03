@@ -216,8 +216,10 @@ fn truncate_browser_dom(content: String) -> (String, bool) {
 }
 
 pub(crate) fn default_browser_screenshot_path(format: BrowserScreenshotFormat) -> Result<PathBuf, String> {
+    // 存进 `.CodePapr/screenshots`（三级闸门的草稿前缀）而不是 `.CodePapr/browser`
+    //（运行时私有）：Agent 截图后要能 read_image / bash 直接读，无需另指路径。
     Ok(PathBuf::from(format!(
-        ".CodePapr/browser/browser-{}.{}",
+        ".CodePapr/screenshots/browser-{}.{}",
         unix_millis()?,
         format.extension()
     )))

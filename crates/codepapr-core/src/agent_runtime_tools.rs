@@ -1682,7 +1682,7 @@ fn ensure_codepapr_access(path: &str, op: &str, mode: &str, allow_apps: bool) ->
         return Ok(());
     }
     Err(format!(
-        "无法访问「{path}」：.CodePapr 由 CodePapr 运行时管理。Agent 请使用 skill / 项目配置界面；草稿可用 .CodePapr/tmp、tool-output、downloads。"
+        "无法访问「{path}」：.CodePapr 由 CodePapr 运行时管理。Agent 请使用 skill / 项目配置界面；草稿可用 .CodePapr/tmp、tool-output、downloads、screenshots、images、assets、fixtures。"
     ))
 }
 
@@ -2053,6 +2053,9 @@ mod tests {
         assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "agent", false).is_err());
         assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "app", false).is_ok());
         assert!(ensure_codepapr_access(".CodePapr/apps/x/index.html", "read", "agent", true).is_ok());
+        // browser 截图默认存 screenshots 前缀（Agent 可读）；运行时私有的 browser 目录仍封锁
+        assert!(ensure_codepapr_access(".CodePapr/screenshots/shot.png", "read", "agent", false).is_ok());
+        assert!(ensure_codepapr_access(".CodePapr/browser/shot.png", "read", "agent", false).is_err());
         assert!(ensure_shell_codepapr("node server.js", Some(".CodePapr/apps/x"), "agent", true).is_ok());
         assert!(ensure_shell_codepapr("node server.js", Some(".CodePapr/apps/x"), "agent", false).is_err());
     }

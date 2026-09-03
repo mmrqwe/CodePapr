@@ -47,6 +47,10 @@ describe('assertAgentCodePaprAccess', () => {
     expect(() => assertAgentCodePaprAccess('.CodePapr/chat-images/a.png', 'read')).toThrow(
       /运行时管理/
     );
+    // browser 截图已改存 .CodePapr/screenshots；私有 browser 目录仍封锁
+    expect(() => assertAgentCodePaprAccess('.CodePapr/browser/shot.png', 'read')).toThrow(
+      /运行时管理/
+    );
   });
 
   it('allows scratch dirs in every mode', () => {
@@ -54,6 +58,10 @@ describe('assertAgentCodePaprAccess', () => {
       '.CodePapr/tmp/validate.mjs',
       '.CodePapr/tool-output/tool_1.txt',
       '.CodePapr/downloads/page.html',
+      '.CodePapr/screenshots/browser-1.png',
+      '.CodePapr/images/x.png',
+      '.CodePapr/assets/y.css',
+      '.CodePapr/fixtures/z.json',
     ]) {
       expect(() => assertAgentCodePaprAccess(path, 'read')).not.toThrow();
       expect(() => assertAgentCodePaprAccess(path, 'write')).not.toThrow();
@@ -89,6 +97,8 @@ describe('assertShellCodePaprAccess', () => {
     expect(() => assertShellCodePaprAccess('ls .CodePapr')).toThrow(/运行时管理/);
     expect(() => assertShellCodePaprAccess('ls -la .CodePapr/')).toThrow(/运行时管理/);
     expect(() => assertShellCodePaprAccess('ls .CodePapr/tmp')).not.toThrow();
+    expect(() => assertShellCodePaprAccess('ls .CodePapr/screenshots')).not.toThrow();
+    expect(() => assertShellCodePaprAccess('cp .CodePapr/browser/x.png /tmp')).toThrow(/运行时管理/);
     expect(() => assertShellCodePaprAccess('node validate.mjs', 'agent', '.CodePapr/tmp')).not.toThrow();
     expect(() =>
       assertShellCodePaprAccess('node server.js', 'agent', '.CodePapr/apps/demo')

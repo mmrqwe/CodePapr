@@ -600,7 +600,7 @@ describe('accumulateCacheStats', () => {
           {
             id: 'tool-screenshot',
             name: 'browser_take_screenshot',
-            arguments: { relativePath: '.CodePapr/browser/home.png' },
+            arguments: { relativePath: '.CodePapr/screenshots/home.png' },
           },
           {
             id: 'tool-background',
@@ -708,7 +708,7 @@ describe('accumulateCacheStats', () => {
           toolCallId: 'tool-screenshot',
           success: true,
           result: {
-            path: '.CodePapr/browser/home.png',
+            path: '.CodePapr/screenshots/home.png',
             bytes: 2048,
             format: 'png',
             url: 'http://localhost:3000',
@@ -780,7 +780,7 @@ describe('accumulateCacheStats', () => {
     expect(summary).toContain('[src/App.tsx](codepapr-file:src%2FApp.tsx) (+12/-3');
     expect(summary).toContain('20 -> 29 行');
     expect(summary).toContain('[new] [assets/logo.png](codepapr-file:assets%2Flogo.png) (+0/-0)');
-    expect(summary).toContain('[new] [.CodePapr/browser/home.png](codepapr-file:.CodePapr%2Fbrowser%2Fhome.png) (+0/-0)');
+    expect(summary).toContain('[new] [.CodePapr/screenshots/home.png](codepapr-file:.CodePapr%2Fscreenshots%2Fhome.png) (+0/-0)');
     expect(summary).toContain('已完成 2 次上下文读取/搜索/目录检查');
     expect(summary).toContain('npm run test -> 退出码 0');
     expect(summary).toContain('npm run dev -> 已在后台启动 (PID 43210)');

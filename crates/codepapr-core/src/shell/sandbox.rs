@@ -301,8 +301,12 @@ fn build_profile(
 }
 
 /// Agent bash 对工作区内 `.CodePapr` 的内核闸门：先整树 deny，再放行草稿
-/// （tmp / tool-output / downloads）、已存在的 skills（只读，供 skill 包脚本）、
-/// 以及 App 模式的 apps。后端 app_write_dir 在 deny 之后重新放行。
+/// （tmp / tool-output / downloads / screenshots / images / assets / fixtures）、
+/// 已存在的 skills（只读，供 skill 包脚本）、以及 App 模式的 apps。
+/// 后端 app_write_dir 在 deny 之后重新放行。草稿清单必须与工具闸门
+/// （agent_runtime_tools::is_allowed_codepapr_suffix 与 ui 端
+/// codepaprAgentAccess.ts 的 SCRATCH_PREFIXES）保持一致，否则会出现
+/// 「工具闸门放行、内核误拒」的漂移。
 #[cfg(target_os = "macos")]
 fn apply_codepapr_agent_isolation(
     lines: &mut Vec<String>,
@@ -327,6 +331,21 @@ fn apply_codepapr_agent_isolation(
     for name in ["tmp", "tool-output", "downloads"] {
         let dir = codepapr.join(name);
         let _ = fs::create_dir_all(&dir);
+        if let Some(canonical) = add_subpath_rule(lines, "allow", "file-read*", &dir) {
+            read_roots.push(canonical);
+        }
+        if access.workspace_write {
+            add_subpath_rule(lines, "allow", "file-write*", &dir);
+        }
+    }
+
+    // 同属草稿前缀但由运行按需创建（browser 截图写 screenshots、文件工具写
+    // images/assets/fixtures），不存在时不预先 mkdir，存在后重建 profile 即放行。
+    for name in ["screenshots", "images", "assets", "fixtures"] {
+        let dir = codepapr.join(name);
+        if !dir.is_dir() {
+            continue;
+        }
         if let Some(canonical) = add_subpath_rule(lines, "allow", "file-read*", &dir) {
             read_roots.push(canonical);
         }
@@ -856,6 +875,8 @@ mod tests {
             std::env::temp_dir().join(format!("codepapr-sandbox-cp-{}", std::process::id()));
         fs::create_dir_all(workspace.join(".CodePapr/git")).expect("internal dir");
         fs::write(workspace.join(".CodePapr/git/HEAD"), b"secret\n").expect("write secret");
+        fs::create_dir_all(workspace.join(".CodePapr/screenshots")).expect("scratch dir");
+        fs::create_dir_all(workspace.join(".CodePapr/browser")).expect("runtime dir");
 
         let profile = build_profile("/bin/zsh", &workspace, None, None).expect("profile");
         let codepapr = workspace
@@ -876,6 +897,22 @@ mod tests {
                 tmp.canonicalize().expect("tmp").display()
             )),
             "must allow scratch tmp:\n{profile}"
+        );
+        // 与工具闸门对齐：存在的草稿前缀（screenshots）内核同样放行
+        let screenshots = codepapr.join("screenshots");
+        assert!(
+            profile.contains(&format!(
+                "(allow file-read* (subpath \"{}\"))",
+                screenshots.canonicalize().expect("screenshots").display()
+            )),
+            "must allow scratch screenshots:\n{profile}"
+        );
+        assert!(
+            !profile.contains(&format!(
+                "(allow file-read* (subpath \"{}\"))",
+                codepapr.join("browser").display()
+            )),
+            "must not allow runtime browser dir:\n{profile}"
         );
         assert!(
             !profile.contains(&format!(
@@ -947,6 +984,25 @@ mod tests {
             allowed_out.status.success(),
             "ls scratch tmp must succeed; stderr={:?}",
             String::from_utf8_lossy(&allowed_out.stderr)
+        );
+
+        fs::create_dir_all(workspace.join(".CodePapr/screenshots")).expect("scratch dir");
+        fs::write(workspace.join(".CodePapr/screenshots/shot.png"), b"png").expect("write shot");
+        let mut shots = sandboxed_command(
+            "/bin/ls",
+            &[".CodePapr/screenshots".to_string()],
+            &workspace,
+            None,
+            &workspace,
+        )
+        .expect("command");
+        shots.current_dir(&workspace);
+        let shots_out = shots.output().expect("run");
+        let shots_stdout = String::from_utf8_lossy(&shots_out.stdout);
+        assert!(
+            shots_out.status.success() && shots_stdout.contains("shot.png"),
+            "ls scratch screenshots must succeed; stdout={shots_stdout} stderr={:?}",
+            String::from_utf8_lossy(&shots_out.stderr)
         );
 
         let _ = fs::remove_dir_all(&workspace);

@@ -59,7 +59,7 @@ function isAllowedCodePaprSuffix(suffix: string, op: CodePaprAgentOp, mode: stri
 }
 
 export function agentCodePaprDeniedMessage(path: string): string {
-  return `无法访问「${path}」：.CodePapr 由 CodePapr 运行时管理。Agent 请使用 skill / 项目配置界面；草稿可用 .CodePapr/tmp、tool-output、downloads。`;
+  return `无法访问「${path}」：.CodePapr 由 CodePapr 运行时管理。Agent 请使用 skill / 项目配置界面；草稿可用 .CodePapr/tmp、tool-output、downloads、screenshots、images、assets、fixtures。`;
 }
 
 export function assertAgentCodePaprAccess(

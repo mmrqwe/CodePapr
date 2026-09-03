@@ -726,7 +726,7 @@ name: 'web_download_file',
   {
     name: 'browser_take_screenshot',
     description:
-      '对当前可交互浏览页截图，可截整页或某个元素。默认把图片保存到项目内 .CodePapr/browser 目录。',
+      '对当前可交互浏览页截图，可截整页或某个元素。默认把图片保存到项目内 .CodePapr/screenshots 目录（read_image 与 bash 均可直接读取）。',
     parameters: {
       type: 'object',
       properties: {

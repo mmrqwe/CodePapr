@@ -29,6 +29,7 @@ export interface ProjectDiagnosticStagePlan {
   kind?:
     | 'package-script'
     | 'python-static'
+    | 'node-static'
     | 'dotnet-build'
     | 'cargo-check'
     | 'go-build'
@@ -126,6 +127,61 @@ const PYTHON_STATIC_CHECK_SCRIPT = [
   '    sys.exit(1)',
   '',
   'print(f"Python static checks OK ({checked} files syntax-checked)")',
+].join('\n');
+
+/** node 项目语法兜底（对应 Python 的 py_compile 阶段）：纯 JS 项目常没有
+ *  lint/typecheck/build 脚本，旧实现直接报 unavailable，Agent 只能自己摸
+ *  出 `node --check`。这里递归跑一遍；.js 文件 script 模式失败后按 ESM
+ *  重试（package.json type 不可靠），两模式都报错才算语法错误。 */
+const NODE_STATIC_CHECK_SCRIPT = [
+  'const { spawnSync } = require("child_process");',
+  'const fs = require("fs");',
+  'const path = require("path");',
+  '',
+  'const root = process.cwd();',
+  "const skipDirs = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', 'target']);",
+  "const extensions = new Set(['.js', '.mjs', '.cjs']);",
+  'const files = [];',
+  '',
+  'function walk(dir) {',
+  '  let entries;',
+  '  try {',
+  '    entries = fs.readdirSync(dir, { withFileTypes: true });',
+  '  } catch {',
+  '    return;',
+  '  }',
+  '  for (const entry of entries) {',
+  '    if (entry.isDirectory()) {',
+  "      if (entry.name.startsWith('.') || skipDirs.has(entry.name)) continue;",
+  '      walk(path.join(dir, entry.name));',
+  '    } else if (entry.isFile() && extensions.has(path.extname(entry.name))) {',
+  '      files.push(path.join(dir, entry.name));',
+  '    }',
+  '  }',
+  '}',
+  '',
+  'walk(root);',
+  '',
+  'let failed = 0;',
+  'for (const file of files) {',
+  "  const scriptMode = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });",
+  '  if (scriptMode.status === 0) continue;',
+  "  if (path.extname(file) !== '.cjs') {",
+  '    const tmpFile = file + ".esm-check-" + process.pid + ".mjs";',
+  '    fs.copyFileSync(file, tmpFile);',
+  "    const moduleMode = spawnSync(process.execPath, ['--check', tmpFile], { encoding: 'utf8' });",
+  '    fs.unlinkSync(tmpFile);',
+  '    if (moduleMode.status === 0) continue;',
+  '  }',
+  '  failed += 1;',
+  "  const rel = path.relative(root, file).split(path.sep).join('/');",
+  "  const detail = String(scriptMode.stderr || scriptMode.stdout || scriptMode.error || '')",
+  "    .trim().split('\\n').slice(0, 6).join('\\n');",
+   "  console.error(rel + ': syntax error\\n' + detail);",
+  '}',
+  '',
+  "console.log(`node --check: ${files.length} file(s) checked, ${failed} failed`);",
+  'process.exit(failed ? 1 : 0);',
 ].join('\n');
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -384,6 +440,7 @@ function asProjectDiagnosticsCommandResult(result: WorkspaceHostCommandResult): 
 const PROJECT_TYPE_BY_KIND: Record<string, ProjectDiagnosticsProjectType> = {
   'package-script': 'node',
   'python-static': 'python',
+  'node-static': 'node',
   'dotnet-build': 'dotnet',
   'cargo-check': 'rust',
   'go-build': 'go',
@@ -466,6 +523,28 @@ export function createProjectDiagnosticsPlan(params: {
       args: ['-c', PYTHON_STATIC_CHECK_SCRIPT],
       fallback: false,
       kind: 'python-static',
+      category: 'syntax',
+    });
+  }
+  // 纯 JS 项目（无 lint/typecheck/build 脚本）的语法兜底：不让诊断直接 unavailable。
+  // 已有任何 package-script 检查阶段时不加，避免与项目自带工具链重复。
+  const hasJsSources = params.entries.some(
+    (entry) => !entry.isDir && /\.(?:js|mjs|cjs)$/i.test(entry.name)
+  );
+  const hasNodeCheckStage = stages.some(
+    (stage) =>
+      stage.kind === 'package-script' &&
+      (stage.category === 'lint' || stage.category === 'typecheck' || stage.category === 'syntax')
+  );
+  if (hasJsSources && !hasNodeCheckStage) {
+    stages.push({
+      id: 'node-syntax',
+      scriptName: 'node-static',
+      label: 'node syntax check',
+      command: 'node',
+      args: ['-e', NODE_STATIC_CHECK_SCRIPT],
+      fallback: false,
+      kind: 'node-static',
       category: 'syntax',
     });
   }
