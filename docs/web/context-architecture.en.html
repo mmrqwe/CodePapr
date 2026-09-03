@@ -3,431 +3,206 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Context Layering · CodePapr</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='320' y1='280' x2='720' y2='780'%3E%3Cstop stop-color='%23D9673E'/%3E%3Cstop offset='1' stop-color='%23B84E2A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3Cpath d='M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z' fill='%23F0D5B2'/%3E%3Cpath d='M392 350h244' stroke='url(%23a)' stroke-width='40' stroke-linecap='round'/%3E%3Cpath d='M392 450h156' stroke='url(%23a)' stroke-width='40' stroke-linecap='round' opacity='.86'/%3E%3Cpath d='m432 592-80 80 80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m592 592 80 80-80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M540 560 484 784' stroke='url(%23a)' stroke-width='42' stroke-linecap='round'/%3E%3C/svg%3E">
+<title>System Architecture · CodePapr</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
-  :root{
-    --bg-deep:#06070a;--bg-base:#0a0c12;--bg-elevated:#0f121a;--bg-card:rgba(15,18,26,0.8);
-    --surface:rgba(255,255,255,0.04);--surface-hover:rgba(255,255,255,0.06);
-    --border:rgba(255,255,255,0.07);--border-hover:rgba(99,102,241,0.25);
-    --foreground:#edeff5;--foreground-muted:#8b90a0;--foreground-dim:#5c6170;
-    --accent:#6366f1;--accent-glow:rgba(99,102,241,0.18);--accent-soft:rgba(99,102,241,0.09);
-    --green:#22c55e;--green-glow:rgba(34,197,94,0.15);--amber:#f59e0b;--orange:#d9673e;
-    --radius:16px;--radius-sm:10px;--radius-xs:6px;
-    --font-mono:'JetBrains Mono','Cascadia Code','SF Mono',monospace;
-    --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-    --easing:cubic-bezier(0.16,1,0.3,1);--texture-opacity:0;
-  }
-  [data-theme="light"]{
-    --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
-    --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
-    --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
-    --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
-    --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
-    --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;--orange:#c25a35;
-    --texture-opacity:1;
-  }
-  @media (prefers-color-scheme: light){
-    :root:not([data-theme="dark"]){
-      --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
-      --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
-      --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
-      --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
-      --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
-      --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;--orange:#c25a35;
-      --texture-opacity:1;
-    }
-  }
-  body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased;transition:background-color 0.4s,color 0.4s}
-  body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:calc(var(--texture-opacity) * 0.035);background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:256px 256px}
-  code{font-family:var(--font-mono);font-size:0.86em;color:var(--accent)}
-  .ambient{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
-  .ambient::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(99,102,241,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(34,197,94,0.04) 0%,transparent 60%)}
-  [data-theme="light"] .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%)}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%)}}
-  .container{max-width:920px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
-  @media(max-width:768px){.container{padding:0 20px}}
-  nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,0.82);backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border)}
-  [data-theme="light"] nav{background:rgba(245,241,236,0.88)}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) nav{background:rgba(245,241,236,0.88)}}
-  nav .container{display:flex;align-items:center;justify-content:space-between;height:64px;max-width:1200px}
-  .logo{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground)}
-  .logo-icon{width:34px;height:34px;flex-shrink:0}
-  .logo-icon svg{width:100%;height:100%}
-  .nav-links{display:flex;gap:28px;list-style:none}
-  .nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:0.875rem;font-weight:500}
-  .nav-links a:hover{color:var(--foreground)}
-  .nav-right{display:flex;align-items:center;gap:6px}
-  .theme-toggle,.lang-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;text-decoration:none;font-size:0.73rem;font-weight:700;font-family:var(--font-mono)}
-  .theme-toggle:hover,.lang-toggle:hover{color:var(--foreground);border-color:var(--border-hover)}
-  .theme-toggle svg{width:17px;height:17px}
-  .theme-toggle .icon-sun{display:none}.theme-toggle .icon-moon{display:block}
-  [data-theme="light"] .theme-toggle .icon-sun{display:block}[data-theme="light"] .theme-toggle .icon-moon{display:none}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
-  
-  .hero{padding:120px 0 36px}
-  .kicker{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.75rem;color:var(--foreground-dim);letter-spacing:.08em;margin-bottom:16px}
-  .kicker i{width:6px;height:6px;border-radius:50%;background:var(--green)}
-  .hero h1{font-size:clamp(1.9rem,4vw,2.8rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:14px}
-  .hero h1 em{font-style:normal;color:var(--accent)}
-  .hero p{color:var(--foreground-muted);font-size:1.05rem;max-width:640px}
-  .hero p strong{color:var(--foreground);font-weight:600}
-  .sec{padding:48px 0 8px}
-  .sec h2{font-size:1.35rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
-  .lead{color:var(--foreground-muted);margin-bottom:22px;max-width:640px}
-  .stack{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card)}
-  .slot{display:grid;grid-template-columns:52px 1fr 200px;gap:12px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);border-left:4px solid var(--slot)}
-  .slot:last-child{border-bottom:none}
-  .slot .n{font-family:var(--font-mono);font-weight:700;font-size:0.95rem;color:var(--slot)}
-  .slot h3{font-size:0.98rem;font-weight:600}
-  .slot p{font-size:0.8rem;color:var(--foreground-muted);margin-top:2px}
-  .slot .when{font-family:var(--font-mono);font-size:0.7rem;color:var(--slot);text-align:right;line-height:1.4}
-  @media(max-width:640px){.slot{grid-template-columns:40px 1fr}.slot .when{grid-column:2;text-align:left;margin-top:4px}}
-  .layers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-  @media(max-width:720px){.layers{grid-template-columns:1fr}}
-  .layer{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);border-top:3px solid var(--c)}
-  .layer .tag{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.1em;color:var(--c);font-weight:700}
-  .layer h3{font-size:1.05rem;margin:6px 0 10px}
-  .layer ul{margin:0;padding-left:1.1em;color:var(--foreground-muted);font-size:0.86rem}
-  .layer li{margin:4px 0}
-  .layer li strong{color:var(--foreground);font-weight:600}
-  .dest{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-  @media(max-width:800px){.dest{grid-template-columns:1fr}}
-  .dcard{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
-  .dcard .k{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.1em;color:var(--accent);font-weight:700}
-  .dcard h3{font-size:1.05rem;margin:6px 0 8px}
-  .dcard p{color:var(--foreground-muted);font-size:0.86rem}
-  .dcard .cap{margin-top:10px;font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-dim)}
-  .flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0}
-  @media(max-width:800px){.flow{grid-template-columns:1fr}}
-  .step{padding:18px 18px 20px;border:1px solid var(--border);background:var(--bg-card);position:relative}
-  .step:first-child{border-radius:var(--radius) 0 0 var(--radius)}
-  .step:last-child{border-radius:0 var(--radius) var(--radius) 0}
-  @media(max-width:800px){.step:first-child,.step:last-child{border-radius:var(--radius-sm)}}
-  .step + .step{border-left:none}
-  @media(max-width:800px){.step + .step{border-left:1px solid var(--border);border-top:none}}
-  .step .n{font-family:var(--font-mono);font-size:0.72rem;color:var(--accent);font-weight:700}
-  .step h3{font-size:0.95rem;margin:6px 0 6px}
-  .step p{font-size:0.82rem;color:var(--foreground-muted)}
-  .clocks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-  @media(max-width:800px){.clocks{grid-template-columns:1fr}}
-  .clock{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
-  .clock h3{font-size:1rem;margin-bottom:8px}
-  .clock p{font-size:0.86rem;color:var(--foreground-muted)}
-  .tlist{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card)}
-  .trow{display:grid;grid-template-columns:188px 1fr;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);align-items:start}
-  .trow:last-child{border-bottom:none}
-  .trow .tn{font-family:var(--font-mono);font-size:0.82rem;color:var(--accent);font-weight:600;word-break:break-all}
-  .trow p{font-size:0.82rem;color:var(--foreground-muted)}
-  @media(max-width:640px){.trow{grid-template-columns:1fr}}
-
-  .note{margin-top:22px;padding:16px 18px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.88rem}
-  .note strong{color:var(--foreground)}
-  footer{border-top:1px solid var(--border);margin-top:56px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
-  footer a{color:var(--foreground-muted)}
-  .reveal{opacity:0;transform:translateY(16px);transition:opacity 0.6s var(--easing),transform 0.6s var(--easing)}
-  .reveal.visible{opacity:1;transform:none}
-
-  .nav-toggle{display:none;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;margin-left:8px;flex-shrink:0}
-  .nav-toggle:hover{border-color:var(--border-hover);color:var(--foreground)}
-  .nav-toggle svg{width:18px;height:18px}
-  .nav-toggle .icon-close{display:none}
-  body.nav-open .nav-toggle .icon-open{display:none}
-  body.nav-open .nav-toggle .icon-close{display:block}
-  @media(max-width:768px){
-    .nav-toggle{display:inline-flex}
-    nav .container{flex-wrap:wrap}
-    .nav-links{display:none;order:10;width:100%;flex-direction:column;gap:0;padding:12px 0 8px;border-top:1px solid var(--border);margin-top:8px}
-    body.nav-open .nav-links{display:flex}
-    body.nav-open .nav-links a{display:block;padding:12px 4px;font-size:0.95rem;border-bottom:1px solid var(--border)}
-  }
-
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+:root{--bg-deep:#06070a;--bg-card:rgba(15,18,26,.8);--surface:rgba(255,255,255,.04);--border:rgba(255,255,255,.07);--border-hover:rgba(99,102,241,.25);--foreground:#edeff5;--foreground-muted:#8b90a0;--foreground-dim:#5c6170;--accent:#6366f1;--green:#22c55e;--amber:#f59e0b;--orange:#d9673e;--radius:16px;--radius-sm:10px;--radius-xs:6px;--font-mono:'JetBrains Mono','SF Mono',monospace;--font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+[data-theme="light"]{--bg-deep:#f7f4ef;--bg-card:rgba(245,241,236,.85);--surface:rgba(54,32,17,.05);--border:rgba(27,18,10,.08);--border-hover:rgba(217,103,62,.35);--foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;--accent:#d9673e;--green:#15803d;--amber:#a56a1d;--orange:#c25a35}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg-deep:#f7f4ef;--bg-card:rgba(245,241,236,.85);--surface:rgba(54,32,17,.05);--border:rgba(27,18,10,.08);--border-hover:rgba(217,103,62,.35);--foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;--accent:#d9673e;--green:#15803d;--amber:#a56a1d;--orange:#c25a35}}
+body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.6;-webkit-font-smoothing:antialiased}
+code{font-family:var(--font-mono);font-size:.86em;color:var(--accent)}
+.container{max-width:980px;margin:0 auto;padding:0 32px}
+@media(max-width:768px){.container{padding:0 20px}}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,.82);backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border)}
+[data-theme="light"] nav{background:rgba(245,241,236,.88)}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) nav{background:rgba(245,241,236,.88)}}
+nav .container{display:flex;align-items:center;justify-content:space-between;height:64px;max-width:1200px}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground)}
+.logo-icon{width:30px;height:30px;flex-shrink:0}.logo-icon svg{width:100%;height:100%}
+.nav-links{display:flex;gap:22px;list-style:none;flex-wrap:wrap}
+.nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:.85rem;font-weight:500}
+.nav-links a:hover{color:var(--foreground)}
+.nav-right{display:flex;align-items:center;gap:6px}
+.theme-toggle,.lang-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;text-decoration:none;font-size:.73rem;font-weight:700;font-family:var(--font-mono)}
+.theme-toggle:hover,.lang-toggle:hover{color:var(--foreground);border-color:var(--border-hover)}
+.theme-toggle svg{width:16px;height:16px}
+.theme-toggle .icon-sun{display:none}.theme-toggle .icon-moon{display:block}
+[data-theme="light"] .theme-toggle .icon-sun{display:block}[data-theme="light"] .theme-toggle .icon-moon{display:none}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
+.nav-toggle{display:none;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;margin-left:8px}
+.nav-toggle svg{width:18px;height:18px}.nav-toggle .icon-close{display:none}
+body.nav-open .nav-toggle .icon-open{display:none}body.nav-open .nav-toggle .icon-close{display:block}
+@media(max-width:768px){.nav-toggle{display:inline-flex}nav .container{flex-wrap:wrap}.nav-links{display:none;order:10;width:100%;flex-direction:column;gap:0;padding:12px 0 8px;border-top:1px solid var(--border);margin-top:8px}body.nav-open .nav-links{display:flex}body.nav-open .nav-links a{display:block;padding:12px 4px;font-size:.95rem;border-bottom:1px solid var(--border)}}
+.hero{padding:112px 0 36px}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:.75rem;color:var(--foreground-dim);letter-spacing:.08em;margin-bottom:16px}
+.kicker i{width:6px;height:6px;border-radius:50%;background:var(--green)}
+.hero h1{font-size:clamp(1.8rem,4vw,2.6rem);font-weight:700;letter-spacing:-.03em;line-height:1.18;margin-bottom:14px}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.hero p{color:var(--foreground-muted);font-size:1.02rem;max-width:700px}
+.hero p strong{color:var(--foreground);font-weight:600}
+.sec{padding:40px 0 8px}
+.sec h2{font-size:1.3rem;font-weight:700;letter-spacing:-.02em;margin-bottom:8px}
+.lead{color:var(--foreground-muted);margin-bottom:18px;max-width:700px;font-size:.94rem}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}
+@media(max-width:720px){.grid2{grid-template-columns:1fr}}
+.card{padding:16px 18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
+.card.top{border-top:3px solid var(--c,var(--accent))}
+.card .tag{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.1em;color:var(--c,var(--accent));font-weight:700}
+.card h3{font-size:.98rem;margin:6px 0 8px}
+.card p{color:var(--foreground-muted);font-size:.84rem}
+pre{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;overflow-x:auto;font-family:var(--font-mono);font-size:.74rem;line-height:1.55;color:var(--foreground-muted);margin:14px 0}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+th{color:var(--foreground-dim);font-family:var(--font-mono);font-size:.68rem;letter-spacing:.05em}
+.tbl-wrap{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);padding:2px 14px;margin-bottom:14px}
+.note{margin-top:14px;padding:14px 16px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:.84rem}
+.note strong{color:var(--foreground)}
+footer{border-top:1px solid var(--border);margin-top:48px;padding:24px 0 40px;color:var(--foreground-dim);font-size:.8rem}
+footer a{color:var(--foreground-muted)}
 </style>
 </head>
 <body>
-<div class="ambient"></div>
-
 <nav>
-  <div class="container">
-    <a href="index.en.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
-    <ul class="nav-links" id="primary-nav">
-      <li><a href="index.en.html">Home</a></li>
-      <li><a href="tutorial.en.html">Tutorial</a></li>
-      <li><a href="#request">Request</a></li>
-      <li><a href="#layers">Layers</a></li>
-      <li><a href="#memory">Memory</a></li>
-      <li><a href="#read">How it is read</a></li>
-      <li><a href="#clocks">When it refreshes</a></li>
-    </ul>
-    <div class="nav-right">
-          <button type="button" class="nav-toggle" aria-label="Open menu" data-label-open="Open menu" data-label-close="Close menu" aria-expanded="false" aria-controls="primary-nav" onclick="toggleMobileNav()">
-      <svg class="icon-open" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-      <svg class="icon-close" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-    </button>
-      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
-        <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-        <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      </button>
-      <a href="context-architecture.html" class="lang-toggle" onclick="localStorage.setItem('codepapr-lang','zh')">中</a>
-    </div>
-  </div>
-</nav>
-
-<section class="hero">
-  <div class="container">
-    <div class="kicker"><i></i>ONE REQUEST · TOP TO BOTTOM</div>
-    <h1>How context is stacked, <em>where memory lives</em></h1>
-    <p>The model does not get one blob. Earlier bytes stay still so prefix cache works. <strong>Each memory kind enters one layer</strong>: short instructions every session, procedures this turn if useful, web citations only when searched.</p>
-  </div>
-</section>
-
 <div class="container">
-  <section class="sec reveal" id="request">
-    <h2>What one request looks like</h2>
-    <p class="lead">Read top to bottom. The top barely moves; the bottom grows. Color is how often it changes, not how important it is.</p>
-    <div class="stack">
-      <div class="slot" style="--slot:var(--green)">
-        <div class="n">01</div>
-        <div>
-          <h3>System core</h3>
-          <p>System prompt, tool schemas, model params, <code>AGENTS.md</code></p>
-        </div>
-        <div class="when">Frozen for the session</div>
-      </div>
-      <div class="slot" style="--slot:var(--green)">
-        <div class="n">02</div>
-        <div>
-          <h3>Session bootstrap</h3>
-          <p>Skills catalog, enabled-plugin inbox summaries, project-memory slice, long-term guidance</p>
-        </div>
-        <div class="when">Memory: compact or new session</div>
-      </div>
-      <div class="slot" style="--slot:var(--amber)">
-        <div class="n">03</div>
-        <div>
-          <h3>Session state</h3>
-          <p>Checkpoint (where this task is) + retained recent turns</p>
-        </div>
-        <div class="when">Rewritten on compaction</div>
-      </div>
-      <div class="slot" style="--slot:var(--accent)">
-        <div class="n">04</div>
-        <div>
-          <h3>Turn recall</h3>
-          <p>Old experience that might help this turn, inserted before the user message</p>
-        </div>
-        <div class="when">New every user turn</div>
-      </div>
-      <div class="slot" style="--slot:var(--orange)">
-        <div class="n">05</div>
-        <div>
-          <h3>This turn</h3>
-          <p>Current user message and tool results; date and other volatile bits live here too</p>
-        </div>
-        <div class="when">Append-only at the tail</div>
-      </div>
-    </div>
-  </section>
-
-  <section class="sec reveal" id="layers">
-    <h2>What each layer owns</h2>
-    <p class="lead">Five slots, four clocks. A given fact belongs in one layer. The checkpoint is this task’s progress, not cross-session project memory.</p>
-    <div class="layers">
-      <article class="layer" style="--c:var(--green)">
-        <div class="tag">STABLE PREFIX</div>
-        <h3>Stable prefix · 01 + 02</h3>
-        <ul>
-          <li><strong>Holds:</strong> identity and tool boundary, <code>AGENTS.md</code>, skill names + one-liners, inbox contracts for enabled publish targets, short every-session memory, your long-term guidance.</li>
-          <li><strong>Changes when:</strong> you edit rules, skills, publishable plugins, or params. Newly saved memories <strong>do not rebuild the current prefix</strong>; they wait for compaction or the next session.</li>
-          <li><strong>Budget:</strong> the memory slice is at most 24 items / 1500 tokens. Full skill files load via <code>skill_load</code>, not the prefix. Widgets without inbox stay out of context.</li>
-        </ul>
-      </article>
-      <article class="layer" style="--c:var(--amber)">
-        <div class="tag">SESSION STATE</div>
-        <h3>Session state · 03</h3>
-        <ul>
-          <li><strong>Holds:</strong> the checkpoint after compaction (goal, todos, confirmed facts) and recent turns not yet folded in.</li>
-          <li><strong>Changes when:</strong> round or length limits hit, or you run <code>/compact</code>. One intentional miss in exchange for a bounded window.</li>
-          <li><strong>Does not hold:</strong> todos copied into project memory. Checkpoints die with the task; memory lives across sessions.</li>
-        </ul>
-      </article>
-      <article class="layer" style="--c:var(--accent)">
-        <div class="tag">TURN RECALL</div>
-        <h3>Turn recall · 04</h3>
-        <ul>
-          <li><strong>Holds:</strong> retrieved old experience for this turn, mostly procedures. About 5 items / 1200 tokens.</li>
-          <li><strong>Changes when:</strong> every user turn runs retrieval once. It exists only in this request — not in chat history.</li>
-          <li><strong>Does not hold:</strong> web / MCP citations. Those are never auto-recalled, so outside text cannot become standing orders.</li>
-        </ul>
-      </article>
-      <article class="layer" style="--c:var(--orange)">
-        <div class="tag">ACTIVE TAIL</div>
-        <h3>Active context · 05</h3>
-        <ul>
-          <li><strong>Holds:</strong> the current user message and this turn’s tool calls and results. Large dumps go to disk; reread with <code>read_artifact</code>.</li>
-          <li><strong>Changes when:</strong> each turn appends at the tail. That is the only cache miss that is supposed to happen.</li>
-          <li><strong>Does not hold:</strong> date, timezone, and diagnostics in the prefix — those would bust the cache every minute.</li>
-        </ul>
-      </article>
-    </div>
-  </section>
-
-  <section class="sec reveal" id="memory">
-    <h2>How a memory travels</h2>
-    <p class="lead">The SQLite ledger is authoritative. The memory panel is the only place a human browses, edits, or forgets. There is no standalone memory file.</p>
-    <div class="flow">
-      <div class="step">
-        <div class="n">1 · Source</div>
-        <h3>Who proposed it</h3>
-        <p>You said remember / must / don’t, a test passed, cold-start summary, Agent <code>memory_write</code>, or a handwritten panel note.</p>
-      </div>
-      <div class="step">
-        <div class="n">2 · Gate</div>
-        <h3>Keep or drop</h3>
-        <p>A deterministic rule decides immediately: ordinary facts stay; injection, secrets, and dangerous commands are dropped. No “please click admit”.</p>
-      </div>
-      <div class="step">
-        <div class="n">3 · Ledger</div>
-        <h3>Visible in the panel</h3>
-        <p>Kept rows enter <code>memory_entries</code>. Same content replaces the old row. The current-session prefix still does not change.</p>
-      </div>
-      <div class="step">
-        <div class="n">4 · Destination</div>
-        <h3>Layer by kind</h3>
-        <p>Short instructions wait for compact or the next session; procedures can recall next turn; web citations appear only in search.</p>
-      </div>
-    </div>
-
-    <div class="dest" style="margin-top:16px">
-      <article class="dcard">
-        <div class="k">Every session</div>
-        <h3>Into 02 session bootstrap</h3>
-        <p>Handwritten notes, preferences, constraints, facts, conventions, verifications, decisions. At most 24 items / 1500 tokens.</p>
-        <div class="cap">Panel group: every session</div>
-      </article>
-      <article class="dcard">
-        <div class="k">On demand</div>
-        <h3>Into 04 turn recall</h3>
-        <p>Procedures. After save, the next user turn can retrieve them. They never sit in the every-session prefix.</p>
-        <div class="cap">Panel group: on-demand</div>
-      </article>
-      <article class="dcard">
-        <div class="k">Search only</div>
-        <h3>Not auto-injected</h3>
-        <p>Web / MCP citations. The model sees them only via <code>memory_search</code>. Never in 02, never auto-recalled.</p>
-        <div class="cap">Panel group: search only</div>
-      </article>
-    </div>
-    <p class="note"><strong><code>AGENTS.md</code></strong> is the project rules you wrote — editing it rebuilds the prefix. <strong>Project memory</strong> is accumulated facts and preferences — a new write does not bust the current prefix. <strong>The checkpoint</strong> is where this task is. Do not copy one into another.</p>
-  </section>
-
-  <section class="sec reveal" id="read">
-    <h2>How the model reads memory</h2>
-    <p class="lead">The ledger is never dumped into a request. There are only three read paths: already in the prefix, retrieved from this message, or the Agent calling a tool.</p>
-    <div class="dest">
-      <article class="dcard">
-        <div class="k">No tool</div>
-        <h3>Already in 02</h3>
-        <p>Short every-session instructions are visible as soon as the Agent speaks. A new write waits for compact or the next session — the current prefix is not rebuilt just to show a few more rows.</p>
-      </article>
-      <article class="dcard">
-        <div class="k">No tool</div>
-        <h3>Retrieved from this message</h3>
-        <p>Every user turn (except Ask) token-matches your message and inserts hitting procedures into 04. About 5 items / 1200 tokens. Citations and untrusted rows are skipped. If the query is too short or the budget is tight, this turn gets no recall — not a dump of the catalog.</p>
-      </article>
-      <article class="dcard">
-        <div class="k">Tool</div>
-        <h3>Agent searches</h3>
-        <p>When auto-recall is not enough, the Agent calls <code>memory_search</code>. That is the only path that can surface citations. Hits appear in the tool result, and can add one extra recall block for the rest of this turn (at most once per turn).</p>
-      </article>
-    </div>
-    <div class="tlist">
-      <div class="trow">
-        <div class="tn">memory_search</div>
-        <p>Keyword search over the ledger plus historical checkpoints. Optional category filter. Available in Ask. This is the main “read memory on purpose” tool.</p>
-      </div>
-      <div class="trow">
-        <div class="tn">memory_review_candidates</div>
-        <p>Lists the catalog, at most 40 previews. Runs only if the Agent calls it — not an automatic full-table scan each turn. Unavailable in Ask.</p>
-      </div>
-      <div class="trow">
-        <div class="tn">memory_write / memory_forget</div>
-        <p>Write or forget. Handwritten notes cannot be forgotten via tool. Unavailable in Ask.</p>
-      </div>
-      <div class="trow">
-        <div class="tn">skill_load</div>
-        <p>Loads one Skill’s full text on demand. 02 only has the name + one-liner. Skills are not ledger memory.</p>
-      </div>
-    </div>
-    <p class="note">The system prompt tells the Agent to <code>memory_write</code> when something should stick. <code>memory_search</code> stays on the tool list and is used when needed — it is not run on every message.</p>
-  </section>
-
-  <section class="sec reveal" id="clocks">
-    <h2>Three clocks</h2>
-    <p class="lead">After a memory hits the ledger, when the model actually sees it depends on which beat you are on.</p>
-    <div class="clocks">
-      <article class="clock">
-        <h3>This turn</h3>
-        <p>Ledger and panel update immediately. The current prefix does not. A procedure waits until the <strong>next user turn</strong> before it can be recalled.</p>
-      </article>
-      <article class="clock">
-        <h3>Compaction</h3>
-        <p>The checkpoint is rewritten (task progress). Project memory is re-rendered from the ledger, so short instructions finally enter the stable prefix.</p>
-      </article>
-      <article class="clock">
-        <h3>New session</h3>
-        <p>Session bootstrap always re-renders from the ledger. If it is still empty and a project graph exists, a structure / stack summary is written in the background and enters the prefix next time or after compact.</p>
-      </article>
-    </div>
-  </section>
+<a href="index.en.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
+<ul class="nav-links" id="primary-nav">
+<li><a href="index.en.html">Home</a></li>
+<li><a href="#topology">Topology</a></li>
+<li><a href="#rpc">RPC</a></li>
+<li><a href="#dataflow">Data flow</a></li>
+<li><a href="#market">App market</a></li>
+<li><a href="#context">Context layering</a></li>
+<li><a href="tutorial.en.html">Tutorial</a></li>
+</ul>
+<div class="nav-right">
+<button type="button" class="nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="primary-nav" onclick="toggleMobileNav()"><svg class="icon-open" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg><svg class="icon-close" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+<button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"><svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg><svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+<a href="context-architecture.html" class="lang-toggle">中</a>
 </div>
-
-<footer>
-  <div class="container">
-    CodePapr · Context layering · <a href="tutorial.en.html">Tutorial</a> · <a href="index.en.html">Home</a>
-  </div>
-</footer>
-
+</div>
+</nav>
+<section class="hero">
+<div class="container">
+<div class="kicker"><i></i>HOST / CLIENT SPLIT · SYSTEM ARCHITECTURE</div>
+<h1>CodePapr is not a monolith — <em>it is a host daemon plus several thin clients</em></h1>
+<p>Domain logic lives in the library crate <code>codepapr-core</code>. The only process that serves it is the <code>codepapr-server</code> host daemon; the desktop app (Tauri) and the CLI are both <strong>JSON-RPC</strong> clients. Rationale: <code>docs/adr/ADR-012</code>; full detail: <code>docs/ARCHITECTURE.en.md</code>.</p>
+</div>
+</section>
+<div class="container">
+<section class="sec" id="topology">
+<h2>Process topology</h2>
+<p class="lead">Four kinds of executables: clients (<code>codepapr</code> / <code>codepapr-cli</code>), the host (<code>codepapr-server</code>), the Node agent sidecar (<code>agent-runtime.mjs</code>, launched by <strong>the host</strong>), and the child processes the host manages (LSP servers, shells, MCP stdio servers).</p>
+<pre>Desktop client codepapr             CLI codepapr-cli
+React+Monaco · @codepapr/core       ping/doctor/status/git/fs/
+src-tauri/src/host.rs (RPC client)  shell/lsp/server/chat
+        │   JSON-RPC 2.0, line-delimited        │
+        │   TCP 127.0.0.1 (or stdio)            │
+        └────────────────┬─────────────────────────┘
+                          ▼
+           codepapr-server (host)
+           handler.rs → initialize / ping + 159 namespaced methods
+           tasks.rs  → serial task queue
+                          ▼
+           codepapr-core (domain library, no Tauri dependency)
+           workspace_fs · git_operations · shell · lsp
+           symbols · db(SQLite) · snapshot · mcp_host · web
+           agent_runtime → Node agent-runtime.mjs sidecar</pre>
+<div class="grid2">
+<div class="card top" style="--c:var(--green)"><div class="tag">STARTUP</div><h3>Attach or spawn</h3><p><code>CODEPAPR_SERVER_URL</code> set → connect only, no child process. Otherwise locate the binary (<code>CODEPAPR_SERVER_BIN</code> → next to the executable → <code>resourceDir</code> → <code>target/{debug,release}</code> → <code>PATH</code>) and run <code>codepapr-server --port 0 --port-file &lt;temp&gt;/codepapr-server-&lt;pid&gt;.port</code>; the port is read from the port file or the stderr line <code>[codepapr-server] listening on</code> (15s deadline, 40ms poll), then <code>initialize</code> is sent.</p></div>
+<div class="card top" style="--c:var(--amber)"><div class="tag">SHUTDOWN</div><h3>Fixed order</h3><p><code>lsp/stopAll</code> → <code>agent/stopAll</code> → <code>fs/stopWatcher</code> → <code>shell/stopAllBackground</code> → <code>mcp/disconnectAll</code> → kill + wait (only for a self-spawned child; an external host via <code>CODEPAPR_SERVER_URL</code> is left running). The desktop waits for settings to flush first (polls <code>db/settingsSaveState</code>).</p></div>
+</div>
+<div class="tbl-wrap"><table><tr><th>Layer</th><th>Owns</th><th>Does not own</th></tr>
+<tr><td>UI (React)</td><td>Interaction, panels, driving the agent loop, prompt assembly</td><td>Any direct file / process / database access</td></tr>
+<tr><td>Tauri client</td><td><code>host.rs</code> RPC client, <code>commands.rs</code> proxies; GUI-only: <code>codepapr-app://</code>, embedded/headless browser, TTS, Stronghold vault, file export, app install &amp; port probing</td><td>Filesystem, Git, shell, LSP, MCP, snapshots, web, the main SQLite DBs</td></tr>
+<tr><td>codepapr-server</td><td>Method routing, param validation, event broadcast, in-memory secrets, serial task queue</td><td>Domain implementation (delegated to core)</td></tr>
+<tr><td>codepapr-core</td><td>Every domain implementation and child-process lifecycle</td><td>UI, protocol layer</td></tr>
+</table></div>
+<p class="note">Two deliberate exceptions where the desktop crate bypasses RPC via a direct path dependency on <code>codepapr-core</code>: <strong>Papr App storage</strong> (<code>papr_runtime/app_storage.rs</code> calls <code>db::papr_storage_*</code> directly) and <strong>secrets</strong> (plaintext lives only in the client Stronghold vault, pushed one-way to the host's in-memory store via <code>secrets/import</code>; the host never persists secrets).</p>
+</section>
+<section class="sec" id="rpc">
+<h2>JSON-RPC surface</h2>
+<p class="lead">Line-delimited JSON-RPC 2.0, one object per line. <code>--port &lt;N&gt;</code> → TCP (<code>--port 0</code> lets the kernel pick, <code>--port-file</code> writes the bound port); no <code>--port</code> → stdio. Requests with an <code>id</code> get a response; without one they are notifications. On disconnect, every pending request fails with <code>codepapr-server closed the connection</code> — <strong>there is no automatic reconnect</strong>.</p>
+<div class="tbl-wrap"><table><tr><th>Namespace</th><th>Methods</th><th>Representative</th></tr>
+<tr><td><code>fs/*</code></td><td>23</td><td>readTextFile · writeTextFile · listFiles · search · startWatcher</td></tr>
+<tr><td><code>git/*</code></td><td>8</td><td>status · diff · log · stage · commit · branchCheckout</td></tr>
+<tr><td><code>shell/*</code></td><td>17</td><td>execute · startBackground · openSession · sendCommand</td></tr>
+<tr><td><code>lsp/*</code></td><td>12</td><td>startServer · request · diagnostics · batchSymbols</td></tr>
+<tr><td><code>symbols/*</code></td><td>8</td><td>definition · references · hover · checkSyntax</td></tr>
+<tr><td><code>db/*</code></td><td>59</td><td>loadSettings · saveMessageBatch · memory* · paprStorage*</td></tr>
+<tr><td><code>snapshot/*</code></td><td>11</td><td>ensure · create · diff · restorePlan · restoreExecute</td></tr>
+<tr><td><code>mcp/*</code></td><td>10</td><td>listTools · callTool · updateSettings · disconnectAll</td></tr>
+<tr><td><code>agent/*</code></td><td>5</td><td>start · send · stop · respondPermission</td></tr>
+<tr><td><code>web/*</code></td><td>3</td><td>search · fetchUrl · downloadFile</td></tr>
+<tr><td><code>task/*</code></td><td>2</td><td>enqueue · poll</td></tr>
+<tr><td><code>secrets/import</code></td><td>1</td><td>Populate in-memory secrets</td></tr>
+</table></div>
+<p class="note">159 namespaced methods total plus <code>initialize</code> / <code>ping</code>; anything unrecognized returns <code>Unknown JSON-RPC method</code>. Events ride <code>{"method":"event","params":{"event","payload"}}</code> notifications and are re-emitted verbatim on the Tauri event bus, names unchanged: <code>workspace-files-changed</code>, <code>project-stats-progress</code>, <code>codepapr://lsp-managed-status</code>, <code>agent-runtime://frame/exit/permission-request/permission-cancel/workspace-mutated</code>, <code>mcp-confirm-request</code>.</p>
+</section>
+<section class="sec" id="dataflow">
+<h2>Data flow and persistence</h2>
+<div class="grid2">
+<div class="card"><h3>One tool call</h3><pre style="margin:0;font-size:.72rem">React → invoke() → commands.rs
+  → host::call("fs/readTextFile")
+  → TCP → handler.rs → validate
+  → codepapr_core::workspace_fs
+  → result returns to UI</pre></div>
+<div class="card"><h3>One event</h3><pre style="margin:0;font-size:.72rem">watcher.emit("workspace-files-changed")
+  → server wraps as event notification
+  → host.rs dispatch_incoming_line
+  → app.emit(event, payload)
+  → React listen(event, ...)</pre></div>
+</div>
+<div class="tbl-wrap"><table><tr><th>Database</th><th>Path</th><th>Contents</th></tr>
+<tr><td>App DB</td><td><code>~/.codepapr/codepapr.sqlite</code></td><td>Global settings, provider/model, recent workspaces</td></tr>
+<tr><td>Project DB</td><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>Sessions, checkpoints, <code>memory_entries</code>, ProjectGraph cache</td></tr>
+<tr><td>Papr App DB</td><td><code>&lt;appDir&gt;/db.sqlite</code></td><td>Key-value storage and inbox for one .papr app</td></tr>
+</table></div>
+<p class="note">All three are opened by <code>codepapr-core::db</code>, i.e. <strong>the host process writes them</strong> (app storage is the one in-process exception). Legacy <code>state.json</code>/<code>project.json</code> import into SQLite on first open or save.</p>
+</section>
+<section class="sec" id="market">
+<h2>App / plugin marketplace and scope</h2>
+<p class="lead">.papr apps install from the official registry <code>mmrqwe/codepapr-apps</code> → <code>registry.json</code> into a <strong>global</strong> or <strong>workspace</strong> scope.</p>
+<div class="grid2">
+<div class="card top" style="--c:var(--accent)"><div class="tag">GLOBAL</div><h3><code>~/.codepapr/apps/&lt;appId&gt;/</code></h3><p>Cross-project tools, global permission defaults.</p></div>
+<div class="card top" style="--c:var(--orange)"><div class="tag">WORKSPACE</div><h3><code>&lt;workspace&gt;/.CodePapr/apps/&lt;appId&gt;/</code></h3><p>Project-specific, shippable with the repo; same <code>appId</code> <strong>overrides the global install</strong> so frontend/backend/storage stay on one directory.</p></div>
+</div>
+<p class="note">Each app gets one origin <code>codepapr-app://&lt;appId&gt;/</code>; CSP is derived from two permission axes (local access × network) — with network off, <code>script-src</code> disallows <code>https:</code>. <code>db.sqlite</code> (and wal/shm) is never served over the protocol. A directory counts as an app only when its name is valid, <code>manifest.json</code> parses, and the entry file exists.</p>
+</section>
+<section class="sec" id="context">
+<h2>Context layering (TypeScript side)</h2>
+<p class="lead">Side effects are delegated to the host; prompt assembly and cache partitioning stay in <code>@codepapr/core</code> (TS side). Full detail: <code>docs/adr/ADR-001…011</code>.</p>
+<div class="tbl-wrap"><table><tr><th>Layer</th><th>Holds</th><th>Changes when</th></tr>
+<tr><td>01 System core</td><td>System prompt, tool schemas, <code>AGENTS.md</code></td><td>Frozen for the session</td></tr>
+<tr><td>02 Session bootstrap</td><td>Skills catalog, plugin inbox summaries, project-memory slice</td><td>Compaction or new session</td></tr>
+<tr><td>03 Session state</td><td>Checkpoint (task progress) + recent turns</td><td>Rewritten on compaction</td></tr>
+<tr><td>04 Turn recall</td><td>Retrieved procedures for this turn</td><td>New every user turn</td></tr>
+<tr><td>05 Active tail</td><td>Current user message, tool results</td><td>Append-only at the tail</td></tr>
+</table></div>
+<p class="note">Project memory is authoritative in the SQLite ledger (<code>memory_entries</code>); the panel is the only human surface. Short instructions enter 02; procedures enter 04 on demand; web/MCP citations surface only through <code>memory_search</code>, never auto-injected into the prefix.</p>
+</section>
+</div>
+<footer><div class="container">CodePapr · System architecture · <a href="index.en.html">Home</a> · <a href="tutorial.en.html">Tutorial</a> · <a href="tool-inventory.en.html">Tool inventory</a></div></footer>
 <script>
 (function(){
-  const html=document.documentElement;
-  const stored=localStorage.getItem('codepapr-theme');
-  if(stored==='light') html.setAttribute('data-theme','light');
-  else if(stored==='dark') html.setAttribute('data-theme','dark');
-  window.toggleTheme=function(){
-    const cur=html.getAttribute('data-theme');
-    const next=(!cur||cur==='dark')?'light':'dark';
-    html.setAttribute('data-theme',next);
-    localStorage.setItem('codepapr-theme',next);
-  };
-  const observer=new IntersectionObserver((entries)=>{
-    entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}})
-  },{threshold:0.08,rootMargin:'0px 0px -40px 0px'});
-  document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
+const html=document.documentElement;
+const stored=localStorage.getItem('codepapr-theme');
+if(stored==='light') html.setAttribute('data-theme','light');
+else if(stored==='dark') html.setAttribute('data-theme','dark');
+window.toggleTheme=function(){const cur=html.getAttribute('data-theme');const next=(!cur||cur==='dark')?'light':'dark';html.setAttribute('data-theme',next);localStorage.setItem('codepapr-theme',next);};
 })();
 </script>
-
 <script>
 (function(){
-  function setOpen(open){
-    document.body.classList.toggle('nav-open', open);
-    var btn=document.querySelector('.nav-toggle');
-    if(btn){btn.setAttribute('aria-expanded', open?'true':'false'); btn.setAttribute('aria-label', open?(btn.getAttribute('data-label-close')||'Close menu'):(btn.getAttribute('data-label-open')||'Open menu'));}
-  }
-  window.toggleMobileNav=function(){ setOpen(!document.body.classList.contains('nav-open')); };
-  document.addEventListener('click', function(e){
-    var a=e.target.closest && e.target.closest('.nav-links a');
-    if(a) setOpen(false);
-  });
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') setOpen(false); });
+function setOpen(open){document.body.classList.toggle('nav-open', open);var btn=document.querySelector('.nav-toggle');if(btn){btn.setAttribute('aria-expanded', open?'true':'false');}}
+window.toggleMobileNav=function(){ setOpen(!document.body.classList.contains('nav-open')); };
+document.addEventListener('click', function(e){var a=e.target.closest && e.target.closest('.nav-links a');if(a) setOpen(false);});
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') setOpen(false); });
 })();
 </script>
-
 </body>
 </html>
