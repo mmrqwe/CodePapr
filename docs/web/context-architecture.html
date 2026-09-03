@@ -3,441 +3,209 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>上下文分层 · CodePapr</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='320' y1='280' x2='720' y2='780'%3E%3Cstop stop-color='%23D9673E'/%3E%3Cstop offset='1' stop-color='%23B84E2A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3Cpath d='M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z' fill='%23F0D5B2'/%3E%3Cpath d='M392 350h244' stroke='url(%23a)' stroke-width='40' stroke-linecap='round'/%3E%3Cpath d='M392 450h156' stroke='url(%23a)' stroke-width='40' stroke-linecap='round' opacity='.86'/%3E%3Cpath d='m432 592-80 80 80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m592 592 80 80-80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M540 560 484 784' stroke='url(%23a)' stroke-width='42' stroke-linecap='round'/%3E%3C/svg%3E">
+<title>系统架构 · CodePapr</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
-  :root{
-    --bg-deep:#06070a;--bg-base:#0a0c12;--bg-elevated:#0f121a;--bg-card:rgba(15,18,26,0.8);
-    --surface:rgba(255,255,255,0.04);--surface-hover:rgba(255,255,255,0.06);
-    --border:rgba(255,255,255,0.07);--border-hover:rgba(99,102,241,0.25);
-    --foreground:#edeff5;--foreground-muted:#8b90a0;--foreground-dim:#5c6170;
-    --accent:#6366f1;--accent-glow:rgba(99,102,241,0.18);--accent-soft:rgba(99,102,241,0.09);
-    --green:#22c55e;--green-glow:rgba(34,197,94,0.15);--amber:#f59e0b;--orange:#d9673e;
-    --radius:16px;--radius-sm:10px;--radius-xs:6px;
-    --font-mono:'JetBrains Mono','Cascadia Code','SF Mono',monospace;
-    --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-    --easing:cubic-bezier(0.16,1,0.3,1);--texture-opacity:0;
-  }
-  [data-theme="light"]{
-    --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
-    --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
-    --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
-    --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
-    --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
-    --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;--orange:#c25a35;
-    --texture-opacity:1;
-  }
-  @media (prefers-color-scheme: light){
-    :root:not([data-theme="dark"]){
-      --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
-      --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
-      --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
-      --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
-      --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
-      --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;--orange:#c25a35;
-      --texture-opacity:1;
-    }
-  }
-  body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased;transition:background-color 0.4s,color 0.4s}
-  body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:calc(var(--texture-opacity) * 0.035);background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:256px 256px}
-  code{font-family:var(--font-mono);font-size:0.86em;color:var(--accent)}
-  .ambient{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
-  .ambient::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(99,102,241,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(34,197,94,0.04) 0%,transparent 60%)}
-  [data-theme="light"] .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%)}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%)}}
-  .container{max-width:920px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
-  @media(max-width:768px){.container{padding:0 20px}}
-
-  nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,0.82);backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border)}
-  [data-theme="light"] nav{background:rgba(245,241,236,0.88)}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) nav{background:rgba(245,241,236,0.88)}}
-  nav .container{display:flex;align-items:center;justify-content:space-between;height:64px;max-width:1200px}
-  .logo{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground)}
-  .logo-icon{width:34px;height:34px;flex-shrink:0}
-  .logo-icon svg{width:100%;height:100%}
-  .nav-links{display:flex;gap:28px;list-style:none}
-  .nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:0.875rem;font-weight:500}
-  .nav-links a:hover{color:var(--foreground)}
-  .nav-right{display:flex;align-items:center;gap:6px}
-  .theme-toggle,.lang-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;text-decoration:none;font-size:0.73rem;font-weight:700;font-family:var(--font-mono)}
-  .theme-toggle:hover,.lang-toggle:hover{color:var(--foreground);border-color:var(--border-hover)}
-  .theme-toggle svg{width:17px;height:17px}
-  .theme-toggle .icon-sun{display:none}.theme-toggle .icon-moon{display:block}
-  [data-theme="light"] .theme-toggle .icon-sun{display:block}[data-theme="light"] .theme-toggle .icon-moon{display:none}
-  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
-  
-
-  .hero{padding:120px 0 36px}
-  .kicker{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:0.75rem;color:var(--foreground-dim);letter-spacing:.08em;margin-bottom:16px}
-  .kicker i{width:6px;height:6px;border-radius:50%;background:var(--green)}
-  .hero h1{font-size:clamp(1.9rem,4vw,2.8rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:14px}
-  .hero h1 em{font-style:normal;color:var(--accent)}
-  .hero p{color:var(--foreground-muted);font-size:1.05rem;max-width:640px}
-  .hero p strong{color:var(--foreground);font-weight:600}
-
-  .sec{padding:48px 0 8px}
-  .sec h2{font-size:1.35rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
-  .lead{color:var(--foreground-muted);margin-bottom:22px;max-width:640px}
-
-  .stack{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card)}
-  .slot{display:grid;grid-template-columns:52px 1fr 168px;gap:12px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);border-left:4px solid var(--slot)}
-  .slot:last-child{border-bottom:none}
-  .slot .n{font-family:var(--font-mono);font-weight:700;font-size:0.95rem;color:var(--slot)}
-  .slot h3{font-size:0.98rem;font-weight:600}
-  .slot p{font-size:0.8rem;color:var(--foreground-muted);margin-top:2px}
-  .slot .when{font-family:var(--font-mono);font-size:0.7rem;color:var(--slot);text-align:right;line-height:1.4}
-  @media(max-width:640px){.slot{grid-template-columns:40px 1fr}.slot .when{grid-column:2;text-align:left;margin-top:4px}}
-
-  .layers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-  @media(max-width:720px){.layers{grid-template-columns:1fr}}
-  .layer{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);border-top:3px solid var(--c)}
-  .layer .tag{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.1em;color:var(--c);font-weight:700}
-  .layer h3{font-size:1.05rem;margin:6px 0 10px}
-  .layer ul{margin:0;padding-left:1.1em;color:var(--foreground-muted);font-size:0.86rem}
-  .layer li{margin:4px 0}
-  .layer li strong{color:var(--foreground);font-weight:600}
-
-  .dest{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-  @media(max-width:800px){.dest{grid-template-columns:1fr}}
-  .dcard{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
-  .dcard .k{font-family:var(--font-mono);font-size:0.68rem;letter-spacing:.1em;color:var(--accent);font-weight:700}
-  .dcard h3{font-size:1.05rem;margin:6px 0 8px}
-  .dcard p{color:var(--foreground-muted);font-size:0.86rem}
-  .dcard .cap{margin-top:10px;font-family:var(--font-mono);font-size:0.72rem;color:var(--foreground-dim)}
-
-  .flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0}
-  @media(max-width:800px){.flow{grid-template-columns:1fr}}
-  .step{padding:18px 18px 20px;border:1px solid var(--border);background:var(--bg-card);position:relative}
-  .step:first-child{border-radius:var(--radius) 0 0 var(--radius)}
-  .step:last-child{border-radius:0 var(--radius) var(--radius) 0}
-  @media(max-width:800px){.step:first-child,.step:last-child{border-radius:var(--radius-sm)}}
-  .step + .step{border-left:none}
-  @media(max-width:800px){.step + .step{border-left:1px solid var(--border);border-top:none}}
-  .step .n{font-family:var(--font-mono);font-size:0.72rem;color:var(--accent);font-weight:700}
-  .step h3{font-size:0.95rem;margin:6px 0 6px}
-  .step p{font-size:0.82rem;color:var(--foreground-muted)}
-
-  .clocks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-  @media(max-width:800px){.clocks{grid-template-columns:1fr}}
-  .clock{padding:20px 22px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
-  .clock h3{font-size:1rem;margin-bottom:8px}
-  .clock p{font-size:0.86rem;color:var(--foreground-muted)}
-
-  .tlist{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card)}
-  .trow{display:grid;grid-template-columns:188px 1fr;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);align-items:start}
-  .trow:last-child{border-bottom:none}
-  .trow .tn{font-family:var(--font-mono);font-size:0.82rem;color:var(--accent);font-weight:600;word-break:break-all}
-  .trow p{font-size:0.82rem;color:var(--foreground-muted)}
-  @media(max-width:640px){.trow{grid-template-columns:1fr}}
-
-  .note{margin-top:22px;padding:16px 18px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:0.88rem}
-  .note strong{color:var(--foreground)}
-
-  footer{border-top:1px solid var(--border);margin-top:56px;padding:28px 0 44px;color:var(--foreground-dim);font-size:0.8rem}
-  footer a{color:var(--foreground-muted)}
-  .reveal{opacity:0;transform:translateY(16px);transition:opacity 0.6s var(--easing),transform 0.6s var(--easing)}
-  .reveal.visible{opacity:1;transform:none}
-
-  .nav-toggle{display:none;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;margin-left:8px;flex-shrink:0}
-  .nav-toggle:hover{border-color:var(--border-hover);color:var(--foreground)}
-  .nav-toggle svg{width:18px;height:18px}
-  .nav-toggle .icon-close{display:none}
-  body.nav-open .nav-toggle .icon-open{display:none}
-  body.nav-open .nav-toggle .icon-close{display:block}
-  @media(max-width:768px){
-    .nav-toggle{display:inline-flex}
-    nav .container{flex-wrap:wrap}
-    .nav-links{display:none;order:10;width:100%;flex-direction:column;gap:0;padding:12px 0 8px;border-top:1px solid var(--border);margin-top:8px}
-    body.nav-open .nav-links{display:flex}
-    body.nav-open .nav-links a{display:block;padding:12px 4px;font-size:0.95rem;border-bottom:1px solid var(--border)}
-  }
-
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+:root{--bg-deep:#06070a;--bg-card:rgba(15,18,26,.8);--surface:rgba(255,255,255,.04);--border:rgba(255,255,255,.07);--border-hover:rgba(99,102,241,.25);--foreground:#edeff5;--foreground-muted:#8b90a0;--foreground-dim:#5c6170;--accent:#6366f1;--green:#22c55e;--amber:#f59e0b;--orange:#d9673e;--radius:16px;--radius-sm:10px;--radius-xs:6px;--font-mono:'JetBrains Mono','SF Mono',monospace;--font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+[data-theme="light"]{--bg-deep:#f7f4ef;--bg-card:rgba(245,241,236,.85);--surface:rgba(54,32,17,.05);--border:rgba(27,18,10,.08);--border-hover:rgba(217,103,62,.35);--foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;--accent:#d9673e;--green:#15803d;--amber:#a56a1d;--orange:#c25a35}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg-deep:#f7f4ef;--bg-card:rgba(245,241,236,.85);--surface:rgba(54,32,17,.05);--border:rgba(27,18,10,.08);--border-hover:rgba(217,103,62,.35);--foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;--accent:#d9673e;--green:#15803d;--amber:#a56a1d;--orange:#c25a35}}
+body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.6;-webkit-font-smoothing:antialiased}
+code{font-family:var(--font-mono);font-size:.86em;color:var(--accent)}
+.container{max-width:980px;margin:0 auto;padding:0 32px}
+@media(max-width:768px){.container{padding:0 20px}}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,.82);backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border)}
+[data-theme="light"] nav{background:rgba(245,241,236,.88)}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) nav{background:rgba(245,241,236,.88)}}
+nav .container{display:flex;align-items:center;justify-content:space-between;height:64px;max-width:1200px}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground)}
+.logo-icon{width:30px;height:30px;flex-shrink:0}.logo-icon svg{width:100%;height:100%}
+.nav-links{display:flex;gap:22px;list-style:none;flex-wrap:wrap}
+.nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:.85rem;font-weight:500}
+.nav-links a:hover{color:var(--foreground)}
+.nav-right{display:flex;align-items:center;gap:6px}
+.theme-toggle,.lang-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;text-decoration:none;font-size:.73rem;font-weight:700;font-family:var(--font-mono)}
+.theme-toggle:hover,.lang-toggle:hover{color:var(--foreground);border-color:var(--border-hover)}
+.theme-toggle svg{width:16px;height:16px}
+.theme-toggle .icon-sun{display:none}.theme-toggle .icon-moon{display:block}
+[data-theme="light"] .theme-toggle .icon-sun{display:block}[data-theme="light"] .theme-toggle .icon-moon{display:none}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
+.nav-toggle{display:none;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;margin-left:8px}
+.nav-toggle svg{width:18px;height:18px}.nav-toggle .icon-close{display:none}
+body.nav-open .nav-toggle .icon-open{display:none}body.nav-open .nav-toggle .icon-close{display:block}
+@media(max-width:768px){.nav-toggle{display:inline-flex}nav .container{flex-wrap:wrap}.nav-links{display:none;order:10;width:100%;flex-direction:column;gap:0;padding:12px 0 8px;border-top:1px solid var(--border);margin-top:8px}body.nav-open .nav-links{display:flex}body.nav-open .nav-links a{display:block;padding:12px 4px;font-size:.95rem;border-bottom:1px solid var(--border)}}
+.hero{padding:112px 0 36px}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:.75rem;color:var(--foreground-dim);letter-spacing:.08em;margin-bottom:16px}
+.kicker i{width:6px;height:6px;border-radius:50%;background:var(--green)}
+.hero h1{font-size:clamp(1.8rem,4vw,2.6rem);font-weight:700;letter-spacing:-.03em;line-height:1.18;margin-bottom:14px}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.hero p{color:var(--foreground-muted);font-size:1.02rem;max-width:700px}
+.hero p strong{color:var(--foreground);font-weight:600}
+.sec{padding:40px 0 8px}
+.sec h2{font-size:1.3rem;font-weight:700;letter-spacing:-.02em;margin-bottom:8px}
+.lead{color:var(--foreground-muted);margin-bottom:18px;max-width:700px;font-size:.94rem}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
+@media(max-width:720px){.grid2,.grid3{grid-template-columns:1fr}}
+.card{padding:16px 18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
+.card.top{border-top:3px solid var(--c,var(--accent))}
+.card .tag{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.1em;color:var(--c,var(--accent));font-weight:700}
+.card h3{font-size:.98rem;margin:6px 0 8px}
+.card p{color:var(--foreground-muted);font-size:.84rem}
+.card ul{margin:6px 0 0;padding-left:1.1em;color:var(--foreground-muted);font-size:.83rem}
+.card li{margin:4px 0}.card li strong{color:var(--foreground);font-weight:600}
+pre{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;overflow-x:auto;font-family:var(--font-mono);font-size:.74rem;line-height:1.55;color:var(--foreground-muted);margin:14px 0}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+th{color:var(--foreground-dim);font-family:var(--font-mono);font-size:.68rem;letter-spacing:.05em}
+.tbl-wrap{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);padding:2px 14px;margin-bottom:14px}
+.note{margin-top:14px;padding:14px 16px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:.84rem}
+.note strong{color:var(--foreground)}
+footer{border-top:1px solid var(--border);margin-top:48px;padding:24px 0 40px;color:var(--foreground-dim);font-size:.8rem}
+footer a{color:var(--foreground-muted)}
 </style>
 </head>
 <body>
-<div class="ambient"></div>
-
 <nav>
-  <div class="container">
-    <a href="index.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
-    <ul class="nav-links" id="primary-nav">
-      <li><a href="index.html">首页</a></li>
-      <li><a href="tutorial.html">教程</a></li>
-      <li><a href="#request">请求</a></li>
-      <li><a href="#layers">分层</a></li>
-      <li><a href="#memory">记忆</a></li>
-      <li><a href="#read">怎么读</a></li>
-      <li><a href="#clocks">何时刷新</a></li>
-    </ul>
-    <div class="nav-right">
-          <button type="button" class="nav-toggle" aria-label="打开菜单" data-label-open="打开菜单" data-label-close="关闭菜单" aria-expanded="false" aria-controls="primary-nav" onclick="toggleMobileNav()">
-      <svg class="icon-open" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-      <svg class="icon-close" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-    </button>
-      <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">
-        <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-        <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      </button>
-      <a href="context-architecture.en.html" class="lang-toggle" onclick="localStorage.setItem('codepapr-lang','en')">EN</a>
-    </div>
-  </div>
-</nav>
-
-<section class="hero">
-  <div class="container">
-    <div class="kicker"><i></i>一次请求 · 从上到下</div>
-    <h1>上下文怎么拼，<em>记忆进哪一层</em></h1>
-    <p>发给模型的不是一锅炖。越靠前的内容越稳，前缀缓存越好用。<strong>项目记忆按该进哪层就进哪层</strong>：短指令每次带着，踩坑经验这一轮再用，网页引用只等人去搜。</p>
-  </div>
-</section>
-
 <div class="container">
-  <section class="sec reveal" id="request">
-    <h2>一次请求长什么样</h2>
-    <p class="lead">从上到下读。上面尽量不动，下面才增长。颜色表示变化快慢，不是重要程度。</p>
-    <div class="stack">
-      <div class="slot" style="--slot:var(--green)">
-        <div class="n">01</div>
-        <div>
-          <h3>系统核心</h3>
-          <p>系统提示、工具定义、模型参数、<code>AGENTS.md</code></p>
-        </div>
-        <div class="when">会话内冻结</div>
-      </div>
-      <div class="slot" style="--slot:var(--green)">
-        <div class="n">02</div>
-        <div>
-          <h3>会话引导</h3>
-          <p>Skills 目录、已启用插件 inbox 摘要、项目记忆段、长期指导</p>
-        </div>
-        <div class="when">记忆：压缩或新会话才换</div>
-      </div>
-      <div class="slot" style="--slot:var(--amber)">
-        <div class="n">03</div>
-        <div>
-          <h3>会话状态</h3>
-          <p>检查点（这一场任务进行到哪）+ 保留的近期对话</p>
-        </div>
-        <div class="when">压缩时重写</div>
-      </div>
-      <div class="slot" style="--slot:var(--accent)">
-        <div class="n">04</div>
-        <div>
-          <h3>本回合召回</h3>
-          <p>这一轮可能用得上的旧经验，插在当前用户消息前</p>
-        </div>
-        <div class="when">每个用户回合换新</div>
-      </div>
-      <div class="slot" style="--slot:var(--orange)">
-        <div class="n">05</div>
-        <div>
-          <h3>本轮对话</h3>
-          <p>当前用户消息、本轮工具结果；日期等动态内容也在这里</p>
-        </div>
-        <div class="when">只往尾部追加</div>
-      </div>
-    </div>
-  </section>
-
-  <section class="sec reveal" id="layers">
-    <h2>分层各管什么</h2>
-    <p class="lead">五段请求，四个变化节奏。同一条信息只应出现在其中一层。检查点是这场任务的进度，不是跨会话项目记忆。</p>
-    <div class="layers">
-      <article class="layer" style="--c:var(--green)">
-        <div class="tag">STABLE PREFIX</div>
-        <h3>稳定前缀 · 01 + 02</h3>
-        <ul>
-          <li><strong>装什么：</strong>身份与工具边界、<code>AGENTS.md</code>、Skills 名称+一句话、已启用且声明了 inbox 的插件说明书、每次会话带着的短记忆、你设的长期指导。</li>
-          <li><strong>何时变：</strong>你改规则、技能、可推送插件或参数，会重建前缀。新记住的内容<strong>不拆当前前缀</strong>，等压缩或下次会话。</li>
-          <li><strong>预算：</strong>项目记忆段最多 24 条 / 1500 tokens。Skills 全文用 <code>skill_load</code> 按需读，不进前缀。没有 inbox 的小组件不进上下文。</li>
-        </ul>
-      </article>
-      <article class="layer" style="--c:var(--amber)">
-        <div class="tag">SESSION STATE</div>
-        <h3>会话状态 · 03</h3>
-        <ul>
-          <li><strong>装什么：</strong>压缩后的检查点（目标、待办、已确认事实）和还没被折进去的近期对话。</li>
-          <li><strong>何时变：</strong>轮数或长度超限、或你执行 <code>/compact</code>。接受一次失效，换可控的上下文。</li>
-          <li><strong>不装什么：</strong>不要把待办抄进项目记忆。检查点随这一场任务死，记忆跨会话活。</li>
-        </ul>
-      </article>
-      <article class="layer" style="--c:var(--accent)">
-        <div class="tag">TURN RECALL</div>
-        <h3>回合召回 · 04</h3>
-        <ul>
-          <li><strong>装什么：</strong>这一轮检索命中的旧经验，主要是踩坑记录。最多约 5 条 / 1200 tokens。</li>
-          <li><strong>何时变：</strong>每个用户回合重新检索一次。只活在这一次请求里，不写进对话历史。</li>
-          <li><strong>不装什么：</strong>网页 / MCP 引用不自动召回，避免把外部文字当成指令。</li>
-        </ul>
-      </article>
-      <article class="layer" style="--c:var(--orange)">
-        <div class="tag">ACTIVE TAIL</div>
-        <h3>活动上下文 · 05</h3>
-        <ul>
-          <li><strong>装什么：</strong>当前用户消息、本轮工具调用和结果。大段输出落盘，用 <code>read_artifact</code> 回看。</li>
-          <li><strong>何时变：</strong>每一轮只在尾部追加。这是缓存 miss 里唯一「本来就该有」的增量。</li>
-          <li><strong>不装什么：</strong>日期、时区、诊断不进前缀，免得每分钟拆缓存。</li>
-        </ul>
-      </article>
-    </div>
-  </section>
-
-  <section class="sec reveal" id="memory">
-    <h2>一条记忆怎么走</h2>
-    <p class="lead">权威在 SQLite 账本。记忆面板是唯一给人看、改、遗忘的面。没有独立的记忆文件。</p>
-    <div class="flow">
-      <div class="step">
-        <div class="n">1 · 来源</div>
-        <h3>谁提出</h3>
-        <p>你说「记住 / 必须 / 不要」、测试跑通、冷启动摘要、Agent <code>memory_write</code>、或你在面板手写。</p>
-      </div>
-      <div class="step">
-        <div class="n">2 · 门</div>
-        <h3>留下或丢掉</h3>
-        <p>确定性规则立刻决定：正常事实留下，注入 / 密钥 / 危险命令丢掉。没有「请你点同意」。</p>
-      </div>
-      <div class="step">
-        <div class="n">3 · 账本</div>
-        <h3>面板立刻可见</h3>
-        <p>留下的进入 <code>memory_entries</code>。同内容会覆盖旧条。当前会话前缀这时还不变。</p>
-      </div>
-      <div class="step">
-        <div class="n">4 · 去向</div>
-        <h3>按种类进层</h3>
-        <p>短指令等压缩或下次会话进前缀；踩坑下一回合可召回；网页引用只出现在搜索里。</p>
-      </div>
-    </div>
-
-    <div class="dest" style="margin-top:16px">
-      <article class="dcard">
-        <div class="k">每次会话</div>
-        <h3>进 02 会话引导</h3>
-        <p>手写笔记、偏好、约束、项目事实、约定、验证、决策。最多 24 条 / 1500 tokens。</p>
-        <div class="cap">面板分组：每次会话</div>
-      </article>
-      <article class="dcard">
-        <div class="k">按需召回</div>
-        <h3>进 04 本回合召回</h3>
-        <p>踩坑经验 <code>procedure</code>。写入后的下一用户回合，检索命中才出现。不进每次会话的前缀。</p>
-        <div class="cap">面板分组：按需召回</div>
-      </article>
-      <article class="dcard">
-        <div class="k">仅搜索</div>
-        <h3>不自动进请求</h3>
-        <p>网页 / MCP 引用 <code>citation</code>。模型调用 <code>memory_search</code> 才会看到。永不进 02，也不自动召回。</p>
-        <div class="cap">面板分组：仅搜索</div>
-      </article>
-    </div>
-    <p class="note"><strong><code>AGENTS.md</code></strong> 是你写的项目规则，改了会重建前缀。<strong>项目记忆</strong>是自动积累的事实与偏好，新写入不拆当前前缀。<strong>检查点</strong>是这一场任务进行到哪。三者不要互相复制。</p>
-  </section>
-
-  <section class="sec reveal" id="read">
-    <h2>模型怎么读到记忆</h2>
-    <p class="lead">不会把账本整库塞进请求。读取只有三条路：已经带着、系统按这句话搜、Agent 自己调工具。</p>
-    <div class="dest">
-      <article class="dcard">
-        <div class="k">不用工具</div>
-        <h3>已经在 02</h3>
-        <p>每次会话带着的短指令，Agent 张口就能看到。新写入要等压缩或下次会话，不会为了多看几条去拆当前前缀。</p>
-      </article>
-      <article class="dcard">
-        <div class="k">不用工具</div>
-        <h3>系统按这句话召回</h3>
-        <p>每个用户回合（Ask 除外）用你这句话做关键词匹配，命中的踩坑经验插进 04。最多约 5 条 / 1200 tokens。citation 和不可信内容跳过。查询太短或预算不够，本回合就不召回——不是把全部记忆倒进去。</p>
-      </article>
-      <article class="dcard">
-        <div class="k">用工具</div>
-        <h3>Agent 主动搜</h3>
-        <p>自动召回不够时，Agent 调用 <code>memory_search</code>。这是搜 citation 的唯一路径。结果出现在工具返回里，并可以再插一条召回块给本回合后续请求（每回合最多一次）。</p>
-      </article>
-    </div>
-    <div class="tlist">
-      <div class="trow">
-        <div class="tn">memory_search</div>
-        <p>按关键词检索账本 + 历史检查点。可限定类别。Ask 模式也能用。这是「主动读记忆」的主工具。</p>
-      </div>
-      <div class="trow">
-        <div class="tn">memory_review_candidates</div>
-        <p>列出目录，最多 40 条预览。只有 Agent 主动调才会跑；不是每回合自动全表扫描。Ask 模式不可用。</p>
-      </div>
-      <div class="trow">
-        <div class="tn">memory_write / memory_forget</div>
-        <p>写入或遗忘。手写笔记不能用工具删。Ask 模式不可用。</p>
-      </div>
-      <div class="trow">
-        <div class="tn">skill_load</div>
-        <p>按需读某个 Skill 全文。02 里只有名称 + 一句话，Skills 不是账本记忆。</p>
-      </div>
-    </div>
-    <p class="note">系统提示会教 Agent 用 <code>memory_write</code> 记下该记的东西；<code>memory_search</code> 作为工具一直挂着，需要时再调，不会每句话先搜一遍。</p>
-  </section>
-
-  <section class="sec reveal" id="clocks">
-    <h2>三种时钟</h2>
-    <p class="lead">同一条记忆落库之后，什么时候真正出现在模型眼前，取决于你现在处在哪一拍。</p>
-    <div class="clocks">
-      <article class="clock">
-        <h3>本回合</h3>
-        <p>账本和面板立刻更新。当前前缀不动。如果是踩坑经验，要等到<strong>下一个用户回合</strong>才可能被召回。</p>
-      </article>
-      <article class="clock">
-        <h3>压缩</h3>
-        <p>检查点重写（任务进度）。同时从账本重渲染项目记忆，短指令这才进入稳定前缀。</p>
-      </article>
-      <article class="clock">
-        <h3>新会话</h3>
-        <p>总是从账本重渲染会话引导。若账本还是空的、且有项目图，后台写一条结构 / 技术栈摘要，下次或压缩后进入前缀。</p>
-      </article>
-    </div>
-  </section>
+<a href="index.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
+<ul class="nav-links" id="primary-nav">
+<li><a href="index.html">首页</a></li>
+<li><a href="#topology">拓扑</a></li>
+<li><a href="#rpc">RPC 面</a></li>
+<li><a href="#dataflow">数据流</a></li>
+<li><a href="#market">应用市场</a></li>
+<li><a href="#context">上下文分层</a></li>
+<li><a href="tutorial.html">教程</a></li>
+</ul>
+<div class="nav-right">
+<button type="button" class="nav-toggle" aria-label="打开菜单" aria-expanded="false" aria-controls="primary-nav" onclick="toggleMobileNav()"><svg class="icon-open" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg><svg class="icon-close" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+<button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题"><svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg><svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+<a href="context-architecture.en.html" class="lang-toggle">EN</a>
 </div>
-
-<footer>
-  <div class="container">
-    CodePapr · 上下文分层 · <a href="tutorial.html">使用教程</a> · <a href="index.html">首页</a>
-  </div>
-</footer>
-
+</div>
+</nav>
+<section class="hero">
+<div class="container">
+<div class="kicker"><i></i>宿主 / 客户端拆分 · 系统架构</div>
+<h1>CodePapr 不是单体应用，<em>是宿主守护进程 + 多个瘦客户端</em></h1>
+<p>Rust 领域逻辑住在库 crate <code>codepapr-core</code>，唯一对外服务的进程是 <code>codepapr-server</code> 宿主守护进程；桌面端（Tauri）和 CLI 都只是通过 <strong>JSON-RPC</strong> 说话的瘦客户端。决策背景见 <code>docs/adr/ADR-012</code>，完整版见 <code>docs/ARCHITECTURE.md</code>。</p>
+</div>
+</section>
+<div class="container">
+<section class="sec" id="topology">
+<h2>进程拓扑</h2>
+<p class="lead">运行时涉及四类可执行体：客户端（<code>codepapr</code> / <code>codepapr-cli</code>）、宿主（<code>codepapr-server</code>）、Node agent sidecar（<code>agent-runtime.mjs</code>，由<strong>宿主</strong>拉起）、以及宿主管理的各类子进程（LSP server、shell、MCP stdio server）。</p>
+<pre>桌面客户端 codepapr              CLI codepapr-cli
+React+Monaco · @codepapr/core        ping/doctor/status/git/fs/
+src-tauri/src/host.rs (RPC client)   shell/lsp/server/chat
+        │        JSON-RPC 2.0，行分隔 JSON        │
+        │        TCP 127.0.0.1（或 stdio）        │
+        └────────────────┬─────────────────────────┘
+                          ▼
+           codepapr-server（宿主守护进程）
+           handler.rs → initialize / ping + 159 个命名空间方法
+           tasks.rs  → 串行任务队列
+                          ▼
+           codepapr-core（领域库，无 Tauri 依赖）
+           workspace_fs · git_operations · shell · lsp
+           symbols · db(SQLite) · snapshot · mcp_host · web
+           agent_runtime → Node agent-runtime.mjs sidecar</pre>
+<div class="grid2">
+<div class="card top" style="--c:var(--green)"><div class="tag">启动</div><h3>attach 或 spawn</h3><p>设了 <code>CODEPAPR_SERVER_URL</code> → 直连，不拉子进程。否则按 <code>CODEPAPR_SERVER_BIN</code> → 同目录 → <code>resourceDir</code> → <code>target/{debug,release}</code> → <code>PATH</code> 定位二进制，执行 <code>codepapr-server --port 0 --port-file &lt;temp&gt;/codepapr-server-&lt;pid&gt;.port</code>；端口从 port-file 或 stderr 行 <code>[codepapr-server] listening on</code> 拿到（15s 超时、40ms 轮询），随后发 <code>initialize</code>。</p></div>
+<div class="card top" style="--c:var(--amber)"><div class="tag">关闭</div><h3>固定顺序</h3><p><code>lsp/stopAll</code> → <code>agent/stopAll</code> → <code>fs/stopWatcher</code> → <code>shell/stopAllBackground</code> → <code>mcp/disconnectAll</code> → kill + wait（仅自己拉起的子进程；连外部宿主时不杀）。桌面端退出前先等设置落盘（轮询 <code>db/settingsSaveState</code>）。</p></div>
+</div>
+<div class="tbl-wrap"><table><tr><th>层</th><th>拥有</th><th>不拥有</th></tr>
+<tr><td>UI (React)</td><td>交互、面板、Agent 循环驱动、提示词组装</td><td>任何直接文件 / 进程 / 数据库访问</td></tr>
+<tr><td>Tauri 客户端</td><td><code>host.rs</code> RPC 客户端、<code>commands.rs</code> 代理；GUI 专属：<code>codepapr-app://</code> 协议、内置/无头浏览器、TTS、Stronghold 密钥、文件导出、App 安装与端口探测</td><td>文件系统、Git、Shell、LSP、MCP、快照、Web、主 SQLite</td></tr>
+<tr><td>codepapr-server</td><td>方法路由、参数校验、事件广播、内存态密钥、串行任务队列</td><td>领域实现（全部委派给 core）</td></tr>
+<tr><td>codepapr-core</td><td>所有领域实现与子进程生命周期</td><td>UI、协议层</td></tr>
+</table></div>
+<p class="note">两个例外允许桌面端直连 <code>codepapr-core</code>（path 依赖，跳过 RPC）：<strong>Papr App 存储</strong>（<code>papr_runtime/app_storage.rs</code> 直调 <code>db::papr_storage_*</code>）与<strong>密钥</strong>（明文只在客户端 Stronghold vault，经 <code>secrets/import</code> 单向推给宿主内存态存储，宿主不落盘密钥）。</p>
+</section>
+<section class="sec" id="rpc">
+<h2>JSON-RPC 协议面</h2>
+<p class="lead">行分隔 JSON-RPC 2.0，一行一个对象。<code>--port &lt;N&gt;</code> → TCP（<code>--port 0</code> 内核选端口，<code>--port-file</code> 落盘实际端口）；不传 <code>--port</code> → stdio。带 <code>id</code> 的行按请求/响应处理，无 <code>id</code> 的行当通知处理；连接断开时所有 pending 请求以 <code>codepapr-server closed the connection</code> 失败，<strong>当前不做自动重连</strong>。</p>
+<div class="tbl-wrap"><table><tr><th>命名空间</th><th>方法数</th><th>代表方法</th></tr>
+<tr><td><code>fs/*</code></td><td>23</td><td>readTextFile · writeTextFile · listFiles · search · startWatcher</td></tr>
+<tr><td><code>git/*</code></td><td>8</td><td>status · diff · log · stage · commit · branchCheckout</td></tr>
+<tr><td><code>shell/*</code></td><td>17</td><td>execute · startBackground · openSession · sendCommand</td></tr>
+<tr><td><code>lsp/*</code></td><td>12</td><td>startServer · request · diagnostics · batchSymbols</td></tr>
+<tr><td><code>symbols/*</code></td><td>8</td><td>definition · references · hover · checkSyntax</td></tr>
+<tr><td><code>db/*</code></td><td>59</td><td>loadSettings · saveMessageBatch · memory* · paprStorage*</td></tr>
+<tr><td><code>snapshot/*</code></td><td>11</td><td>ensure · create · diff · restorePlan · restoreExecute</td></tr>
+<tr><td><code>mcp/*</code></td><td>10</td><td>listTools · callTool · updateSettings · disconnectAll</td></tr>
+<tr><td><code>agent/*</code></td><td>5</td><td>start · send · stop · respondPermission</td></tr>
+<tr><td><code>web/*</code></td><td>3</td><td>search · fetchUrl · downloadFile</td></tr>
+<tr><td><code>task/*</code></td><td>2</td><td>enqueue · poll</td></tr>
+<tr><td><code>secrets/import</code></td><td>1</td><td>写入内存态密钥</td></tr>
+</table></div>
+<p class="note">共 159 个命名空间方法 + <code>initialize</code> / <code>ping</code>；未命中报 <code>Unknown JSON-RPC method</code>。事件以 <code>{"method":"event","params":{"event","payload"}}</code> 通知回传并原样转发到 Tauri 事件总线，事件名不变：<code>workspace-files-changed</code>、<code>project-stats-progress</code>、<code>codepapr://lsp-managed-status</code>、<code>agent-runtime://frame/exit/permission-request/permission-cancel/workspace-mutated</code>、<code>mcp-confirm-request</code>。</p>
+</section>
+<section class="sec" id="dataflow">
+<h2>数据流与持久化</h2>
+<div class="grid2">
+<div class="card"><h3>一次工具调用</h3><pre style="margin:0;font-size:.72rem">React → invoke() → commands.rs
+  → host::call("fs/readTextFile")
+  → TCP → handler.rs → 校验
+  → codepapr_core::workspace_fs
+  → 原路返回 result → UI</pre></div>
+<div class="card"><h3>一条事件</h3><pre style="margin:0;font-size:.72rem">watcher.emit("workspace-files-changed")
+  → server 包装为 event 通知
+  → host.rs dispatch_incoming_line
+  → app.emit(event, payload)
+  → React listen(event, ...)</pre></div>
+</div>
+<div class="tbl-wrap"><table><tr><th>库</th><th>路径</th><th>内容</th></tr>
+<tr><td>App DB</td><td><code>~/.codepapr/codepapr.sqlite</code></td><td>全局设置、provider/model、最近工作区</td></tr>
+<tr><td>Project DB</td><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>会话消息、checkpoint、<code>memory_entries</code>、ProjectGraph 缓存</td></tr>
+<tr><td>Papr App DB</td><td><code>&lt;appDir&gt;/db.sqlite</code></td><td>单个 .papr 应用的键值存储与 inbox</td></tr>
+</table></div>
+<p class="note">三处均由 <code>codepapr-core::db</code> 打开，即<strong>宿主进程在写</strong>（App 存储是唯一在客户端进程内直连的例外）。旧版 <code>state.json</code>/<code>project.json</code> 首次打开或保存时自动导入 SQLite。</p>
+</section>
+<section class="sec" id="market">
+<h2>App / 插件市场与作用域</h2>
+<p class="lead">.papr 应用从官方注册表 <code>mmrqwe/codepapr-apps</code> → <code>registry.json</code> 安装到 <strong>global</strong> 或 <strong>workspace</strong> 作用域。</p>
+<div class="grid2">
+<div class="card top" style="--c:var(--accent)"><div class="tag">GLOBAL</div><h3><code>~/.codepapr/apps/&lt;appId&gt;/</code></h3><p>跨项目通用工具，全局默认权限。</p></div>
+<div class="card top" style="--c:var(--orange)"><div class="tag">WORKSPACE</div><h3><code>&lt;workspace&gt;/.CodePapr/apps/&lt;appId&gt;/</code></h3><p>项目专属，可随仓库分发；同 <code>appId</code> 时<strong>覆盖全局安装</strong>，前端/后端/存储三者始终指向同一目录。</p></div>
+</div>
+<p class="note">每个应用一个 origin <code>codepapr-app://&lt;appId&gt;/</code>；CSP 由两轴权限（本地访问 × 网络）推导，网络关时 <code>script-src</code> 不放行 <code>https:</code>；<code>db.sqlite</code>（及 wal/shm）永不通过协议输出；一个目录要算应用，需目录名合法、<code>manifest.json</code> 可解析、入口文件存在。</p>
+</section>
+<section class="sec" id="context">
+<h2>上下文分层（TypeScript 侧）</h2>
+<p class="lead">领域副作用交给宿主之后，提示词组装与缓存分区仍在 <code>@codepapr/core</code>（TS 侧）。完整细节见 <code>docs/adr/ADR-001…011</code>。</p>
+<div class="tbl-wrap"><table><tr><th>层</th><th>内容</th><th>何时变</th></tr>
+<tr><td>01 系统核心</td><td>系统提示、工具定义、<code>AGENTS.md</code></td><td>会话内冻结</td></tr>
+<tr><td>02 会话引导</td><td>Skills 目录、插件 inbox 摘要、项目记忆段</td><td>压缩或新会话才换</td></tr>
+<tr><td>03 会话状态</td><td>检查点（任务进度）+ 近期对话</td><td>压缩时重写</td></tr>
+<tr><td>04 本回合召回</td><td>命中的踩坑经验（procedure）</td><td>每个用户回合换新</td></tr>
+<tr><td>05 本轮对话</td><td>当前用户消息、工具结果</td><td>只往尾部追加</td></tr>
+</table></div>
+<p class="note">项目记忆以 SQLite 账本（<code>memory_entries</code>）为唯一权威，面板是唯一人工面；短指令进 02，踩坑经验进 04 按需召回，网页/MCP 引用只在 <code>memory_search</code> 里可见，永不自动进前缀。</p>
+</section>
+</div>
+<footer><div class="container">CodePapr · 系统架构 · <a href="index.html">首页</a> · <a href="tutorial.html">教程</a> · <a href="tool-inventory.html">工具全景</a></div></footer>
 <script>
 (function(){
-  const html=document.documentElement;
-  const stored=localStorage.getItem('codepapr-theme');
-  if(stored==='light') html.setAttribute('data-theme','light');
-  else if(stored==='dark') html.setAttribute('data-theme','dark');
-  window.toggleTheme=function(){
-    const cur=html.getAttribute('data-theme');
-    const next=(!cur||cur==='dark')?'light':'dark';
-    html.setAttribute('data-theme',next);
-    localStorage.setItem('codepapr-theme',next);
-  };
-  const observer=new IntersectionObserver((entries)=>{
-    entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}})
-  },{threshold:0.08,rootMargin:'0px 0px -40px 0px'});
-  document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
+const html=document.documentElement;
+const stored=localStorage.getItem('codepapr-theme');
+if(stored==='light') html.setAttribute('data-theme','light');
+else if(stored==='dark') html.setAttribute('data-theme','dark');
+window.toggleTheme=function(){const cur=html.getAttribute('data-theme');const next=(!cur||cur==='dark')?'light':'dark';html.setAttribute('data-theme',next);localStorage.setItem('codepapr-theme',next);};
 })();
 </script>
-
 <script>
 (function(){
-  function setOpen(open){
-    document.body.classList.toggle('nav-open', open);
-    var btn=document.querySelector('.nav-toggle');
-    if(btn){btn.setAttribute('aria-expanded', open?'true':'false'); btn.setAttribute('aria-label', open?(btn.getAttribute('data-label-close')||'Close menu'):(btn.getAttribute('data-label-open')||'Open menu'));}
-  }
-  window.toggleMobileNav=function(){ setOpen(!document.body.classList.contains('nav-open')); };
-  document.addEventListener('click', function(e){
-    var a=e.target.closest && e.target.closest('.nav-links a');
-    if(a) setOpen(false);
-  });
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') setOpen(false); });
+function setOpen(open){document.body.classList.toggle('nav-open', open);var btn=document.querySelector('.nav-toggle');if(btn){btn.setAttribute('aria-expanded', open?'true':'false');}}
+window.toggleMobileNav=function(){ setOpen(!document.body.classList.contains('nav-open')); };
+document.addEventListener('click', function(e){var a=e.target.closest && e.target.closest('.nav-links a');if(a) setOpen(false);});
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') setOpen(false); });
 })();
 </script>
-
 </body>
 </html>
