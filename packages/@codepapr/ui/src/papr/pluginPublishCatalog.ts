@@ -12,6 +12,7 @@ export interface PublishCatalogTarget {
   appId: string;
   title: string;
   kind: 'app' | 'plugin';
+  scope?: 'global' | 'workspace';
   inbox: PaprInboxSummary[];
   extraChannelCount: number;
 }
@@ -58,6 +59,7 @@ export function collectPublishCatalogTargets(state: {
       appId: app.appId,
       title: app.title.trim() || app.appId,
       kind: isPluginApp(app) ? 'plugin' : 'app',
+      scope: app.scope ?? 'workspace',
       inbox: inbox.slice(0, MAX_PUBLISH_CATALOG_CHANNELS),
       extraChannelCount: Math.max(0, inbox.length - MAX_PUBLISH_CATALOG_CHANNELS),
     });
