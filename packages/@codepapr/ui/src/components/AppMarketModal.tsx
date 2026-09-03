@@ -369,3 +369,149 @@ function AppListingCard({
     </button>
   );
 }
+
+function AppDetail({
+  listing,
+  installedScope,
+  hasUpdate,
+  isInstalling,
+  isUninstalling,
+  onInstall,
+  onUninstall,
+  onOpenApp,
+  workspaceOpen,
+  onClose,
+  c,
+  lang,
+}: {
+  listing: PaprAppListing;
+  installedScope?: 'global' | 'workspace' | null;
+  hasUpdate?: boolean;
+  isInstalling: boolean;
+  isUninstalling: boolean;
+  onInstall: (listing: PaprAppListing, scope: AppInstallScope) => void;
+  onUninstall: (listing: PaprAppListing, scope: AppInstallScope) => void;
+  onOpenApp?: (appId: string) => void;
+  workspaceOpen: boolean;
+  onClose: () => void;
+  c: ReturnType<typeof copy>;
+  lang: Lang | undefined;
+}) {
+  const title = listingTitle(listing, lang);
+  const description = listingDescription(listing, lang);
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-line px-5 py-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex items-center gap-1 text-xs text-fg-muted transition-colors hover:text-fg"
+        >
+          ← {c.back}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-lg leading-none text-fg-muted hover:text-fg"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-raised text-2xl shadow-sm">
+            {listing.icon || (listing.kind === 'plugin' ? '📌' : '🖥️')}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-semibold text-fg">{title}</h3>
+              <span className="rounded-full border border-line bg-raised px-2 py-0.5 text-[10px] text-fg-muted">
+                {listing.kind === 'plugin' ? 'Plugin' : 'App'}
+              </span>
+            </div>
+            <p className="text-xs text-fg-muted">v{listing.version} · {listing.author || 'Official'}</p>
+          </div>
+        </div>
+
+        <p className="text-xs leading-relaxed text-fg-dim">{description}</p>
+
+        {listing.surface && (
+          <div className="space-y-1.5 rounded-xl border border-line bg-raised p-3 text-xs text-fg-muted">
+            <div className="font-semibold text-fg">{c.surfaceConfig}</div>
+            <div>Type: {listing.surface.type || 'overlay'}</div>
+            {listing.surface.position && <div>Position: {listing.surface.position}</div>}
+            {listing.surface.width && <div>Default Size: {listing.surface.width} × {listing.surface.height}px</div>}
+          </div>
+        )}
+
+        <div className="space-y-1.5 rounded-xl border border-line bg-raised p-3 text-xs text-fg-muted">
+          <div className="font-semibold text-fg">{c.permissions}</div>
+          <div>{c.networkAccess}: {listing.permissions?.network ? c.enabled : c.disabled}</div>
+          <div>{c.workspaceAccess}: {listing.permissions?.local || 'none'}</div>
+          <div>{c.dataStorage}: {c.storageDesc}</div>
+        </div>
+      </div>
+
+      <div className="border-t border-line p-5">
+        {installedScope ? (
+          <div className="flex gap-2">
+            {onOpenApp && (
+              <button
+                type="button"
+                onClick={() => onOpenApp(listing.id)}
+                className="flex-1 rounded-xl border border-line py-3 text-sm font-semibold text-fg hover:bg-raised"
+              >
+                {listing.kind === 'plugin' ? c.pinPlugin : c.openApp}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={isInstalling || isUninstalling}
+              onClick={() => onInstall(listing, installedScope)}
+              className="flex-1 rounded-xl bg-purple-500/20 py-3 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/35 disabled:opacity-50"
+            >
+              {isInstalling ? c.installing : hasUpdate ? c.updateAvailable : c.update}
+            </button>
+            <button
+              type="button"
+              disabled={isInstalling || isUninstalling}
+              onClick={() => onUninstall(listing, installedScope)}
+              className="flex-1 rounded-xl bg-danger-bg py-3 text-sm font-semibold text-danger transition-colors hover:bg-danger-bg disabled:opacity-50"
+            >
+              {isUninstalling ? c.uninstalling : c.uninstall}
+            </button>
+          </div>
+        ) : workspaceOpen ? (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={isInstalling || isUninstalling}
+              onClick={() => onInstall(listing, 'global')}
+              className="flex-1 rounded-xl bg-purple-500/20 py-3 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/35 disabled:opacity-50"
+            >
+              🌐 {c.installGlobal}
+            </button>
+            <button
+              type="button"
+              disabled={isInstalling || isUninstalling}
+              onClick={() => onInstall(listing, 'workspace')}
+              className="flex-1 rounded-xl bg-purple-500/20 py-3 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/35 disabled:opacity-50"
+            >
+              📁 {c.installWorkspace}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={isInstalling || isUninstalling}
+            onClick={() => onInstall(listing, 'global')}
+            className="w-full rounded-xl bg-purple-500/20 py-3 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/35 disabled:opacity-50"
+          >
+            🌐 {isInstalling ? c.installing : c.installGlobal}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
