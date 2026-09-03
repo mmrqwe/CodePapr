@@ -65,17 +65,21 @@ fn main() {
             app.manage(app_secrets);
 
             let handle = app.handle().clone();
-            match tauri::async_runtime::block_on(host::start(&handle)) {
-                Ok(host) => {
-                    app.manage(host);
-                    tauri::async_runtime::block_on(host::import_vault_secrets(&handle));
-                }
-                Err(e) => {
-                    // Returning Err from setup panics inside macOS didFinishLaunching
-                    // (panic_cannot_unwind) and aborts before the window appears.
-                    eprintln!("[CodePapr] 连接 codepapr-server 失败: {e}");
-                }
-            }
+            std::thread::Builder::new()
+                .name("codepapr-host-start".into())
+                .spawn(move || {
+                    eprintln!("[CodePapr] host thread: starting");
+                    match tauri::async_runtime::block_on(host::start(&handle)) {
+                        Ok(_) => {
+                            tauri::async_runtime::block_on(host::import_vault_secrets(&handle));
+                            eprintln!("[CodePapr] host thread: ready");
+                        }
+                        Err(e) => {
+                            eprintln!("[CodePapr] 连接 codepapr-server 失败: {e}");
+                        }
+                    }
+                })
+                .map_err(|e| format!("无法启动 codepapr-server 线程: {e}"))?;
 
             if app.get_webview_window("main").is_none() {
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())

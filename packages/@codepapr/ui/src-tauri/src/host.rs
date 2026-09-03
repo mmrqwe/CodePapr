@@ -48,6 +48,9 @@ pub fn global() -> Option<Arc<HostHandle>> {
 }
 
 pub fn from_app(app: &AppHandle) -> Result<Arc<HostHandle>, String> {
+    if let Some(host) = global() {
+        return Ok(host);
+    }
     app.try_state::<Arc<HostHandle>>()
         .map(|s| s.inner().clone())
         .ok_or_else(|| "codepapr-server 尚未连接".to_string())
@@ -117,13 +120,17 @@ impl Drop for HostHandle {
 }
 
 pub async fn start(app: &AppHandle) -> Result<Arc<HostHandle>, String> {
+    eprintln!("[CodePapr] host::start begin");
     let handle = if let Ok(addr) = std::env::var("CODEPAPR_SERVER_URL") {
+        eprintln!("[CodePapr] host::start connect_tcp {addr}");
         connect_tcp(&addr, None, app.clone()).await?
     } else {
+        eprintln!("[CodePapr] host::start spawn_and_connect");
         spawn_and_connect(app.clone()).await?
     };
-
+    eprintln!("[CodePapr] host::start connected, sending initialize");
     let _ = handle.invoke("initialize", json!({})).await?;
+    eprintln!("[CodePapr] host::start initialize ok");
     let arc = Arc::new(handle);
     let _ = GLOBAL.set(Arc::clone(&arc));
     Ok(arc)
@@ -148,12 +155,16 @@ pub async fn import_vault_secrets(app: &AppHandle) {
 }
 
 async fn spawn_and_connect(app: AppHandle) -> Result<HostHandle, String> {
-    let server_bin = find_server_binary(app.path().resource_dir().ok().as_deref())?;
+    let resource_dir = app.path().resource_dir().ok();
+    eprintln!("[CodePapr] host: resource_dir={resource_dir:?}");
+    let server_bin = find_server_binary(resource_dir.as_deref())?;
+    eprintln!("[CodePapr] host: server_bin={}", server_bin.display());
     let port_file = std::env::temp_dir().join(format!(
         "codepapr-server-{}.port",
         std::process::id()
     ));
     let _ = std::fs::remove_file(&port_file);
+    eprintln!("[CodePapr] host: spawning");
 
     let mut cmd = Command::new(&server_bin);
     cmd.arg("--port")
@@ -176,8 +187,10 @@ async fn spawn_and_connect(app: AppHandle) -> Result<HostHandle, String> {
         )
     })?;
 
+    eprintln!("[CodePapr] host: spawned pid={}", child.id());
     let stderr = child.stderr.take();
     let port = wait_for_bound_port(&port_file, stderr)?;
+    eprintln!("[CodePapr] host: bound port {port}, connecting");
     connect_tcp(&format!("127.0.0.1:{port}"), Some(child), app).await
 }
 
@@ -195,8 +208,10 @@ fn wait_for_bound_port(
             for line in reader.lines().map_while(Result::ok) {
                 if let Some(port) = parse_listen_port(&line) {
                     *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(port);
-                    break;
                 }
+                // Keep draining until the child exits. Closing this pipe early
+                // SIGPIPEs codepapr-server when it logs "client connected".
+                eprintln!("{line}");
             }
         });
     }
@@ -254,6 +269,7 @@ async fn connect_tcp(
             }
             dispatch_incoming_line(trimmed, &pending_clone, &app).await;
         }
+        fail_pending(&pending_clone, "codepapr-server closed the connection").await;
     });
 
     Ok(HostHandle {
@@ -262,6 +278,13 @@ async fn connect_tcp(
         next_id: AtomicU64::new(1),
         child: Mutex::new(child),
     })
+}
+
+async fn fail_pending(pending: &Arc<AsyncMutex<PendingMap>>, message: &str) {
+    let mut guard = pending.lock().await;
+    for (_, sender) in guard.drain() {
+        let _ = sender.send(Err(message.to_string()));
+    }
 }
 
 async fn dispatch_incoming_line(line: &str, pending: &Arc<AsyncMutex<PendingMap>>, app: &AppHandle) {

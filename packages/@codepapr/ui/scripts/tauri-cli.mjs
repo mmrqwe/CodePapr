@@ -452,6 +452,7 @@ function touchMainRsForFreshFrontend(args) {
 touchMainRsForFreshFrontend(cliArgs);
 
 const child = spawn(process.execPath, [tauriCliEntry, ...cliArgs], {
+  cwd: uiDir,
   stdio: 'inherit',
   env: sanitizeSpawnEnv(process.env),
 });
