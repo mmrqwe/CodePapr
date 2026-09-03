@@ -15,6 +15,7 @@ import { SettingsLspTab } from './settings/SettingsLspTab';
 import { SettingsAppTab } from './settings/SettingsAppTab';
 import { McpSettingsPanel } from './McpSettingsModal';
 import { McpMarketModal } from './McpMarketModal';
+import { AppMarketModal } from './AppMarketModal';
 import { useThemeStore } from '../store/themeStore';
 import type { SettingsTab } from './settings/types';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
@@ -40,6 +41,7 @@ export function SettingsModal() {
   const [appDraft, setAppDraft] = useState<PaprAppSettings | null>(null);
   const [appLoadError, setAppLoadError] = useState('');
   const [showMcpMarket, setShowMcpMarket] = useState(false);
+  const [showAppMarket, setShowAppMarket] = useState(false);
   useEffect(() => {
     invoke<PaprAppSettings>('papr_get_app_settings')
       .then((settings) => {
@@ -66,7 +68,6 @@ export function SettingsModal() {
     update(resetPart);
   };
 
-  // 主题相关草稿即时应用到 DOM（实时预览）；取消保存时回滚到已持久化值。
   useEffect(() => {
     useThemeStore.getState().applyFromSettings({
       lightTheme: local.lightTheme,
@@ -85,7 +86,6 @@ export function SettingsModal() {
         /* best-effort: app permission persistence mirrors the draft model */
       });
       usePaprPermissionStore.getState().setAppSettings(appDraft);
-      // CSP 在 HTML 响应头里，必须重挂 iframe 才生效。权限没改则不必重载。
       const openedAppId = useAppRuntimeStore.getState().openedAppId;
       const permissionsChanged = JSON.stringify(prev) !== JSON.stringify(appDraft);
       if (permissionsChanged) {
@@ -99,7 +99,6 @@ export function SettingsModal() {
     setShowSettings(false);
   };
 
-  // 外观页会实时把草稿主题应用到 DOM（预览）；取消保存时回滚到已持久化值。
   const closeWithoutSave = () => {
     const persisted = useAgentStore.getState().settings;
     useThemeStore.getState().applyFromSettings({
@@ -129,8 +128,6 @@ export function SettingsModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex select-none items-center justify-center bg-overlay backdrop-blur-sm animate-fade-in">
-      {/* onBlur bubbles (React focusout), so leaving any field clamps/trims the
-          whole draft once — numeric ranges snap on blur instead of mid-typing. */}
       <div
         onBlur={clampOnBlur}
         className="flex max-h-[94vh] h-[94vh] w-[min(96vw,1480px)] flex-col overflow-hidden rounded-3xl border border-line bg-raised shadow-2xl"
@@ -186,6 +183,7 @@ export function SettingsModal() {
               value={appDraft}
               onChange={setAppDraft}
               loadError={appLoadError}
+              onOpenAppMarket={() => setShowAppMarket(true)}
             />
           )}
 
@@ -235,6 +233,9 @@ export function SettingsModal() {
           mcp={local.mcp}
           onMcpChange={(mcp) => update({ mcp })}
         />
+      )}
+      {showAppMarket && (
+        <AppMarketModal onClose={() => setShowAppMarket(false)} />
       )}
     </div>
   );
