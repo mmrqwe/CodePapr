@@ -50,6 +50,7 @@ export interface AppInstance {
   pid?: number;
   url?: string;
   manifestJson?: string;
+  scope?: 'workspace' | 'global';
 }
 
 interface AppRuntimeState {
@@ -210,6 +211,7 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
         args: input.args,
         port: input.port,
         manifestJson: input.manifestJson,
+        scope: input.scope,
         createdAt: input.createdAt ?? now,
         updatedAt: input.updatedAt ?? now,
       };
@@ -219,7 +221,19 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
         existingIndex >= 0
           ? state.apps.map((app, index) =>
               index === existingIndex
-                ? { ...app, title: instance.title, icon: instance.icon, html: instance.html, filePath: instance.filePath, command: instance.command, args: instance.args, port: instance.port, manifestJson: instance.manifestJson, updatedAt: now }
+                ? {
+                    ...app,
+                    title: instance.title,
+                    icon: instance.icon,
+                    html: instance.html,
+                    filePath: instance.filePath,
+                    command: instance.command,
+                    args: instance.args,
+                    port: instance.port,
+                    manifestJson: instance.manifestJson,
+                    scope: instance.scope ?? app.scope,
+                    updatedAt: now,
+                  }
                 : app
             )
           : [...state.apps, instance];
