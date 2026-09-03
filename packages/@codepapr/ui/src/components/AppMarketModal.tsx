@@ -515,3 +515,109 @@ function AppDetail({
     </div>
   );
 }
+
+export function AppMarketModal({ onClose }: AppMarketModalProps) {
+  const settings = useAgentStore((s) => s.settings);
+  const workspacePath = useAgentStore((s) => s.workspacePath);
+  const installedApps = useAppRuntimeStore((s) => s.apps);
+  const c = copy(settings.lang);
+
+  const [appListings, setAppListings] = useState<PaprAppListing[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [kindFilter, setKindFilter] = useState<'all' | 'plugin' | 'app'>('all');
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedApp, setSelectedApp] = useState<PaprAppListing | null>(null);
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const [installingIds, setInstallingIds] = useState<Set<string>>(new Set());
+  const [uninstallingIds, setUninstallingIds] = useState<Set<string>>(new Set());
+  const [installErrors, setInstallErrors] = useState<Record<string, string>>({});
+  const [pendingUninstall, setPendingUninstall] = useState<{
+    listing: PaprAppListing;
+    scope: AppInstallScope;
+  } | null>(null);
+
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToastMessage(null);
+    }, 5000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  const getInstalledAppScope = useCallback(
+    (appId: string): 'global' | 'workspace' | null => {
+      const match = installedApps.find((a) => a.appId === appId);
+      if (!match) return null;
+      return match.scope === 'global' ? 'global' : 'workspace';
+    },
+    [installedApps],
+  );
+
+  const getHasUpdate = useCallback(
+    (listing: PaprAppListing): boolean => {
+      const match = installedApps.find((a) => a.appId === listing.id);
+      if (!match) return false;
+      return isMarketUpdateAvailable(readInstalledAppVersion(match.manifestJson), listing.version);
+    },
+    [installedApps],
+  );
+
+  const loadData = useCallback(async (force = false) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const results = await fetchMarketAppListings({ forceRefresh: force });
+      setAppListings(results);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadData(false);
+  }, [loadData]);
+
+  const handleRetry = useCallback(() => {
+    void loadData(true);
+  }, [loadData]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 backdrop-blur-sm">
+      <div className="flex h-[88vh] w-[92vw] max-w-5xl flex-col overflow-hidden rounded-2xl border border-line bg-base shadow-2xl">
+        <div className="flex items-center justify-between border-b border-line px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/10 text-xl text-purple-400">▦</div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-fg">{c.title}</h2>
+                <span className="rounded-md border border-line bg-raised px-2 py-0.5 text-[10px] text-fg-muted">{c.appsRegistry}</span>
+              </div>
+              <p className="text-xs text-fg-muted">{c.subtitle}</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg border border-line p-2 text-fg-muted transition-colors hover:border-line-strong hover:bg-raised hover:text-fg">✕</button>
+        </div>
+        <div className="flex flex-1 items-center justify-center text-sm text-fg-muted">{isLoading ? c.loading : error ? error : c.empty}</div>
+      </div>
+    </div>
+  );
+}
