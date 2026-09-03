@@ -436,4 +436,34 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     expect(settings.baseURL).toBe('https://ark.cn-beijing.volces.com/api/v3');
     expect(settings.mentorApiFormat).toBe('response');
   });
+
+  it('maxContextTokens 默认值为 200,000', () => {
+    const settings = normalizeSettings({});
+    expect(settings.maxContextTokens).toBe(200_000);
+    const primary = resolvePrimaryProfile(settings);
+    expect(primary?.maxContextTokens).toBe(200_000);
+  });
+
+  it('更新 maxContextTokens 同步更新 activePrimaryProfile.maxContextTokens', () => {
+    const base = normalizeSettings({});
+    const updated = normalizeSettings({
+      ...base,
+      maxContextTokens: 180_000,
+    });
+    expect(updated.maxContextTokens).toBe(180_000);
+    const primary = resolvePrimaryProfile(updated);
+    expect(primary?.maxContextTokens).toBe(180_000);
+  });
+
+  it('旧默认值 500k 和 220k 自动迁移至 200k', () => {
+    const settings500k = normalizeSettings({
+      maxContextTokens: 500_000,
+    });
+    expect(settings500k.maxContextTokens).toBe(200_000);
+
+    const settings220k = normalizeSettings({
+      maxContextTokens: 220_000,
+    });
+    expect(settings220k.maxContextTokens).toBe(200_000);
+  });
 });

@@ -2003,7 +2003,7 @@ X-API-Key: your-api-key</code></pre>
         <p>旧 tool 结果剪枝（<code>pruneOldToolResults</code>，把超出保护窗口的大块旧结果替换为占位符）<strong>没有独立触发器</strong>，只在压缩 / 重建时作为压缩的内部瘦身子步骤执行（对齐 OpenCode 的 <code>SessionCompaction.prune</code>）。触发器只有上下文阈值一个。注意它与 <code>compactionMaxTokens</code>（压缩摘要的输出上限）是两个不同概念。</p>
 
         <h3>有效上下文阈值（provider-aware）</h3>
-        <p><code>maxContextTokens</code> 默认 <strong>500K</strong>，对 DeepSeek / OpenAI 兼容 / Claude 三种服务商统一生效（不再按 provider 钳制；兼容端点常是转发大上下文模型的网关）。阈值越高 → 压缩越少 → 命中率越高（缓存读取廉价）。</p>
+        <p><code>maxContextTokens</code> 默认 <strong>200K</strong>，对 DeepSeek / OpenAI 兼容 / Claude 三种服务商统一生效（不再按 provider 钳制；兼容端点常是转发大上下文模型的网关）。阈值越高 → 压缩越少 → 命中率越高（缓存读取廉价）。</p>
         <table>
           <thead><tr><th>provider</th><th>上下文硬上限</th><th>默认有效阈值</th></tr></thead>
           <tbody>

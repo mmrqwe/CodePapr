@@ -26,6 +26,21 @@ export function useSettingsForm() {
         merged.modelProfiles?.find((p) => p.id === merged.mentorProfileId) ||
         primaryProfile;
 
+      let modelProfiles = merged.modelProfiles;
+      if (partial.maxContextTokens !== undefined && primaryProfile) {
+        modelProfiles = modelProfiles?.map((p) =>
+          p.id === primaryProfile.id
+            ? {
+                ...p,
+                maxContextTokens:
+                  typeof partial.maxContextTokens === 'number' && Number.isFinite(partial.maxContextTokens)
+                    ? partial.maxContextTokens
+                    : p.maxContextTokens,
+              }
+            : p
+        );
+      }
+
       const activeConfig = merged[merged.apiMode] || merged.deepseek;
 
       const effectiveApiMode = primaryProfile ? primaryProfile.apiMode : merged.apiMode;
@@ -41,8 +56,16 @@ export function useSettingsForm() {
       const effectiveApiKey = primaryProfile ? primaryProfile.apiKey : (activeConfig?.apiKey ?? '');
       const effectiveBaseURL = primaryProfile ? primaryProfile.baseURL : (activeConfig?.baseURL ?? '');
 
+      const effectiveMaxContextTokens =
+        partial.maxContextTokens !== undefined
+          ? partial.maxContextTokens
+          : primaryProfile?.maxContextTokens !== undefined
+          ? primaryProfile.maxContextTokens
+          : merged.maxContextTokens;
+
       return {
         ...merged,
+        modelProfiles,
         apiMode: effectiveApiMode,
         apiFormat: effectiveApiFormat,
         provider: effectiveProvider,
@@ -68,9 +91,7 @@ export function useSettingsForm() {
         topP: primaryProfile?.topP !== undefined
           ? primaryProfile.topP
           : merged.topP,
-        maxContextTokens: primaryProfile?.maxContextTokens !== undefined
-          ? primaryProfile.maxContextTokens
-          : merged.maxContextTokens,
+        maxContextTokens: effectiveMaxContextTokens,
         multimodalEnabled: primaryProfile?.multimodalEnabled !== undefined
           ? primaryProfile.multimodalEnabled
           : merged.multimodalEnabled,

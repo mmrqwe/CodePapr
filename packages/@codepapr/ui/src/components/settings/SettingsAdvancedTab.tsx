@@ -1,4 +1,5 @@
 import { DEFAULT_TOOL_CONTEXT_OVERRIDES } from '@codepapr/core';
+import { DEFAULT_MAX_CONTEXT_TOKENS } from '@codepapr/api';
 import { FieldCard, SelectField, TextField } from '../forms';
 import type { SettingsTabProps } from './types';
 
@@ -75,10 +76,25 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
             min="1000"
             max="1000000"
             step="10000"
-            value={local.maxContextTokens}
+            value={local.maxContextTokens ?? ''}
+            placeholder={String(DEFAULT_MAX_CONTEXT_TOKENS)}
             onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
+              const raw = e.target.value;
+              if (raw === '') {
+                update({ maxContextTokens: '' as unknown as number });
+                return;
+              }
+              const parsed = parseInt(raw, 10);
               update({ maxContextTokens: Number.isFinite(parsed) ? parsed : local.maxContextTokens });
+            }}
+            onBlur={() => {
+              if (
+                typeof local.maxContextTokens !== 'number' ||
+                !Number.isFinite(local.maxContextTokens) ||
+                local.maxContextTokens <= 0
+              ) {
+                update({ maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS });
+              }
             }}
             title={t.maxContextTokens}
           />

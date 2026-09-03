@@ -117,7 +117,7 @@ export function ProfileEditorModal({
         baseURL: '',
         model: 'deepseek-v4-pro',
         maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
-        maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
+        maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,
         topP: 0.9,
         multimodalEnabled: false,
@@ -135,7 +135,7 @@ export function ProfileEditorModal({
         baseURL: '',
         model: 'deepseek-v4-flash',
         maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
-        maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
+        maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,
         topP: 0.9,
         multimodalEnabled: false,
@@ -660,16 +660,30 @@ export function ProfileEditorModal({
               min={1000}
               max={2000000}
               step={10000}
-              value={draft.maxContextTokens ?? (draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS : DEFAULT_MAX_CONTEXT_TOKENS)}
+              value={draft.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS}
               onChange={(e) => {
-                const parsed = parseInt(e.target.value, 10);
+                const raw = e.target.value;
+                if (raw === '') {
+                  update({ maxContextTokens: '' as unknown as number });
+                  return;
+                }
+                const parsed = parseInt(raw, 10);
                 update({
                   maxContextTokens: Number.isFinite(parsed)
                     ? parsed
-                    : (draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS : DEFAULT_MAX_CONTEXT_TOKENS),
+                    : DEFAULT_MAX_CONTEXT_TOKENS,
                 });
               }}
-              placeholder={String(draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS : DEFAULT_MAX_CONTEXT_TOKENS)}
+              onBlur={() => {
+                if (
+                  typeof draft.maxContextTokens !== 'number' ||
+                  !Number.isFinite(draft.maxContextTokens) ||
+                  draft.maxContextTokens <= 0
+                ) {
+                  update({ maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS });
+                }
+              }}
+              placeholder={String(DEFAULT_MAX_CONTEXT_TOKENS)}
             />
 
             <TextField
@@ -680,12 +694,28 @@ export function ProfileEditorModal({
               step={500}
               value={draft.maxTokens ?? (draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS)}
               onChange={(e) => {
-                const parsed = parseInt(e.target.value, 10);
+                const raw = e.target.value;
+                if (raw === '') {
+                  update({ maxTokens: '' as unknown as number });
+                  return;
+                }
+                const parsed = parseInt(raw, 10);
                 update({
                   maxTokens: Number.isFinite(parsed)
                     ? parsed
                     : (draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS),
                 });
+              }}
+              onBlur={() => {
+                if (
+                  typeof draft.maxTokens !== 'number' ||
+                  !Number.isFinite(draft.maxTokens) ||
+                  draft.maxTokens <= 0
+                ) {
+                  update({
+                    maxTokens: draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS,
+                  });
+                }
               }}
               placeholder={String(draft.apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS)}
             />

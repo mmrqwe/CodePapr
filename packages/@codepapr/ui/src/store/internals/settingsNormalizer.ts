@@ -46,10 +46,14 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     typeof obj.maxTokens === 'number' && Number.isFinite(obj.maxTokens)
       ? Math.max(100, Math.floor(obj.maxTokens))
       : (apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS);
-  const maxContextTokens =
+  const rawMaxContextTokens =
     typeof obj.maxContextTokens === 'number' && Number.isFinite(obj.maxContextTokens)
       ? Math.max(1000, Math.floor(obj.maxContextTokens))
       : undefined;
+  const maxContextTokens =
+    rawMaxContextTokens === 500_000 || rawMaxContextTokens === 220_000
+      ? DEFAULT_MAX_CONTEXT_TOKENS
+      : rawMaxContextTokens;
   const thinkingEnabled = typeof obj.thinkingEnabled === 'boolean' ? obj.thinkingEnabled : false;
   const thinkingEffort = typeof obj.thinkingEffort === 'string' ? obj.thinkingEffort.trim() : '';
   const thinkingBudgetTokens =
@@ -105,7 +109,7 @@ export function createDefaultProfile(
       apiKey: '',
       model: 'deepseek-v4-pro',
       maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
-      maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,
       topP: 0.9,
       multimodalEnabled: false,
@@ -184,7 +188,7 @@ function buildSynthesizedProfiles(
       apiKey: deepseek.apiKey,
       model: deepseek.model || 'deepseek-v4-pro',
       maxTokens: deepseek.maxTokens || DEEPSEEK_DEFAULT_MAX_TOKENS,
-      maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,
       topP: 0.9,
       multimodalEnabled: false,
@@ -202,7 +206,7 @@ function buildSynthesizedProfiles(
       apiKey: deepseek.apiKey,
       model: deepseek.fastModel || 'deepseek-v4-flash',
       maxTokens: deepseek.maxTokens || DEEPSEEK_DEFAULT_MAX_TOKENS,
-      maxContextTokens: DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,
       topP: 0.9,
       multimodalEnabled: false,
@@ -460,10 +464,14 @@ export function normalizeSettings(
     typeof input.maxToolRounds === 'number' && Number.isFinite(input.maxToolRounds)
       ? Math.max(1, Math.floor(input.maxToolRounds))
       : DEFAULT_SETTINGS.maxToolRounds;
-  const maxContextTokens =
+  const rawMaxContextTokens =
     typeof input.maxContextTokens === 'number' && Number.isFinite(input.maxContextTokens)
       ? Math.max(1000, Math.floor(input.maxContextTokens))
-      : (apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS : DEFAULT_MAX_CONTEXT_TOKENS);
+      : DEFAULT_MAX_CONTEXT_TOKENS;
+  const maxContextTokens =
+    rawMaxContextTokens === 500_000 || rawMaxContextTokens === 220_000
+      ? DEFAULT_MAX_CONTEXT_TOKENS
+      : rawMaxContextTokens;
   const maxConversationRounds =
     typeof input.maxConversationRounds === 'number' && Number.isFinite(input.maxConversationRounds)
       ? Math.max(2, Math.floor(input.maxConversationRounds))
@@ -959,6 +967,21 @@ export function normalizeSettings(
     hasExplicitProfiles && activePrimaryProfile.topP !== undefined
       ? activePrimaryProfile.topP
       : topP;
+  if (
+    hasExplicitProfiles &&
+    typeof input.maxContextTokens === 'number' &&
+    Number.isFinite(input.maxContextTokens)
+  ) {
+    const primaryIndex = modelProfiles.findIndex((p) => p.id === primaryProfileId);
+    if (primaryIndex >= 0) {
+      modelProfiles[primaryIndex] = {
+        ...modelProfiles[primaryIndex],
+        maxContextTokens,
+      };
+      activePrimaryProfile.maxContextTokens = maxContextTokens;
+    }
+  }
+
   const effectiveMaxContextTokens =
     hasExplicitProfiles && activePrimaryProfile.maxContextTokens !== undefined
       ? activePrimaryProfile.maxContextTokens

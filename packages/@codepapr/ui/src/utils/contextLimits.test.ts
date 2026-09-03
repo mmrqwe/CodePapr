@@ -28,9 +28,9 @@ describe('effectiveMaxContextTokens', () => {
     expect(effectiveMaxContextTokens({ maxContextTokens: 500 }, 'claude')).toBe(1000);
   });
 
-  it('falls back to the 500k default for NaN and Infinity', () => {
-    expect(effectiveMaxContextTokens({ maxContextTokens: Number.NaN })).toBe(500_000);
-    expect(effectiveMaxContextTokens({ maxContextTokens: Number.POSITIVE_INFINITY })).toBe(500_000);
-    expect(effectiveMaxContextTokens({ maxContextTokens: Number.NEGATIVE_INFINITY })).toBe(500_000);
+  it('falls back to the 200k default for NaN and Infinity', () => {
+    expect(effectiveMaxContextTokens({ maxContextTokens: Number.NaN })).toBe(200_000);
+    expect(effectiveMaxContextTokens({ maxContextTokens: Number.POSITIVE_INFINITY })).toBe(200_000);
+    expect(effectiveMaxContextTokens({ maxContextTokens: Number.NEGATIVE_INFINITY })).toBe(200_000);
   });
 });

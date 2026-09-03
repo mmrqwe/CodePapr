@@ -672,7 +672,7 @@ Compaction summarizes away the head (incl. old tool results); pruning slims the 
 
 ### 13.5 Effective Context Threshold (user-configured)
 
-`maxContextTokens` (default **500K**) is the compaction trigger threshold. It applies **uniformly** to DeepSeek / OpenAI-compatible / Claude providers — no per-provider clamping (`effectiveMaxContextTokens`):
+`maxContextTokens` (default **200K**) is the compaction trigger threshold. It applies **uniformly** to DeepSeek / OpenAI-compatible / Claude providers — no per-provider clamping (`effectiveMaxContextTokens`):
 
 ```
 effectiveMaxContextTokens = maxContextTokens

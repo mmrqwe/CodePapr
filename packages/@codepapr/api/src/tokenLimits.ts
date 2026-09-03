@@ -1,14 +1,14 @@
 export const DEFAULT_MAX_TOKENS = 36_000;
 export const DEEPSEEK_MAX_TOKENS = 100_000;
 export const DEEPSEEK_DEFAULT_MAX_TOKENS = 100_000;
-export const DEFAULT_MAX_CONTEXT_TOKENS = 220_000;
-export const DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS = 500_000;
+export const DEFAULT_MAX_CONTEXT_TOKENS = 200_000;
+export const DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS = 200_000;
 
 export const CONTEXT_LIMITS: Record<string, number> = {
-  deepseek: 500_000,
-  claude: 220_000,
-  openai: 220_000,
-  response: 220_000,
+  deepseek: 200_000,
+  claude: 200_000,
+  openai: 200_000,
+  response: 200_000,
 };
 
 export function getProviderContextLimit(provider: string): number {

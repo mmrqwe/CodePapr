@@ -312,4 +312,45 @@ describe('SettingsModal', () => {
     expect(container.textContent).not.toContain('导师 API 格式');
     expect(container.textContent).not.toContain('导师 API Key');
   });
+
+  it('advanced tab allows modifying maxContextTokens with default 200000', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+
+    const advancedTab = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '高级'
+    );
+    expect(advancedTab).toBeDefined();
+    await act(async () => {
+      advancedTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const maxContextInput = container.querySelector(
+      'input[title="输入上下文上限"]'
+    ) as HTMLInputElement;
+    expect(maxContextInput).not.toBeNull();
+    expect(maxContextInput.value).toBe('200000');
+
+    await act(async () => {
+      setInputValue(maxContextInput, '150000');
+    });
+    expect(maxContextInput.value).toBe('150000');
+
+    // Clicking save saves 150000 to settings and syncs to primary profile
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '保存'
+    );
+    expect(saveButton).toBeDefined();
+    await act(async () => {
+      saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const currentSettings = useAgentStore.getState().settings;
+    expect(currentSettings.maxContextTokens).toBe(150000);
+    const primary = currentSettings.modelProfiles.find(
+      (p) => p.id === currentSettings.primaryProfileId
+    );
+    expect(primary?.maxContextTokens).toBe(150000);
+  });
 });

@@ -2002,7 +2002,7 @@ After compaction:
         <p>Old tool-result pruning (<code>pruneOldToolResults</code>, replacing large old results beyond the protection window with a placeholder) has <strong>no independent trigger</strong>; it runs only at compaction/rebuild as an internal slimming sub-step of compaction (mirroring OpenCode's <code>SessionCompaction.prune</code>). The only trigger is the context threshold. Note this differs from <code>compactionMaxTokens</code> (the compaction summary's output limit).</p>
 
         <h3>Effective Context Threshold (provider-aware)</h3>
-        <p><code>maxContextTokens</code> defaults to <strong>500K</strong> and applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers (no per-provider clamping; compatible endpoints are often gateways forwarding large-context models). Higher threshold → fewer compactions → higher hit rate (cache reads are cheap).</p>
+        <p><code>maxContextTokens</code> defaults to <strong>200K</strong> and applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers (no per-provider clamping; compatible endpoints are often gateways forwarding large-context models). Higher threshold → fewer compactions → higher hit rate (cache reads are cheap).</p>
         <table>
           <thead><tr><th>Provider</th><th>Hard context limit</th><th>Default effective threshold</th></tr></thead>
           <tbody>

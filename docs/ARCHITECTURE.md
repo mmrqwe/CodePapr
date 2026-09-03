@@ -659,7 +659,7 @@ CodePapr 的核心架构决策是**围绕 DeepSeek 隐式前缀缓存做提示�
 
 ### 13.5 有效上下文阈值（用户配置优先）
 
-`maxContextTokens`（默认 **500K**）是压缩触发阈值，对 DeepSeek / OpenAI 兼容 / Claude 三种服务商**统一生效**，不再按 provider 硬上限钳制（`effectiveMaxContextTokens`）：
+`maxContextTokens`（默认 **200K**）是压缩触发阈值，对 DeepSeek / OpenAI 兼容 / Claude 三种服务商**统一生效**，不再按 provider 硬上限钳制（`effectiveMaxContextTokens`）：
 
 ```
 effectiveMaxContextTokens = maxContextTokens
