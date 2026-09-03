@@ -19,7 +19,8 @@
     "typecheck": "node ../../../scripts/run-module-bin.mjs typescript/bin/tsc -p tsconfig.json --noEmit",
     "prebuild:lsp": "node scripts/prebuild-lsp-servers.mjs",
     "build:sidecar": "node scripts/build-sidecar.mjs",
-    "build": "npm run typecheck && npm run build:sidecar && npm run build:frontend",
+    "build:host-server": "node scripts/prepare-host-server.mjs",
+    "build": "npm run typecheck && npm run build:host-server && npm run build:sidecar && npm run build:frontend",
     "build:tauri": "node ../../../scripts/run-desktop-workflow.mjs ui-build-tauri",
     "release": "node ../../../scripts/run-desktop-workflow.mjs ui-build-tauri"
   },

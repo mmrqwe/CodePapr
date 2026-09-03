@@ -34,6 +34,9 @@
     "publisher": "CodePapr",
     "shortDescription": "CodePapr - DeepSeek Cache-Optimized Local AI Coding Agent",
     "longDescription": "CodePapr is a local-first coding agent runtime with CLI automation, built on Tauri 2. It features DeepSeek prefix cache optimization, multi-agent collaboration, ProjectGraph semantic analysis, LSP support for 15+ languages, and TodoList task planning -- all running natively on your machine.",
+    "externalBin": [
+      "binaries/codepapr-server"
+    ],
     "resources": [
       "../generated/lsp-tools/**/*",
       "../dist-sidecar/agent-runtime.mjs"

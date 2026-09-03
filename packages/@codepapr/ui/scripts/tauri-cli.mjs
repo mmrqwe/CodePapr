@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync, spawn } from 'node:child_process';
+import { execFileSync, execSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -414,7 +414,27 @@ async function recoverMacOsDmgBundle(args) {
   }
 }
 
+function prepareHostServerBinary(args) {
+  if (args[0] !== 'build' && args[0] !== 'dev') {
+    return;
+  }
+
+  const prepareScript = path.resolve(scriptDir, 'prepare-host-server.mjs');
+  const prepareArgs = [prepareScript];
+  if (args[0] === 'dev' || args.includes('--debug')) {
+    prepareArgs.push('--debug');
+  }
+
+  console.log('[tauri-cli] Preparing bundled codepapr-server sidecar...');
+  execFileSync(process.execPath, prepareArgs, {
+    cwd: uiDir,
+    stdio: 'inherit',
+    env: sanitizeSpawnEnv(process.env),
+  });
+}
+
 cleanupStaleMacOsBundleArtifacts(cliArgs);
+prepareHostServerBinary(cliArgs);
 
 // 强制 cargo 重新编译 main.rs，确保 generate_context!() 重新嵌入最新的 dist/ 前端文件。
 // 不这样做的话，如果只改了前端没改 .rs 文件，cargo 增量编译会跳过 main.rs 重编译，

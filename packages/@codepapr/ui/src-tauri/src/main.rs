@@ -65,10 +65,17 @@ fn main() {
             app.manage(app_secrets);
 
             let handle = app.handle().clone();
-            let host = tauri::async_runtime::block_on(host::start(&handle))
-                .map_err(|e| format!("连接 codepapr-server 失败: {e}"))?;
-            app.manage(host);
-            tauri::async_runtime::block_on(host::import_vault_secrets(&handle));
+            match tauri::async_runtime::block_on(host::start(&handle)) {
+                Ok(host) => {
+                    app.manage(host);
+                    tauri::async_runtime::block_on(host::import_vault_secrets(&handle));
+                }
+                Err(e) => {
+                    // Returning Err from setup panics inside macOS didFinishLaunching
+                    // (panic_cannot_unwind) and aborts before the window appears.
+                    eprintln!("[CodePapr] 连接 codepapr-server 失败: {e}");
+                }
+            }
 
             if app.get_webview_window("main").is_none() {
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())

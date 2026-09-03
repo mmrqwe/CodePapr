@@ -23,6 +23,7 @@ packages/@codepapr/ui/generated/
 packages/@codepapr/ui/dist-sidecar/
 packages/@codepapr/ui/src-tauri/generated/
 packages/@codepapr/ui/src-tauri/target/
+packages/@codepapr/ui/src-tauri/binaries/codepapr-server-*
 target/
 Release/
 packages/@codepapr/ui/src-tauri/tools/**/bin/

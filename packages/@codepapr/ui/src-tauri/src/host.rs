@@ -335,6 +335,10 @@ fn find_server_binary(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
         if sidecar.is_file() {
             return Ok(sidecar);
         }
+        let nested = resource.join("_up_").join(bin_name);
+        if nested.is_file() {
+            return Ok(nested);
+        }
     }
 
     for folder in ["debug", "release"] {
