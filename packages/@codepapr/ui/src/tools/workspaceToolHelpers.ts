@@ -230,11 +230,13 @@ export interface BrowserClosePreviewArgs {
 export interface BrowserOpenPageArgs {
   url: string;
   title?: string;
+  timeoutSeconds?: number;
 }
 
 export interface BrowserNavigatePageArgs {
   url: string;
   title?: string;
+  timeoutSeconds?: number;
 }
 
 export interface BrowserClickArgs {
@@ -495,6 +497,8 @@ export interface StopAllBackgroundProcessesResult {
 
 export interface BrowserPreviewStateResult {
   session: PreviewSession | null;
+  /** 后端浏览页真实会话（headless/内置引擎的页会话注册表）；无会话为 null。 */
+  pageSession?: BrowserPageSessionResult | null;
 }
 
 export interface BrowserClosePreviewResult {
@@ -508,6 +512,7 @@ export interface BrowserPageSessionResult {
   workspacePath: string;
   startedAt: number;
   active: boolean;
+  navigationWarning?: string;
 }
 
 export interface BrowserPageActionResult {
@@ -516,6 +521,7 @@ export interface BrowserPageActionResult {
   title: string;
   selector?: string;
   selectorType?: string;
+  navigationWarning?: string;
 }
 
 export interface BrowserPageDomResult {

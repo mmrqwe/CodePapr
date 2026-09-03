@@ -256,6 +256,7 @@ fn main() {
             browser::page::open_browser_target,
             browser::page::open_browser_page,
             browser::page::navigate_browser_page,
+            browser::page::get_browser_page_state,
             browser::page::reload_browser_page,
             browser::page::click_browser_page_element,
             browser::page::input_browser_page_text,

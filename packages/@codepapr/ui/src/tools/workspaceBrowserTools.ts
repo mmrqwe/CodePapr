@@ -59,8 +59,17 @@ export function registerWorkspaceBrowserTools(ctx: WorkspaceToolContext): void {
 
   registry.register(toolByName('browser_get_preview_session'), async () => {
     const session = usePreviewStore.getState().activePreviewSession;
+    let pageSession: BrowserPageSessionResult | null = null;
+    try {
+      pageSession = await invoke<BrowserPageSessionResult | null>('get_browser_page_state', {
+        workspacePath: workspace(),
+      });
+    } catch {
+      pageSession = null;
+    }
     return {
       session: session && session.workspacePath === workspace() ? session : null,
+      pageSession,
     } satisfies BrowserPreviewStateResult;
   });
 
@@ -129,11 +138,13 @@ export function registerWorkspaceBrowserTools(ctx: WorkspaceToolContext): void {
     const parsed: BrowserOpenPageArgs = {
       url: asHttpOrHttpsUrl(args.url, 'url'),
       title: asOptionalString(args.title),
+      timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     };
 
     const result = await invoke<BrowserPageSessionResult>('open_browser_page', {
       workspacePath: workspace(),
       url: parsed.url,
+      timeoutSeconds: parsed.timeoutSeconds,
     });
     const session = syncPreviewWithPage(workspace(), result, parsed.title ?? result.title);
     syncBrowserViewPage(workspace(), result, parsed.title ?? result.title);
@@ -144,20 +155,23 @@ export function registerWorkspaceBrowserTools(ctx: WorkspaceToolContext): void {
     const parsed: BrowserNavigatePageArgs = {
       url: asHttpOrHttpsUrl(args.url, 'url'),
       title: asOptionalString(args.title),
+      timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     };
 
     const result = await invoke<BrowserPageSessionResult>('navigate_browser_page', {
       workspacePath: workspace(),
       url: parsed.url,
+      timeoutSeconds: parsed.timeoutSeconds,
     });
     const session = syncPreviewWithPage(workspace(), result, parsed.title ?? result.title);
     syncBrowserViewPage(workspace(), result, parsed.title ?? result.title);
     return { ...result, previewSession: session };
   });
 
-  registry.register(toolByName('browser_reload_page'), async () => {
+  registry.register(toolByName('browser_reload_page'), async (args: Record<string, unknown>) => {
     const result = await invoke<BrowserPageSessionResult>('reload_browser_page', {
       workspacePath: workspace(),
+      timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     });
     const session = syncPreviewWithPage(workspace(), result);
     syncBrowserViewPage(workspace(), result);

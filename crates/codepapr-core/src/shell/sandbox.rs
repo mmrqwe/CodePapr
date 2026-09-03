@@ -187,7 +187,12 @@ fn build_profile(
         // 缺了它 `open` 一律 -54/kLSNoExecutableErr（内核日志可见 deny lsopen）。
         // 各 daemon 自带鉴权，文件/网络仍按本 profile 约束；且既已放行 process*
         // （任意可读二进制可执行），这些 IPC 放行的边际风险与之匹配。
-        // sysctl-read 供 ps/pgrep 读进程表（纯读）。
+        // sysctl-read 供 pgrep/lsof 读进程表（纯读）。注意：`ps`/`top` 与沙箱
+        // profile 无关——macOS 在 exec 前由系统策略拒绝（AMFI：平台二进制带
+        // 私有 entitlement，不允许在第三方沙箱容器内 exec），连 allow default
+        // 都拉不起来，任何 SBPL 规则都救不了；命令预检对其返回替代方案引导。
+        // zsh 后台任务的 nice/setpriority 同理：走一个无法从 SBPL 命名的
+        // system-* 操作，只会刷一行 `nice(5) failed` 警告，不影响执行，接受。
         "(allow mach-lookup)".to_string(),
         "(allow lsopen)".to_string(),
         "(allow sysctl-read)".to_string(),
@@ -649,11 +654,72 @@ fn reject_dynamic_unix_shell_syntax(command: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// macOS only: `ps`/`top` 在 sandbox-exec 容器内被系统策略（AMFI：带私有
+/// entitlement 的平台二进制不允许在第三方沙箱中 exec）拒绝在 exec 阶段——
+/// 与 SBPL profile 无关，任何放行规则都救不回来（allow default 也拉不起）。
+/// shell 只会给出含糊的 "operation not permitted"，Agent 容易绕圈找解法；
+/// 预检直接返回沙箱内真正可用的替代路径。
+#[cfg(target_os = "macos")]
+fn sandbox_blocked_process_tool(name: &str) -> Option<String> {
+    let cleaned = name.trim_matches(|c| c == '"' || c == '\'');
+    let base = Path::new(cleaned)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if base != "ps" && base != "top" {
+        return None;
+    }
+    Some(format!(
+        "`{base}` 在 Agent 沙箱内无法运行（macOS 在 exec 阶段拦截，与沙箱权限无关，放宽权限也无法解决）。替代方案：`pgrep -fl <关键词>` 查进程、`lsof -iTCP -sTCP:LISTEN -P` 查监听端口、`bash(action: list)` 列出工具启动的后台进程及日志尾部"
+    ))
+}
+
+/// 取命令段的首个真实命令词（跳过 sudo/doas 前缀）。
+fn segment_head(segment: &str) -> Option<&str> {
+    segment.split_whitespace().find(|token| {
+        let cleaned = token.trim_matches(|c| c == '"' || c == '\'');
+        !matches!(cleaned, "sudo" | "doas" | "command" | "env")
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn reject_blocked_process_command(command: &str) -> Result<(), String> {
+    if let Some(head) = segment_head(command) {
+        if let Some(reason) = sandbox_blocked_process_tool(head) {
+            return Err(reason);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reject_blocked_process_command(_command: &str) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn reject_blocked_process_shell_line(command: &str) -> Result<(), String> {
+    for segment in crate::shell::dangerous::split_segments(command) {
+        if let Some(head) = segment_head(&segment) {
+            if let Some(reason) = sandbox_blocked_process_tool(head) {
+                return Err(reason);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reject_blocked_process_shell_line(_command: &str) -> Result<(), String> {
+    Ok(())
+}
+
 pub(crate) fn validate_restricted_command(
     command: &str,
     args: &[String],
     workspace: &Path,
 ) -> Result<(), String> {
+    reject_blocked_process_command(command)?;
     #[cfg(target_os = "windows")]
     {
         for argument in args {
@@ -716,6 +782,7 @@ pub(crate) fn validate_restricted_shell_command(
     command: &str,
     workspace: &Path,
 ) -> Result<(), String> {
+    reject_blocked_process_shell_line(command)?;
     #[cfg(target_os = "windows")]
     {
         reject_dynamic_windows_shell_syntax(command)?;
@@ -1010,7 +1077,7 @@ mod tests {
 
     /// 回归：profile 必须放行 mach-lookup、lsopen 与 sysctl-read，否则
     /// `open`（内核 deny lsopen → -54/kLSNoExecutableErr）、`osascript`
-    /// AppleEvents（-1728）、`ps`/`pgrep`（sysctl kern.proc）全部失效。
+    /// AppleEvents（-1728）、`pgrep`/`lsof`（sysctl kern.proc）全部失效。
     /// 与两轴权限无关，任何访问档下都要存在。
     #[test]
     fn profile_allows_mach_lookup_and_sysctl_read() {
@@ -1029,6 +1096,81 @@ mod tests {
             assert!(profile.contains("(allow lsopen)"), "got:\n{profile}");
             assert!(profile.contains("(allow sysctl-read)"), "got:\n{profile}");
         }
+
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    /// 端到端进程可见性：`pgrep -fl` 与 `lsof` 在真实 Agent profile 下必须能
+    /// 读进程表/端口；`ps`/`top` 则被 macOS 在 exec 层拒绝（AMFI，与 SBPL
+    /// 无关），沙箱内唯一正确姿势是前者 + 后台进程注册表——预检会把这条
+    /// 知识变成可读引导（见 sandbox_blocked_process_tool）。
+    #[test]
+    fn sandboxed_process_discovery_tools_work_ps_is_exec_blocked() {
+        let workspace =
+            std::env::temp_dir().join(format!("codepapr-sandbox-ps-{}", std::process::id()));
+        fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
+
+        let mut pgrep = sandboxed_command(
+            "/usr/bin/pgrep",
+            &["-fl".to_string(), "codepapr".to_string()],
+            &workspace,
+            None,
+            &workspace,
+        )
+        .expect("command");
+        pgrep.current_dir(&workspace);
+        let pgrep_out = pgrep.output().expect("run");
+        let pgrep_stdout = String::from_utf8_lossy(&pgrep_out.stdout);
+        assert!(
+            pgrep_out.status.success() && pgrep_stdout.contains("codepapr"),
+            "pgrep must read the process table inside the agent sandbox; stdout={pgrep_stdout} stderr={:?}",
+            String::from_utf8_lossy(&pgrep_out.stderr)
+        );
+
+        let mut ps = sandboxed_command(
+            "/bin/ps",
+            &["ax".to_string()],
+            &workspace,
+            None,
+            &workspace,
+        )
+        .expect("command");
+        ps.current_dir(&workspace);
+        let ps_out = ps.output().expect("run");
+        // 钉死当前系统行为：ps 连 exec 都过不去（EPERM）。若未来 macOS 放开，
+        // 该断言失败即提醒删除预检的 ps/top 引导。
+        assert!(
+            !ps_out.status.success(),
+            "ps is expected to stay exec-blocked inside sandbox-exec on this macOS"
+        );
+
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    /// 预检引导：`ps`/`top` 命令段（含 sudo 前缀）必须返回带替代方案的错误，
+    /// 而把 ps 当参数/字符串使用的命令不得误伤。
+    #[test]
+    fn shell_validation_guides_away_from_exec_blocked_process_tools() {
+        let workspace =
+            std::env::temp_dir().join(format!("codepapr-sandbox-guide-{}", std::process::id()));
+        fs::create_dir_all(&workspace).expect("sandbox test workspace should exist");
+
+        let err = validate_restricted_shell_command("ps aux | grep node", &workspace)
+            .expect_err("ps must be rejected with guidance");
+        assert!(err.contains("`ps`") && err.contains("pgrep") && err.contains("lsof"), "got: {err}");
+        validate_restricted_shell_command("sudo top -l 1", &workspace)
+            .expect_err("sudo-prefixed top must be rejected too");
+
+        validate_restricted_shell_command("pgrep -fl node && echo ok", &workspace)
+            .expect("pgrep must pass");
+        validate_restricted_shell_command("echo 'ps aux' > /dev/null", &workspace)
+            .expect("ps as echo string must not be a false positive");
+        validate_restricted_shell_command("npm install psl", &workspace)
+            .expect("unrelated command names must not be a false positive");
+        validate_restricted_command("ps", &["aux".to_string()], &workspace)
+            .expect_err("direct ps must be rejected with guidance");
+        validate_restricted_command("/bin/ps", &[], &workspace)
+            .expect_err("absolute /bin/ps must be rejected with guidance");
 
         let _ = fs::remove_dir_all(&workspace);
     }

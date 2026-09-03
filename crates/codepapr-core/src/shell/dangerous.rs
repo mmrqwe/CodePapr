@@ -15,7 +15,7 @@
 /// 把一个命令行按 shell 元字符切成多个简单片段。
 /// 这不是完整的 shell 解析，仅用于让每个 `cmd args...` 段能被独立检查，
 /// 避免 `a && rm -rf /` 这类串联命令漏检。
-fn split_segments(line: &str) -> Vec<String> {
+pub(crate) fn split_segments(line: &str) -> Vec<String> {
     let mut segments = Vec::new();
     let mut current = String::new();
     let mut chars = line.chars().peekable();

@@ -455,7 +455,7 @@ name: 'web_download_file',
   {
     name: 'browser_get_preview_session',
     description:
-      '读取当前应用内预览页状态，包括 URL、标题和是否绑定后台进程。适合在导航或关闭前先确认当前浏览会话。',
+      '读取当前浏览会话状态：session 是应用内预览面板（URL/标题/绑定后台进程）；pageSession 是后端可交互浏览页的真实会话（无则为 null），含 navigationWarning。导航报错后用 pageSession 判断 headless 会话是否还在。',
     parameters: {
       type: 'object',
       properties: {},
@@ -587,7 +587,7 @@ name: 'web_download_file',
   {
     name: 'browser_open_page',
     description:
-      '打开一个可交互的浏览页会话，并把同一 URL 同步到应用内预览。适合后续需要点击、输入、抓 DOM 或截图的网页任务。',
+      '打开一个可交互的浏览页会话，并把同一 URL 同步到应用内预览。适合后续需要点击、输入、抓 DOM 或截图的网页任务。加载慢的页面（WebGL 首帧、大量资源）可加大 timeoutSeconds；等待超时但页面已可响应时不报错，返回 navigationWarning 且会话可用。',
     parameters: {
       type: 'object',
       properties: {
@@ -599,6 +599,10 @@ name: 'web_download_file',
           type: 'string',
           description: '可选。预览页标题。',
         },
+        timeoutSeconds: {
+          type: 'number',
+          description: '可选。等待页面加载的超时秒数，默认 10，最长 120。',
+        },
       },
       required: ['url'],
     },
@@ -606,7 +610,7 @@ name: 'web_download_file',
   {
     name: 'browser_navigate_page',
     description:
-      '把当前可交互浏览页导航到新的 URL，并同步刷新应用内预览。若当前没有浏览页会话，会自动创建一个。',
+      '把当前可交互浏览页导航到新的 URL，并同步刷新应用内预览。若当前没有浏览页会话（或旧会话已失联），会自动重建。加载慢可加大 timeoutSeconds；超时但页面可响应时返回 navigationWarning 而非报错。',
     parameters: {
       type: 'object',
       properties: {
@@ -618,6 +622,10 @@ name: 'web_download_file',
           type: 'string',
           description: '可选。新的预览标题。',
         },
+        timeoutSeconds: {
+          type: 'number',
+          description: '可选。等待页面加载的超时秒数，默认 10，最长 120。',
+        },
       },
       required: ['url'],
     },
@@ -625,10 +633,15 @@ name: 'web_download_file',
   {
     name: 'browser_reload_page',
     description:
-      '刷新当前可交互浏览页，并同步刷新应用内预览。适合页面脚本、热更新或重定向后手动重载。',
+      '刷新当前可交互浏览页，并同步刷新应用内预览。适合页面脚本、热更新或重定向后手动重载；收到 navigationWarning 后可加大 timeoutSeconds 再 reload。',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        timeoutSeconds: {
+          type: 'number',
+          description: '可选。等待页面加载的超时秒数，默认 10，最长 120。',
+        },
+      },
     },
   },
   {

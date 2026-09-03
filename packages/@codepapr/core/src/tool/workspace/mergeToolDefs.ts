@@ -236,7 +236,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 13. bash ────
   {
     name: 'bash',
-    description: '在项目环境中执行 shell 命令（穿过 shell 解释，支持管道、&&、变量展开等）。默认阻塞等待并返回完整输出；background:true 后台运行并返回 pid。action: run(默认，执行命令)|list(列出后台进程及日志尾部)|stop(停止指定 pid)|stop_all(停止全部后台进程)。长命令（dev server、构建、测试）建议用 background:true。更换工作目录请用 workdir 参数，不要在命令里 cd（不跨调用保留）。',
+    description: '在项目环境中执行 shell 命令（穿过 shell 解释，支持管道、&&、变量展开等）。默认阻塞等待并返回完整输出；background:true 后台运行并返回 pid。action: run(默认，执行命令)|list(列出后台进程及日志尾部)|stop(停止指定 pid)|stop_all(停止全部后台进程)。长命令（dev server、构建、测试）建议用 background:true。更换工作目录请用 workdir 参数，不要在命令里 cd（不跨调用保留）。进程/端口排查：ps/top 在 macOS 沙箱内被系统禁止 exec（用 action: list、pgrep -fl、lsof -iTCP 代替）。',
     parameters: {
       type: 'object',
       properties: {
@@ -253,7 +253,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 16. browser ────
   {
     name: 'browser',
-    description: '内置浏览器交互。action: open(打开URL)|navigate(导航)|reload(刷新)|close(关闭)|click(点击元素)|type(输入文本)|read(读取DOM)|screenshot(截图)|get(读状态)。open/navigate 需 url；click/type 需 selector；type 需 text。open/navigate/reload 会等待页面加载完成后才返回，之后无需再用 bash sleep 等待。',
+    description: '内置浏览器交互。action: open(打开URL)|navigate(导航)|reload(刷新)|close(关闭)|click(点击元素)|type(输入文本)|read(读取DOM)|screenshot(截图，默认存 .CodePapr/screenshots 且 read_image 可读)|get(读状态：预览会话+浏览页真实会话)。open/navigate 需 url；click/type 需 selector；type 需 text。open/navigate/reload 默认等页面 load 完成（timeoutSeconds 可调，最长 120s）；加载超时但页面已可响应时不报错，返回 navigationWarning。',
     parameters: {
       type: 'object',
       properties: {

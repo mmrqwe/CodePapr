@@ -19,6 +19,9 @@ pub(crate) struct BrowserPageSessionResult {
     pub(crate) workspace_path: String,
     pub(crate) started_at: i64,
     pub(crate) active: bool,
+    /// 导航未等到 load 事件但页面对象仍可探测时的降级说明；无警告为 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) navigation_warning: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -29,6 +32,8 @@ pub(crate) struct BrowserPageActionResult {
     pub(crate) title: String,
     pub(crate) selector: Option<String>,
     pub(crate) selector_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) navigation_warning: Option<String>,
 }
 
 #[derive(Serialize)]

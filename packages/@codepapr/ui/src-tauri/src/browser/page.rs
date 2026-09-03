@@ -16,7 +16,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use std::sync::mpsc;
 
@@ -120,6 +120,11 @@ fn build_browser_launch_options() -> Result<headless_chrome::LaunchOptions<'stat
             std::ffi::OsStr::new("--headless=new"),
             std::ffi::OsStr::new("--enable-webgl"),
             std::ffi::OsStr::new("--ignore-gpu-blocklist"),
+            // Chrome 137+ 默认禁用了 SwiftShader 回退：headless（无 GPU 设备 /
+            // 远程会话）下 WebGL 上下文直接拿不到，页面 JS 崩溃或 GPU 进程
+            // 挂死，表现为等待导航超时 + 会话失联。允许不安全的软件 GL，
+            // 保证 WebGL/c2d 双模式渲染对比可自动化。
+            std::ffi::OsStr::new("--enable-unsafe-swiftshader"),
         ]);
 
     builder
@@ -139,29 +144,68 @@ fn browser_page_state(
         workspace_path: session.workspace_path.clone(),
         started_at: session.started_at,
         active: true,
+        navigation_warning: None,
     })
 }
 
-fn navigate_browser_tab(tab: &Arc<Tab>, url: &str) -> Result<(), String> {
-    tab.navigate_to(url)
+const NAVIGATION_SETTLE_GRACE: Duration = Duration::from_secs(3);
+
+/// 探活 tab：能读到 document.readyState 即页面对象仍可用。
+fn tab_ready_state(tab: &Arc<Tab>) -> Option<String> {
+    tab.evaluate("function () { return document.readyState; }", false)
+        .ok()
+        .and_then(|object| object.value)
+        .and_then(|value| value.as_str().map(str::to_string))
+}
+
+/// 等 load 事件超时后的降级判定：宽限期内轮询 readyState。headless WebGL 页
+/// 常因 GPU 初始化/着色器编译拖住 load 事件，但 DOM 早已可用——旧实现在 10s
+/// 后硬失败，还会把会话留在半死状态（后续命令全挂）。现在只要页面能响应
+/// 探测就返回警告文本（Ok(Some)），彻底失联（renderer 崩溃/会话断开）才 Err。
+fn wait_navigation_settled(tab: &Arc<Tab>, wait_err: &str) -> Result<Option<String>, String> {
+    let deadline = Instant::now() + NAVIGATION_SETTLE_GRACE;
+    let mut last: Option<String> = None;
+    loop {
+        last = tab_ready_state(tab).or(last);
+        if let Some(state) = &last {
+            if state != "loading" {
+                return Ok(Some(format!(
+                    "等待页面加载超时（{wait_err}）；document.readyState={state}，页面已可交互，DOM/截图可用。需要更完整的加载可加大 timeoutSeconds 或 reload 重试"
+                )));
+            }
+        }
+        if Instant::now() >= deadline {
+            return match last {
+                Some(state) => Ok(Some(format!(
+                    "等待页面加载超时（{wait_err}）；document.readyState={state}（仍在加载），DOM/截图可用。建议加大 timeoutSeconds 后 reload"
+                ))),
+                None => Err(wait_err.to_string()),
+            };
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn navigate_browser_tab(tab: &Arc<Tab>, url: &str) -> Result<Option<String>, String> {
+    match tab
+        .navigate_to(url)
         .map_err(|err| format!("浏览器页面跳转失败: {err}"))?
         .wait_until_navigated()
-        .map_err(|err| format!("等待页面完成跳转失败: {err}"))?;
-    Ok(())
+    {
+        Ok(_) => Ok(None),
+        Err(err) => wait_navigation_settled(tab, &format!("等待页面完成跳转失败: {err}")),
+    }
 }
 
-fn reload_browser_tab(tab: &Arc<Tab>) -> Result<(), String> {
-    tab.reload(false, None)
+fn reload_browser_tab(tab: &Arc<Tab>) -> Result<Option<String>, String> {
+    match tab
+        .reload(false, None)
         .map_err(|err| format!("浏览器页面刷新失败: {err}"))?
         .wait_until_navigated()
-        .map_err(|err| format!("等待页面刷新完成失败: {err}"))?;
-    Ok(())
-}
-
-fn is_browser_connection_closed(err: &str) -> bool {
-    err.contains("underlying connection is closed")
-        || err.contains("Unable to make method calls")
-        || err.contains("connection is closed")
+    {
+        Ok(_) => Ok(None),
+        Err(err) => wait_navigation_settled(tab, &format!("等待页面刷新完成失败: {err}")),
+    }
 }
 
 fn find_browser_element<'a>(
@@ -185,6 +229,7 @@ fn browser_page_action_result(
     session: &ManagedBrowserPageSession,
     selector: Option<String>,
     selector_kind: Option<BrowserSelectorKind>,
+    navigation_warning: Option<String>,
 ) -> Result<BrowserPageActionResult, String> {
     let state = browser_page_state(session)?;
     Ok(BrowserPageActionResult {
@@ -193,6 +238,7 @@ fn browser_page_action_result(
         title: state.title,
         selector,
         selector_type: selector_kind.map(|kind| kind.label().to_string()),
+        navigation_warning,
     })
 }
 
@@ -309,14 +355,15 @@ fn launch_browser_page_session(
     sessions: &mut HashMap<String, ManagedBrowserPageSession>,
     workspace_key: &str,
     parsed_url: &str,
+    timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageSessionResult, String> {
     let browser = Browser::new(build_browser_launch_options()?)
         .map_err(|err| format!("启动浏览器自动化会话失败: {err}"))?;
     let tab = browser
         .new_tab()
         .map_err(|err| format!("创建浏览器页面失败: {err}"))?;
-    tab.set_default_timeout(browser_action_timeout(None));
-    navigate_browser_tab(&tab, parsed_url)?;
+    tab.set_default_timeout(browser_action_timeout(timeout_seconds));
+    let warning = navigate_browser_tab(&tab, parsed_url)?;
 
     let session = ManagedBrowserPageSession {
         _browser: browser,
@@ -324,7 +371,8 @@ fn launch_browser_page_session(
         workspace_path: workspace_key.to_string(),
         started_at: unix_millis()?,
     };
-    let result = browser_page_state(&session)?;
+    let mut result = browser_page_state(&session)?;
+    result.navigation_warning = warning;
     sessions.insert(workspace_key.to_string(), session);
     Ok(result)
 }
@@ -332,27 +380,49 @@ fn launch_browser_page_session(
 fn open_or_navigate_browser_page_session(
     workspace_path: &str,
     url: &str,
+    timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageSessionResult, String> {
     let workspace_key = browser_workspace_key(workspace_path)?;
     let parsed_url = parse_browser_url(url)?;
+    let timeout = browser_action_timeout(timeout_seconds);
 
     with_browser_page_sessions(|sessions| {
-        let mut needs_relaunch = false;
+        let mut failed_navigation: Option<String> = None;
         if let Some(session) = sessions.get_mut(&workspace_key) {
+            session.tab.set_default_timeout(timeout);
             match navigate_browser_tab(&session.tab, &parsed_url) {
-                Ok(()) => return browser_page_state(session),
-                Err(err) if is_browser_connection_closed(&err) => {
-                    needs_relaunch = true;
+                Ok(warning) => {
+                    let mut state = browser_page_state(session)?;
+                    state.navigation_warning = warning;
+                    return Ok(state);
                 }
-                Err(err) => return Err(err),
+                Err(err) => {
+                    // 导航硬失败意味着 tab 已失联（renderer 崩溃、会话断开）：
+                    // 保留僵尸会话只会让后续每个命令都失败，探活重建一次。
+                    failed_navigation = Some(err);
+                }
             }
         }
-        if needs_relaunch {
+        if failed_navigation.is_some() {
             if let Some(stale) = sessions.remove(&workspace_key) {
                 let _ = stale.tab.close(true);
             }
         }
-        launch_browser_page_session(sessions, &workspace_key, &parsed_url)
+        match launch_browser_page_session(sessions, &workspace_key, &parsed_url, Some(timeout.as_secs())) {
+            Ok(mut result) => {
+                if let Some(original) = failed_navigation {
+                    result.navigation_warning = Some(match result.navigation_warning.take() {
+                        Some(existing) => format!("原会话导航失败（{original}），已重建浏览会话；{existing}"),
+                        None => format!("原会话导航失败（{original}），已重建浏览会话"),
+                    });
+                }
+                Ok(result)
+            }
+            Err(relaunch_err) => Err(match failed_navigation {
+                Some(original) => format!("{relaunch_err}（且原会话导航失败：{original}）"),
+                None => relaunch_err,
+            }),
+        }
     })
 }
 
@@ -393,12 +463,13 @@ pub(crate) async fn open_browser_page(
     app: tauri::AppHandle,
     workspace_path: String,
     url: String,
+    timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageSessionResult, String> {
     if crate::embedded_browser::is_embedded_engine() {
         return crate::embedded_browser::page::embedded_browser_open(app, workspace_path, url).await;
     }
     run_blocking_workspace_task(move || {
-        open_or_navigate_browser_page_session(&workspace_path, &url)
+        open_or_navigate_browser_page_session(&workspace_path, &url, timeout_seconds)
     }).await
 }
 
@@ -407,19 +478,43 @@ pub(crate) async fn navigate_browser_page(
     app: tauri::AppHandle,
     workspace_path: String,
     url: String,
+    timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageSessionResult, String> {
     if crate::embedded_browser::is_embedded_engine() {
         return crate::embedded_browser::page::embedded_browser_navigate(app, workspace_path, url).await;
     }
     run_blocking_workspace_task(move || {
-        open_or_navigate_browser_page_session(&workspace_path, &url)
+        open_or_navigate_browser_page_session(&workspace_path, &url, timeout_seconds)
     }).await
+}
+
+/// `browser(get)` 的真实状态来源：headless 引擎的页会话存于本进程注册表，
+/// 与前端 previewStore（预览面板会话）是两回事。此前 get 只读 previewStore，
+/// 导航失败后 agent 看到的是「会话为空」而真实会话（含死 tab）仍在，无从判断。
+#[tauri::command]
+pub(crate) async fn get_browser_page_state(
+    workspace_path: String,
+) -> Result<Option<BrowserPageSessionResult>, String> {
+    if crate::embedded_browser::is_embedded_engine() {
+        return crate::embedded_browser::page::embedded_browser_session_state(workspace_path);
+    }
+    run_blocking_workspace_task(move || {
+        let workspace_key = browser_workspace_key(&workspace_path)?;
+        with_browser_page_sessions(|sessions| {
+            match sessions.get_mut(&workspace_key) {
+                Some(session) => Ok(Some(browser_page_state(session)?)),
+                None => Ok(None),
+            }
+        })
+    })
+    .await
 }
 
 #[tauri::command]
 pub(crate) async fn reload_browser_page(
     app: tauri::AppHandle,
     workspace_path: String,
+    timeout_seconds: Option<u64>,
 ) -> Result<BrowserPageSessionResult, String> {
     if crate::embedded_browser::is_embedded_engine() {
         return crate::embedded_browser::page::embedded_browser_reload(app, workspace_path).await;
@@ -432,8 +527,11 @@ pub(crate) async fn reload_browser_page(
                 .get_mut(&workspace_key)
                 .ok_or_else(|| "当前工作区没有活动中的浏览页会话，请先打开页面。".to_string())?;
 
-            reload_browser_tab(&session.tab)?;
-            browser_page_state(session)
+            session.tab.set_default_timeout(browser_action_timeout(timeout_seconds));
+            let warning = reload_browser_tab(&session.tab)?;
+            let mut state = browser_page_state(session)?;
+            state.navigation_warning = warning;
+            Ok(state)
         })
     }).await
 }
@@ -471,14 +569,20 @@ pub(crate) async fn click_browser_page_element(
                 .click()
                 .map_err(|err| format!("点击页面元素失败: {err}"))?;
 
+            let mut navigation_warning = None;
             if wait_for_navigation.unwrap_or(false) {
-                session
-                    .tab
-                    .wait_until_navigated()
-                    .map_err(|err| format!("等待页面完成跳转失败: {err}"))?;
+                match session.tab.wait_until_navigated() {
+                    Ok(_) => {}
+                    Err(err) => {
+                        navigation_warning = wait_navigation_settled(
+                            &session.tab,
+                            &format!("等待页面完成跳转失败: {err}"),
+                        )?;
+                    }
+                }
             }
 
-            browser_page_action_result("click", session, Some(selector), Some(selector_kind))
+            browser_page_action_result("click", session, Some(selector), Some(selector_kind), navigation_warning)
         })
     }).await
 }
@@ -546,14 +650,20 @@ pub(crate) async fn input_browser_page_text(
                     .press_key("Enter")
                     .map_err(|err| format!("提交页面输入失败: {err}"))?;
             }
+            let mut navigation_warning = None;
             if wait_for_navigation.unwrap_or(false) {
-                session
-                    .tab
-                    .wait_until_navigated()
-                    .map_err(|err| format!("等待页面完成跳转失败: {err}"))?;
+                match session.tab.wait_until_navigated() {
+                    Ok(_) => {}
+                    Err(err) => {
+                        navigation_warning = wait_navigation_settled(
+                            &session.tab,
+                            &format!("等待页面完成跳转失败: {err}"),
+                        )?;
+                    }
+                }
             }
 
-            browser_page_action_result("input", session, Some(selector), Some(selector_kind))
+            browser_page_action_result("input", session, Some(selector), Some(selector_kind), navigation_warning)
         })
     }).await
 }

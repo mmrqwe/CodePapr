@@ -69,7 +69,19 @@ fn session_result(session: &EmbeddedSession) -> Result<BrowserPageSessionResult,
         workspace_path: session.workspace_path.clone(),
         started_at: session.started_at,
         active: true,
+        navigation_warning: None,
     })
+}
+
+/// 只读查询内置浏览页会话状态（对齐 headless 的 get_browser_page_state）。
+pub(crate) fn embedded_browser_session_state(
+    workspace_path: String,
+) -> Result<Option<BrowserPageSessionResult>, String> {
+    let key = workspace_key(&workspace_path)?;
+    match get_session(&key) {
+        Some(session) => Ok(Some(session_result(&session)?)),
+        None => Ok(None),
+    }
 }
 
 /// 执行同步 JS 并取回 JSON 结果。
@@ -442,6 +454,7 @@ pub(crate) async fn embedded_browser_click(
         title,
         selector: Some(selector),
         selector_type: Some(selector_kind.label().to_string()),
+        navigation_warning: None,
     })
 }
 
@@ -486,6 +499,7 @@ pub(crate) async fn embedded_browser_input(
         title,
         selector: Some(selector),
         selector_type: Some(selector_kind.label().to_string()),
+        navigation_warning: None,
     })
 }
 
