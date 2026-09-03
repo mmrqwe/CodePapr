@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/codepapr-core",
+    "crates/codepapr-server",
+    "packages/@codepapr/ui/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["CodePapr"]
+license = "MIT"
