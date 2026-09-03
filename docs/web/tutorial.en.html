@@ -455,18 +455,18 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         </table>
 
         <div class="callout">
-          <strong>Note:</strong> If you only do frontend development or source code reading, running <code>npm install</code> and <code>npm run build</code> is usually enough. Desktop debugging and packaging require the Rust toolchain.
+          <strong>Note:</strong> Rust is not optional: this is a dual Node workspace + Cargo workspace, and <code>npm run build</code> runs <code>build:host-server</code> to compile <code>codepapr-server</code>, so it requires the Rust toolchain. Only narrow commands such as <code>npm run lint</code> or the pure-vitest part of <code>npm run test</code> avoid Rust.
         </div>
 
         <h3>Standard Installation</h3>
-        <pre><code><span class="hl-comment"># After cloning the repository (including submodules)</span>
-<span class="hl-keyword">git</span> submodule update --init --recursive
+        <pre><code><span class="hl-comment"># After cloning the repository</span>
 <span class="hl-keyword">npm</span> install
 <span class="hl-keyword">npm</span> run build</code></pre>
+        <p>The desktop build (<code>cargo check</code> / <code>npm run debug</code> / <code>release</code> / <code>publish</code>) pulls tree-sitter and language grammars from crates.io; it no longer depends on <code>.cargo-vendor/*</code> submodules. <code>npm run build</code> already compiles the <code>codepapr-server</code> host, leaving a usable host binary on disk; when the desktop starts, it launches that binary as a Tauri <code>externalBin</code> sidecar.</p>
 
         <h3>Installation Verification</h3>
         <pre><code><span class="hl-keyword">npm</span> run verify</code></pre>
-        <p>Passing this step confirms that your machine at least satisfies: correct Node dependencies, successful workspace build, passing workspace tests, and passing Tauri cargo check.</p>
+        <p>Passing this step confirms that your machine at least satisfies: correctly installed Node dependencies, successful workspace build (including the codepapr-server compile), passing workspace tests, and passing Tauri cargo check.</p>
 
         <h3>Supported Platforms</h3>
         <table>
@@ -1874,15 +1874,17 @@ X-API-Key: your-api-key</code></pre>
       <div class="section-header"><h2>System Architecture</h2></div>
       <div class="content">
         <h3>Architecture Overview</h3>
-        <div class="diagram">User → Desktop Workbench → Shared Agent Runtime
-                                  ↓
-                    ┌─────────────┼──────────────┐
-              Provider          SQLite        Tool Registry
-              Adapters      (App/Project)   (Workspace Tools)
-                              State
-                    ↓
-        ┌──────────┼──────────┐
-    DeepSeek   OpenAI   Claude
+        <div class="diagram">User → React UI / Shared Agent Runtime
+                 │ Tauri command (thin client)
+                 ▼
+           JSON-RPC 2.0
+                 ▼
+       codepapr-server (host process)
+                 ▼
+       codepapr-core (domain subsystems)
+       fs · git · shell · lsp · db · mcp · web
+                 │
+                 └─ JSON-RPC notification → Tauri event bus → UI
 </div>
 
         <h3>Package-Level Responsibilities</h3>
@@ -1894,29 +1896,28 @@ X-API-Key: your-api-key</code></pre>
             <tr><td><code>@codepapr/core</code></td><td>Runtime core</td><td>Agent, Session, ToolRegistry, cache partitioning, ProjectGraph, Prompt assembly</td></tr>
             <tr><td><code>@codepapr/api</code></td><td>Provider adapter layer</td><td>RequestBuilder, CacheValidator, provider implementations</td></tr>
             <tr><td><code>@codepapr/editor</code></td><td>Editor contract</td><td>Framework-agnostic Monaco types, markers, navigation, and static check contracts</td></tr>
-            <tr><td><code>@codepapr/ui</code></td><td>Desktop workbench</td><td>React, Zustand, Tauri, WorkerBackedAgent; SQLite persistence lives in <code>ui/src-tauri</code> (Rust)</td></tr>
+            <tr><td><code>@codepapr/ui</code></td><td>Desktop workbench</td><td>React, Zustand, Tauri, WorkerBackedAgent; Tauri commands are thin JSON-RPC clients, while the host owns the main SQLite handles through <code>codepapr-core::db</code></td></tr>
           </tbody>
         </table>
 
-        <h3>Rust Backend Domain Modules</h3>
-        <p>The Tauri backend is split into multiple modules by responsibility:</p>
+        <h3>Host / Client Responsibilities</h3>
+        <p>The Tauri desktop is not a monolithic backend: <code>src-tauri</code> keeps GUI-only capabilities and thin RPC proxies. File system, Git, Shell, LSP, database, MCP, Web, and other domain implementations live in <code>codepapr-core</code> and are exposed uniformly by <code>codepapr-server</code> over JSON-RPC.</p>
         <ul>
-          <li><code>browser</code>: Headless Chromium browser automation</li>
-          <li><code>shell</code>: Foreground/background commands, persistent shell sessions, command safety guards</li>
-          <li><code>web</code>: HTTP fetch, web page extraction, multi-engine search (SearXNG first, with automatic fallback)</li>
-          <li><code>workspace_fs</code>: File listing, reading, writing, SEARCH/REPLACE diff, searching</li>
-          <li><code>task_queue</code>: Heavy I/O operation serialization queue</li>
-          <li><code>db</code>: App and project-level SQLite persistence</li>
-          <li><code>lsp</code>: LSP server process management</li>
-          <li><code>symbol_provider</code>: Tree-sitter fallback symbol extraction</li>
-          <li><code>mcp_host</code>: MCP tool server host</li>
-          <li><code>shared</code>: Path normalization, workspace path resolution, general utilities</li>
+          <li><code>src-tauri/src/commands.rs</code>: Tauri commands that proxy UI requests to <code>host.rs</code></li>
+          <li><code>src-tauri/src/host.rs</code>: starts/connects to <code>codepapr-server</code>, sends JSON-RPC, and forwards notifications to the Tauri event bus</li>
+          <li><code>crates/codepapr-server</code>: RPC routing, parameter validation, event broadcasting, and task queue</li>
+          <li><code>crates/codepapr-core</code>: domain subsystems such as <code>workspace_fs</code>, <code>git_operations</code>, <code>shell</code>, <code>lsp</code>, <code>db</code>, <code>mcp_host</code>, and <code>web</code></li>
+          <li>GUI-only exceptions: embedded/headless browser, TTS, Stronghold vault, file export, and the Papr App runtime remain client-owned</li>
         </ul>
 
         <h3>Desktop Agent Bridge</h3>
         <div class="diagram">ChatPanel → agentStore.sendMessage() → WorkerBackedAgent.chat()
                                          ├─ Worker Thread: Agent.chat() → LLM
-                                         └─ Main Thread: tool execution → Tauri invoke
+                                         └─ Main Thread: tool → Tauri command → JSON-RPC
+                                                                         ↓
+                                                codepapr-server → codepapr-core subsystem
+                                                                         ↓
+                                                JSON-RPC notification → Tauri event bus → UI
 </div>
         <p>The desktop does not invoke the core Agent directly; instead, it offloads the LLM chat loop into a Web Worker via <code>WorkerBackedAgent</code>, ensuring long tasks do not block the UI.</p>
 
@@ -1933,7 +1934,7 @@ X-API-Key: your-api-key</code></pre>
           <tbody>
             <tr><td>Frontend UI</td><td>React 18, TypeScript, Zustand 5, Monaco Editor, Tailwind CSS 3, Vite 8</td></tr>
             <tr><td>Desktop Framework</td><td>Tauri 2 (Rust)</td></tr>
-            <tr><td>Rust Backend</td><td>rusqlite (SQLite), headless_chrome (browser), tree-sitter (16 languages), LSP stdio bridge (15 language families)</td></tr>
+            <tr><td>Rust Host / Client</td><td>codepapr-server + codepapr-core (JSON-RPC, SQLite, tree-sitter, LSP, and other domain capabilities); thin Tauri client owns GUI-only capabilities</td></tr>
             <tr><td>Agent Offload</td><td>Web Workers</td></tr>
             <tr><td>Testing</td><td>Vitest 4, Playwright (UI E2E)</td></tr>
           </tbody>

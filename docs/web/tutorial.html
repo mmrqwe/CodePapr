@@ -455,18 +455,18 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         </table>
 
         <div class="callout">
-          <strong>注意：</strong>如果只做前端开发或只阅读源码，完成 <code>npm install</code> 和 <code>npm run build</code> 通常就够了。桌面端调试和打包才需要 Rust toolchain。
+          <strong>注意：</strong>Rust 不是可选项——仓库是 Node workspace + Cargo workspace 双栈，<code>npm run build</code> 会执行 <code>build:host-server</code> 编译 <code>codepapr-server</code>，因此也需要 Rust toolchain。只有单跑 <code>npm run lint</code>、<code>npm run test</code>（纯 vitest 部分）这类命令才不需要碰 Rust。
         </div>
 
         <h3>标准安装</h3>
-        <pre><code><span class="hl-comment"># 克隆仓库后（含子模块）</span>
-<span class="hl-keyword">git</span> submodule update --init --recursive
+        <pre><code><span class="hl-comment"># 克隆仓库</span>
 <span class="hl-keyword">npm</span> install
 <span class="hl-keyword">npm</span> run build</code></pre>
+        <p>桌面端构建（<code>cargo check</code> / <code>npm run debug</code> / <code>release</code> / <code>publish</code>）从 crates.io 拉取 tree-sitter 及各语言 grammar 的最新兼容版本，不再依赖 <code>.cargo-vendor/*</code> 子模块。<code>npm run build</code> 已经包含 <code>codepapr-server</code> 宿主进程的编译，跑完这两步本机就有一个可用的宿主二进制；桌面端启动时会把它当 Tauri <code>externalBin</code> sidecar 拉起。</p>
 
         <h3>安装验收</h3>
         <pre><code><span class="hl-keyword">npm</span> run verify</code></pre>
-        <p>通过这一步，说明当前机器至少满足：Node 依赖正确、workspace 构建正常、workspace 测试正常、Tauri cargo check 正常。</p>
+        <p>通过这一步，说明当前机器至少满足：Node 依赖安装正确、workspace 构建正常（含 codepapr-server 编译）、workspace 测试正常、Tauri cargo check 正常。</p>
 
         <h3>支持平台</h3>
         <table>
@@ -1875,15 +1875,17 @@ X-API-Key: your-api-key</code></pre>
       <div class="section-header"><h2>系统架构</h2></div>
       <div class="content">
         <h3>架构概览</h3>
-        <div class="diagram">User → Desktop Workbench → Shared Agent Runtime
-                                  ↓
-                    ┌─────────────┼──────────────┐
-              Provider          SQLite        Tool Registry
-              Adapters      (App/Project)   (Workspace Tools)
-                              State
-                    ↓
-        ┌──────────┼──────────┐
-    DeepSeek   OpenAI   Claude
+        <div class="diagram">User → React UI / Shared Agent Runtime
+                 │ Tauri command（瘦客户端）
+                 ▼
+           JSON-RPC 2.0
+                 ▼
+       codepapr-server（宿主进程）
+                 ▼
+       codepapr-core（领域子系统）
+       fs · git · shell · lsp · db · mcp · web
+                 │
+                 └─ JSON-RPC 通知 → Tauri 事件总线 → UI
 </div>
 
         <h3>包级职责</h3>
@@ -1895,29 +1897,28 @@ X-API-Key: your-api-key</code></pre>
             <tr><td><code>@codepapr/core</code></td><td>运行时核心</td><td>Agent、Session、ToolRegistry、缓存分区、ProjectGraph、Prompt 组装</td></tr>
             <tr><td><code>@codepapr/api</code></td><td>Provider 适配层</td><td>RequestBuilder、CacheValidator、provider 实现</td></tr>
             <tr><td><code>@codepapr/editor</code></td><td>编辑器契约</td><td>框架无关的 Monaco 类型、标记、导航与静态检查契约</td></tr>
-            <tr><td><code>@codepapr/ui</code></td><td>桌面工作台</td><td>React、Zustand、Tauri、WorkerBackedAgent；SQLite 持久化位于 <code>ui/src-tauri</code>（Rust）</td></tr>
+            <tr><td><code>@codepapr/ui</code></td><td>桌面工作台</td><td>React、Zustand、Tauri、WorkerBackedAgent；Tauri 命令作为瘦 JSON-RPC 客户端，主 SQLite 由 <code>codepapr-core::db</code> 在宿主进程中持有</td></tr>
           </tbody>
         </table>
 
-        <h3>Rust 后端领域模块</h3>
-        <p>Tauri 后端按职责拆分为多个模块：</p>
+        <h3>宿主 / 客户端职责</h3>
+        <p>Tauri 桌面端不是单体后端：<code>src-tauri</code> 保留 GUI 专属能力与薄 RPC 代理；文件系统、Git、Shell、LSP、数据库、MCP、Web 等领域实现位于 <code>codepapr-core</code>，统一由 <code>codepapr-server</code> 通过 JSON-RPC 提供。</p>
         <ul>
-          <li><code>browser</code>：headless Chromium 浏览器自动化</li>
-          <li><code>shell</code>：前台/后台命令、持久 Shell 会话、命令安全守卫</li>
-          <li><code>web</code>：HTTP fetch、网页提取、多引擎搜索（SearXNG 优先，失败自动降级）</li>
-          <li><code>workspace_fs</code>：文件列表、读取、写入、SEARCH/REPLACE diff、搜索</li>
-          <li><code>task_queue</code>：重 I/O 操作串行化队列</li>
-          <li><code>db</code>：应用与项目级 SQLite 持久化</li>
-          <li><code>lsp</code>：LSP server 进程管理</li>
-          <li><code>symbol_provider</code>：tree-sitter fallback 符号提取</li>
-          <li><code>mcp_host</code>：MCP 工具服务器宿主</li>
-          <li><code>shared</code>：路径归一化、workspace 路径解析、通用工具</li>
+          <li><code>src-tauri/src/commands.rs</code>：Tauri 命令，将 UI 请求代理给 <code>host.rs</code></li>
+          <li><code>src-tauri/src/host.rs</code>：启动/连接 <code>codepapr-server</code>、发送 JSON-RPC、把通知转发到 Tauri 事件总线</li>
+          <li><code>crates/codepapr-server</code>：RPC 路由、参数校验、事件广播与任务队列</li>
+          <li><code>crates/codepapr-core</code>：<code>workspace_fs</code>、<code>git_operations</code>、<code>shell</code>、<code>lsp</code>、<code>db</code>、<code>mcp_host</code>、<code>web</code> 等领域子系统</li>
+          <li>GUI 专属例外：内置/无头浏览器、TTS、Stronghold vault、文件导出与 Papr App 运行时仍由桌面客户端持有</li>
         </ul>
 
         <h3>桌面端 Agent 桥接</h3>
         <div class="diagram">ChatPanel → agentStore.sendMessage() → WorkerBackedAgent.chat()
                                          ├─ Worker Thread: Agent.chat() → LLM
-                                         └─ Main Thread: tool execution → Tauri invoke
+                                         └─ Main Thread: tool → Tauri command → JSON-RPC
+                                                                         ↓
+                                                codepapr-server → codepapr-core subsystem
+                                                                         ↓
+                                                JSON-RPC notification → Tauri event bus → UI
 </div>
         <p>桌面端不直接调用 core Agent，而是通过 <code>WorkerBackedAgent</code> 将 LLM 聊天循环卸载到 Web Worker 中，确保长任务不阻塞 UI。</p>
 
@@ -1934,7 +1935,7 @@ X-API-Key: your-api-key</code></pre>
           <tbody>
             <tr><td>前端 UI</td><td>React 18、TypeScript、Zustand 5、Monaco Editor、Tailwind CSS 3、Vite 8</td></tr>
             <tr><td>桌面框架</td><td>Tauri 2（Rust）</td></tr>
-            <tr><td>Rust 后端</td><td>rusqlite (SQLite)、headless_chrome (浏览器)、tree-sitter (16 种语言)、LSP stdio 桥接（15 个语言族）</td></tr>
+            <tr><td>Rust 宿主 / 客户端</td><td>codepapr-server + codepapr-core（JSON-RPC、SQLite、tree-sitter、LSP 等领域能力）；Tauri 瘦客户端持有 GUI 专属能力</td></tr>
             <tr><td>Agent 卸载</td><td>Web Workers</td></tr>
             <tr><td>测试</td><td>Vitest 4、Playwright（UI E2E）</td></tr>
           </tbody>

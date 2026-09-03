@@ -303,7 +303,7 @@
             <div class="name">read <small>workspace_read_file</small><span class="cchip c-mix">Text + AST</span><span class="exp"></span></div>
           </div>
           <div class="desc">Reads project files. Supports <code>startLine / endLine</code> slicing and <code>aroundLine</code> context windows; accepts a <code>symbol</code> parameter for AST-targeted definition extraction; large files automatically attach a lightweight symbol outline.</div>
-          <div class="more"><div class="mbox">Route: <code>read</code> → <code>workspace_read_file</code> → Rust <code>read_text_file</code>. If <code>symbol</code> is passed, AST locates the exact line range; output is truncated safely (&gt;60k chars folded in middle, &gt;100k offloaded to disk with 2k preview, 150k hard cap).</div></div>
+          <div class="more"><div class="mbox">Route: <code>read</code> → <code>workspace_read_file</code> (Tauri command) → JSON-RPC <code>fs/readTextFile</code> → <code>codepapr-server</code> → <code>codepapr-core::workspace_fs</code>. If <code>symbol</code> is passed, AST locates the exact line range; output is truncated safely (&gt;60k chars folded in middle, &gt;100k offloaded to disk with 2k preview, 150k hard cap).</div></div>
         </div>
 
         <div class="item">
@@ -312,7 +312,7 @@
             <div class="name">write <small>workspace_write_file</small><span class="cchip c-mix">Text + AST/LSP</span><span class="exp"></span></div>
           </div>
           <div class="desc">Creates or overwrites files. Runs an <b>AST syntax pre-check</b> prior to disk writes (blocks newly introduced syntax errors), verifies consistency via immediate re-read, and <b>returns fresh LSP diagnostics directly in the tool result</b>.</div>
-          <div class="more"><div class="mbox">Route: <code>write</code> → <code>workspace_write_file</code>. Pre-check compares before/after syntax errors, rejecting regressions; triggers <code>lsp_open_document</code> to refresh diagnostics, and emits workspace mutation notifications to invalidate stale graph caches.</div></div>
+          <div class="more"><div class="mbox">Route: <code>write</code> → <code>workspace_write_file</code> (Tauri command) → JSON-RPC <code>fs/writeTextFile</code> → <code>codepapr-server</code> → <code>codepapr-core::workspace_fs</code>. Pre-check compares before/after syntax errors, rejecting regressions; triggers <code>lsp_open_document</code> to refresh diagnostics, then sends a JSON-RPC notification (<code>workspace-files-changed</code>) back through the Tauri event bus to invalidate stale graph caches.</div></div>
         </div>
 
         <div class="item">
@@ -359,7 +359,7 @@
             <div class="name">list <small>workspace_list_files</small><span class="cchip c-mix">Text + AST</span><span class="exp"></span></div>
           </div>
           <div class="desc">Browses directory trees (default depth 2, max 6), <b>automatically attaching top-level AST symbol summaries</b> (functions, classes, interfaces) for each discovered code file to quickly grasp project architecture.</div>
-          <div class="more"><div class="mbox">Route: <code>list</code> → <code>workspace_list_files</code> → Rust directory scan + concurrent AST top-level symbol extraction into <code>symbolsByFile</code>.</div></div>
+          <div class="more"><div class="mbox">Route: <code>list</code> → <code>workspace_list_files</code> (Tauri command) → JSON-RPC <code>fs/listFiles</code> → <code>codepapr-server</code> → <code>codepapr-core</code> directory scan + concurrent AST top-level symbol extraction into <code>symbolsByFile</code>.</div></div>
         </div>
 
         <div class="item">
@@ -368,7 +368,7 @@
             <div class="name">read_image <small>workspace_read_image</small><span class="cchip c-mm">Multimodal</span><span class="exp"></span></div>
           </div>
           <div class="desc">Reads local image files (PNG/JPEG/WebP/GIF) into Base64 strings for vision models (5MB max). Dynamically hidden from the model when multimodal capabilities are disabled.</div>
-          <div class="more"><div class="mbox">Route: <code>read_image</code> → <code>workspace_read_image</code> → Rust native I/O. Automatically stripped from toolsets if the current model tier is text-only.</div></div>
+          <div class="more"><div class="mbox">Route: <code>read_image</code> → <code>workspace_read_image</code> (Tauri command) → JSON-RPC <code>fs/readFile</code> → <code>codepapr-server</code> → <code>codepapr-core</code> native I/O. Automatically stripped from toolsets if the current model tier is text-only.</div></div>
         </div>
       </section>
 
@@ -409,7 +409,7 @@
             <div class="name">diagnostics <small>File Review / Project Checks</small><span class="cchip c-lsp">LSP Diagnostics</span><span class="exp"></span></div>
           </div>
           <div class="desc">Queries LSP diagnostics for a specific file or runs project-wide lint/typechecks via <code>project: true</code>. Note: file writing tools already return real-time diagnostics; this tool is designed for explicit verification and full-project audits.</div>
-          <div class="more"><div class="mbox">Route: Single-file queries poll Rust <code>lsp_get_diagnostics</code> (short-circuits on fresh diagnostics, 2s timeout guard); project-wide mode aggregates issues across active language providers.</div></div>
+          <div class="more"><div class="mbox">Route: Single-file queries use JSON-RPC <code>lsp/diagnostics</code> (<code>codepapr-server</code> → <code>codepapr-core::lsp</code>; short-circuits on fresh diagnostics, 2s timeout guard); project-wide mode aggregates issues across active language providers.</div></div>
         </div>
 
         <div class="sublabel"><b>Global Architecture &amp; Deep Analysis</b> Explore Subagent Exclusive</div>
@@ -638,8 +638,9 @@
           <li class="wnode"><b>LLM Surface</b> 25 Merged Tools<span class="wtag">Clean abstraction, reduced cognitive load</span></li>
           <li class="wnode"><b>Dispatch Router</b> Parameter Remapping<span class="wtag">registerSharedWorkspaceTools</span></li>
           <li class="wnode"><b>Fine-Grained</b> 61 Backend Handlers<span class="wtag">workspaceTools state management</span></li>
-          <li class="wnode"><b>Tauri IPC</b> Native Bridge<span class="wtag">invoke Rust backend modules</span></li>
-          <li class="wnode"><b>Rust Engine</b> LSP / AST Fallback Core<span class="wtag">symbol_provider fault-tolerance</span></li>
+          <li class="wnode"><b>Tauri Commands</b> Thin Client<span class="wtag">host.rs sends JSON-RPC requests</span></li>
+          <li class="wnode"><b>codepapr-server</b> JSON-RPC Host<span class="wtag">handler.rs routes 159 methods</span></li>
+          <li class="wnode"><b>codepapr-core</b> Domain Subsystems<span class="wtag">symbol_provider LSP / AST fallback engine</span></li>
         </ul>
       </div>
 
@@ -685,15 +686,16 @@
       <div class="fstep"><span class="fi">L2</span><b>Dispatch Route</b>Remaps to apply_patch</div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L3</span><b>Pre-check</b>Re-reads file, pinpoints symbols</div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L4</span><b>Literal Edit &amp; AST</b>Literal replace, blocks new errors</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L5</span><b>Rust Write</b>invoke write_text_file</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L6</span><b>Verify &amp; Sync</b>Attaches LSP diagnostics, clears cache</div>
+      <div class="fstep"><span class="fi">L5</span><b>JSON-RPC Write</b>fs/writeTextFile → codepapr-server</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L6</span><b>Host Persistence</b>codepapr-core::workspace_fs writes</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L7</span><b>Verify &amp; Sync</b>Returns diagnostics via JSON-RPC notification, clears cache</div>
     </div>
   </section>
 </div>
 
 <footer>
   <div class="container">
-    CodePapr Tool Inventory Architecture · 25 LLM-facing tools → 61 fine-grained backend handlers → Tauri / Rust native backend. Comprehensive coverage across LSP semantics, AST syntax trees, and regex fallbacks for determinism and safety.
+    CodePapr Tool Inventory Architecture · 25 LLM-facing tools → 61 fine-grained backend handlers → Tauri command → JSON-RPC → codepapr-server → codepapr-core. Comprehensive coverage across LSP semantics, AST syntax trees, and regex fallbacks for determinism and safety.
   </div>
 </footer>
 

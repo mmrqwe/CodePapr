@@ -303,7 +303,7 @@
             <div class="name">read <small>workspace_read_file</small><span class="cchip c-mix">文本 + AST</span><span class="exp"></span></div>
           </div>
           <div class="desc">读取项目文件。支持 <code>startLine / endLine</code> 行范围切片与 <code>aroundLine</code> 窗口；支持 <code>symbol</code> 参数按 AST 精确定位符号代码块；大文件全量读取时自动附加符号大纲。</div>
-          <div class="more"><div class="mbox">调用链路：<code>read</code> → <code>workspace_read_file</code> → Rust <code>read_text_file</code>。传 <code>symbol</code> 时通过 AST 定位行区间再返回；输出经过截断保护（&gt;60k 字符中间折叠，&gt;100k 转存磁盘并返回 2k 预览，150k 硬顶）。</div></div>
+          <div class="more"><div class="mbox">调用链路：<code>read</code> → <code>workspace_read_file</code>（Tauri 命令）→ JSON-RPC <code>fs/readTextFile</code> → <code>codepapr-server</code> → <code>codepapr-core::workspace_fs</code>。传 <code>symbol</code> 时通过 AST 定位行区间再返回；输出经过截断保护（&gt;60k 字符中间折叠，&gt;100k 转存磁盘并返回 2k 预览，150k 硬顶）。</div></div>
         </div>
 
         <div class="item">
@@ -312,7 +312,7 @@
             <div class="name">write <small>workspace_write_file</small><span class="cchip c-mix">文本 + AST/LSP</span><span class="exp"></span></div>
           </div>
           <div class="desc">创建或全量覆盖文件。写入前执行 <b>AST 语法预检</b>（拦截新增语法错误），写入后立即重读校验，并同步触发 LSP 文档变更，<b>直接随结果返回该文件最新诊断</b>。</div>
-          <div class="more"><div class="mbox">调用链路：<code>write</code> → <code>workspace_write_file</code>。预检对比前后语法错误数，错误增加则拒绝落盘；落盘后重读校验，通过 <code>lsp_open_document</code> 刷新诊断，最后触发工作区变更通知并清理项目图缓存。</div></div>
+          <div class="more"><div class="mbox">调用链路：<code>write</code> → <code>workspace_write_file</code>（Tauri 命令）→ JSON-RPC <code>fs/writeTextFile</code> → <code>codepapr-server</code> → <code>codepapr-core::workspace_fs</code>。预检对比前后语法错误数，错误增加则拒绝落盘；落盘后重读校验，通过 <code>lsp_open_document</code> 刷新诊断，最后经 JSON-RPC 通知（<code>workspace-files-changed</code>）回传 Tauri 事件总线并清理项目图缓存。</div></div>
         </div>
 
         <div class="item">
@@ -359,7 +359,7 @@
             <div class="name">list <small>workspace_list_files</small><span class="cchip c-mix">文本 + AST</span><span class="exp"></span></div>
           </div>
           <div class="desc">浏览目录树结构（默认深度 2，最大 6），<b>自动附带每个代码文件的顶层 AST 符号摘要</b>（函数、类、接口等），快速建立项目骨架认知。</div>
-          <div class="more"><div class="mbox">调用链路：<code>list</code> → <code>workspace_list_files</code> → Rust 遍历，并发通过 AST 提取顶层符号注入 <code>symbolsByFile</code>。</div></div>
+          <div class="more"><div class="mbox">调用链路：<code>list</code> → <code>workspace_list_files</code>（Tauri 命令）→ JSON-RPC <code>fs/listFiles</code> → <code>codepapr-server</code> → <code>codepapr-core</code> 遍历，并发通过 AST 提取顶层符号注入 <code>symbolsByFile</code>。</div></div>
         </div>
 
         <div class="item">
@@ -368,7 +368,7 @@
             <div class="name">read_image <small>workspace_read_image</small><span class="cchip c-mm">多模态</span><span class="exp"></span></div>
           </div>
           <div class="desc">读取本地图片（PNG/JPEG/WebP/GIF）并转为 Base64 供视觉模型解析（大小上限 5MB）。仅在多模态配置开启时对模型可见。</div>
-          <div class="more"><div class="mbox">调用链路：<code>read_image</code> → <code>workspace_read_image</code> → Rust 原生读取。非多模态模型自动从可见工具集中剥离。</div></div>
+          <div class="more"><div class="mbox">调用链路：<code>read_image</code> → <code>workspace_read_image</code>（Tauri 命令）→ JSON-RPC <code>fs/readFile</code> → <code>codepapr-server</code> → <code>codepapr-core</code> 原生读取。非多模态模型自动从可见工具集中剥离。</div></div>
         </div>
       </section>
 
@@ -409,7 +409,7 @@
             <div class="name">diagnostics <small>单文件复查 / 全项目检查</small><span class="cchip c-lsp">LSP 诊断</span><span class="exp"></span></div>
           </div>
           <div class="desc">按需查询指定文件的 LSP 诊断信息，或传 <code>project: true</code> 触发项目级 Lint/Typecheck。注：常规文件写入已内置诊断回传，本工具主要用于按需复查与全项目检测。</div>
-          <div class="more"><div class="mbox">调用链路：单文件通过 Rust <code>lsp_get_diagnostics</code> 监听诊断刷新（短路返回，2s 超时防卡死）；全项目则聚合各语言 Provider 的静态检查结果。</div></div>
+          <div class="more"><div class="mbox">调用链路：单文件通过 JSON-RPC <code>lsp/diagnostics</code>（<code>codepapr-server</code> → <code>codepapr-core::lsp</code>）监听诊断刷新（短路返回，2s 超时防卡死）；全项目则聚合各语言 Provider 的静态检查结果。</div></div>
         </div>
 
         <div class="sublabel"><b>全局图谱与深度分析</b> Explore 子代理专属</div>
@@ -638,8 +638,9 @@
           <li class="wnode"><b>LLM 视图</b> 25 个合并工具<span class="wtag">简洁抽象，降低决策成本</span></li>
           <li class="wnode"><b>分发路由器</b> 参数重映射<span class="wtag">registerSharedWorkspaceTools</span></li>
           <li class="wnode"><b>细粒度实现</b> 61 个底层 Handler<span class="wtag">workspaceTools 状态管理</span></li>
-          <li class="wnode"><b>Tauri IPC</b> 原生通道<span class="wtag">invoke Rust 后端模块</span></li>
-          <li class="wnode"><b>Rust 引擎</b> LSP / AST 降级核心<span class="wtag">symbol_provider 容灾引擎</span></li>
+          <li class="wnode"><b>Tauri 命令</b> 瘦客户端<span class="wtag">host.rs 发起 JSON-RPC 请求</span></li>
+          <li class="wnode"><b>codepapr-server</b> JSON-RPC 宿主<span class="wtag">handler.rs 路由 159 个方法</span></li>
+          <li class="wnode"><b>codepapr-core</b> 领域库子系统<span class="wtag">symbol_provider LSP / AST 降级引擎</span></li>
         </ul>
       </div>
 
@@ -685,15 +686,16 @@
       <div class="fstep"><span class="fi">L2</span><b>分发路由</b>映射至 workspace_apply_patch</div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L3</span><b>内容预检</b>重读原文，精准定位歧义符号</div><div class="farrow">→</div>
       <div class="fstep"><span class="fi">L4</span><b>字面替换 &amp; AST 检查</b>字面替换，拦截新增语法错误</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L5</span><b>Rust 落盘</b>invoke write_text_file</div><div class="farrow">→</div>
-      <div class="fstep"><span class="fi">L6</span><b>重读校验 &amp; 诊断同步</b>回传 LSP 最新诊断，清理图缓存</div>
+      <div class="fstep"><span class="fi">L5</span><b>JSON-RPC 落盘</b>fs/writeTextFile → codepapr-server</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L6</span><b>宿主写入</b>codepapr-core::workspace_fs 落盘</div><div class="farrow">→</div>
+      <div class="fstep"><span class="fi">L7</span><b>重读校验 &amp; 诊断同步</b>经 JSON-RPC 通知回传 LSP 最新诊断，清理图缓存</div>
     </div>
   </section>
 </div>
 
 <footer>
   <div class="container">
-    CodePapr 工具全景架构 · 25 个大模型暴露工具 → 61 个细粒度底层 Handler → Tauri / Rust 原生后端。全链路覆盖 LSP 语义、AST 语法树与正则兜底，提供确定性与安全保障。
+    CodePapr 工具全景架构 · 25 个大模型暴露工具 → 61 个细粒度底层 Handler → Tauri 命令 → JSON-RPC → codepapr-server → codepapr-core。全链路覆盖 LSP 语义、AST 语法树与正则兜底，提供确定性与安全保障。
   </div>
 </footer>
 
