@@ -387,9 +387,3 @@ pub fn check_port_available(port: u16) -> Result<bool, String> {
     let occupied = port_has_listener(("127.0.0.1", port)) || port_has_listener(("::1", port));
     Ok(!occupied)
 }
-
-/// 探测端口是否有服务：用 connect 而非 bind。
-/// Rust std 的 TcpListener::bind 默认设 SO_REUSEADDR，macOS/BSD 下对同样
-/// 带 REUSEADDR 的监听 socket（node/libuv 默认开启）绑定会成功 → 永远误判
-/// 「端口空闲」，曾导致启动验证把活着的后端当死的杀掉。connect 无此语义
-/// 陷阱：连得上 = 有监听，拒绝 = 无服务。

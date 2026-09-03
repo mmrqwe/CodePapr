@@ -1,3 +1,8 @@
+/// 探测端口是否有服务：用 connect 而非 bind。
+/// Rust std 的 TcpListener::bind 默认设 SO_REUSEADDR，macOS/BSD 下对同样
+/// 带 REUSEADDR 的监听 socket（node/libuv 默认开启）绑定会成功 → 永远误判
+/// 「端口空闲」，曾导致启动验证把活着的后端当死的杀掉。connect 无此语义
+/// 陷阱：连得上 = 有监听，拒绝 = 无服务。
 fn port_has_listener(addr: (&str, u16)) -> bool {
     use std::net::ToSocketAddrs;
     let Ok(mut addrs) = addr.to_socket_addrs() else {
@@ -451,9 +456,3 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
         .body(body)
         .expect("static status code and validated header values cannot fail")
 }
-
-/// 按两轴权限构建 app 文档的 CSP：
-/// - 网络关：只允许同源 + 自身后端端口（无后端则纯同源），img/form 全禁外发；
-/// - 网络开：额外放行 https/wss/ws 与 https 图片/表单；
-/// - script-src 始终放行 https:（CDN 图表库），connect-src 关闭时无法回传数据；
-/// - frame-src / blob: 放行同源、自身后端与 blob URL，供 `<a download>` 与隐藏 iframe 下载。
