@@ -8,9 +8,22 @@ import { launchAppBackend } from '../tools/workspaceAppTools';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 import { isPluginApp } from '../papr/pluginSurface';
+import { DangerConfirmDialog } from './DangerConfirmDialog';
 
 interface AppDockPanelProps {
   lang?: Lang;
+}
+
+function appDisplayTitle(app: AppInstance, lang: Lang | undefined): string {
+  if (lang === 'en' && app.manifestJson) {
+    try {
+      const parsed = JSON.parse(app.manifestJson) as { nameEn?: string };
+      if (parsed.nameEn && parsed.nameEn.trim()) return parsed.nameEn.trim();
+    } catch {
+      /* ignore */
+    }
+  }
+  return app.title;
 }
 
 export function AppDockPanel({ lang }: AppDockPanelProps) {
@@ -27,6 +40,7 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<AppInstance | null>(null);
 
   const selected = apps.find((a) => a.appId === selectedId) ?? null;
   const hasBackend = !!(selected?.command && selected?.port);
@@ -105,25 +119,21 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
     setBusy(false);
   }, [selected, setAppStopped]);
 
-  const handleDelete = useCallback(async () => {
-    if (!selected) return;
-    // N13：删除不可逆（整个 app 目录含 db.sqlite），必须先确认——与角色卡/
-    // 会话删除一致。取消则什么都不做。
-    const confirmText =
-      lang === 'en'
-        ? `Delete app "${selected.title}"? Its directory and local data (database) will be permanently removed.`
-        : lang === 'zh-TW'
-          ? `刪除應用「${selected.title}」？其目錄與本地資料（資料庫）將被永久移除。`
-          : `删除应用「${selected.title}」？其目录与本地数据（数据库）将被永久移除。`;
-    if (typeof window !== 'undefined' && !window.confirm(confirmText)) return;
+  const requestDelete = useCallback(() => {
+    if (!selected || busy) return;
+    setPendingDelete(selected);
+  }, [selected, busy]);
 
+  const handleDelete = useCallback(async () => {
+    const target = pendingDelete;
+    if (!target) return;
     setBusy(true);
     setError('');
-    if (selected.pid) {
-      try { await invoke('stop_background_process', { pid: selected.pid, source: 'app-dock-delete' }); } catch { /* ignore */ }
+    if (target.pid) {
+      try { await invoke('stop_background_process', { pid: target.pid, source: 'app-dock-delete' }); } catch { /* ignore */ }
     }
     try {
-      await invoke('papr_delete_app', { appId: selected.appId });
+      await invoke('papr_delete_app', { appId: target.appId });
     } catch (e) {
       // N13：删除失败必须可见，且绝不能从 UI 移除该 app——目录仍在磁盘上，
       // 移除只会在下次启动时被扫描回来（"假删除"）。
@@ -136,15 +146,17 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
             : `删除应用失败：${detail}`
       );
       setBusy(false);
+      setPendingDelete(null);
       return;
     }
     // 目录已删除：unregister 失败只影响映射，app 本身已不可恢复，尽力而为。
-    try { await invoke('unregister_app_workspace', { appId: selected.appId }); } catch { /* ignore */ }
-    usePermissionStore.getState().clearManifest(selected.appId);
-    if (selectedId === selected.appId) setSelectedId(null);
-    closeApp(selected.appId);
+    try { await invoke('unregister_app_workspace', { appId: target.appId }); } catch { /* ignore */ }
+    usePermissionStore.getState().clearManifest(target.appId);
+    if (selectedId === target.appId) setSelectedId(null);
+    closeApp(target.appId);
+    setPendingDelete(null);
     setBusy(false);
-  }, [selected, selectedId, closeApp, lang]);
+  }, [pendingDelete, selectedId, closeApp, lang]);
 
   const selectedIsPlugin = !!(selected && isPluginApp(selected));
   const selectedPinned = !!(selected && pinnedPluginIds.includes(selected.appId));
@@ -305,12 +317,19 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
               <span className="flex-shrink-0 text-sm leading-none">
                 {app.icon && app.icon.trim().length > 0 ? app.icon.trim().slice(0, 2) : plugin ? '📌' : '🖥️'}
               </span>
-              <span className="truncate text-xs text-fg">{app.title}</span>
-              {plugin && (
-                <span className="ml-auto shrink-0 rounded bg-raised px-1 py-0.5 text-[9px] text-fg-muted">
-                  {t.appDockPluginBadge}
-                </span>
-              )}
+              <span className="truncate text-xs text-fg">{appDisplayTitle(app, lang)}</span>
+              <div className="ml-auto flex items-center gap-1 shrink-0">
+                {app.scope === 'global' && (
+                  <span className="rounded border border-info-bg bg-info-bg px-1 py-0.5 text-[9px] text-info">
+                    Global
+                  </span>
+                )}
+                {plugin && (
+                  <span className="rounded bg-raised px-1 py-0.5 text-[9px] text-fg-muted">
+                    {t.appDockPluginBadge}
+                  </span>
+                )}
+              </div>
             </div>
           );
         })}
@@ -329,7 +348,7 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
         <button
           type="button"
           disabled={!canDelete}
-          onClick={handleDelete}
+          onClick={requestDelete}
           className={btnRed(canDelete)}
           title={t.appDockDelete}
           aria-label={t.appDockDelete}
@@ -347,6 +366,21 @@ export function AppDockPanel({ lang }: AppDockPanelProps) {
           ⤓
         </button>
       </div>
+      {pendingDelete && (
+        <DangerConfirmDialog
+          title={(isPluginApp(pendingDelete) ? t.appDockDeleteConfirmTitlePlugin : t.appDockDeleteConfirmTitle).replace(
+            '{name}',
+            appDisplayTitle(pendingDelete, lang),
+          )}
+          warning={t.appDockDeleteConfirmBody}
+          confirmLabel={t.appDockDeleteConfirmAction}
+          cancelLabel={t.appDockDeleteConfirmCancel}
+          executing={busy}
+          executingLabel={t.appDockDeleteConfirming}
+          onConfirm={() => { void handleDelete(); }}
+          onCancel={() => { if (!busy) setPendingDelete(null); }}
+        />
+      )}
     </div>
   );
 }
