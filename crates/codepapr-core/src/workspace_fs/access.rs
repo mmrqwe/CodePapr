@@ -10,7 +10,7 @@ use crate::shared::{
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ExternalPathCheck {
+pub struct ExternalPathCheck {
     pub(crate) path: String,
     pub(crate) canonical_path: String,
     pub(crate) exists: bool,

@@ -17,7 +17,7 @@ pub(crate) const MAX_WEB_FETCH_BYTES: usize = 2_000_000;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DownloadFileResult {
+pub struct DownloadFileResult {
     pub(crate) url: String,
     pub(crate) path: String,
     pub(crate) bytes: usize,
@@ -29,7 +29,7 @@ pub(crate) struct DownloadFileResult {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct WebFetchUrlResult {
+pub struct WebFetchUrlResult {
     pub(crate) url: String,
     pub(crate) status: u16,
     pub(crate) content: String,

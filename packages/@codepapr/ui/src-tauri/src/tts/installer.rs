@@ -47,7 +47,7 @@ pub(crate) fn cancel() {
     CANCELLED.store(true, Ordering::SeqCst);
     let pid = ACTIVE_PID.lock().ok().and_then(|mut guard| guard.take());
     if let Some(pid) = pid {
-        crate::shell::process_tree::kill_process_group_by_pid(pid);
+        codepapr_core::shell::process_tree::kill_process_group_by_pid(pid);
     }
 }
 
@@ -104,8 +104,8 @@ fn run_and_stream(
     step_id: &str,
     label: &str,
 ) -> Result<(), String> {
-    crate::shell::process_tree::prepare_new_process_group(&mut cmd);
-    crate::shell::process_tree::prepare_parent_death_signal(&mut cmd);
+    codepapr_core::shell::process_tree::prepare_new_process_group(&mut cmd);
+    codepapr_core::shell::process_tree::prepare_parent_death_signal(&mut cmd);
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -154,10 +154,10 @@ fn run_and_stream(
     // Poll for cancellation while waiting for the process to exit.
     loop {
         if CANCELLED.load(Ordering::SeqCst) {
-            let _ = crate::shell::process_tree::kill_process_tree(&mut child);
-            crate::shell::process_tree::wait_for_child_exit(
+            let _ = codepapr_core::shell::process_tree::kill_process_tree(&mut child);
+            codepapr_core::shell::process_tree::wait_for_child_exit(
                 &mut child,
-                crate::shared::child_reap_timeout(),
+                codepapr_core::shared::child_reap_timeout(),
             );
             let _ = stdout_handle.join();
             let _ = stderr_handle.join();

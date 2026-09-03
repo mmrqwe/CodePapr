@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-#[path = "src/download_verification.rs"]
+#[path = "../../../../crates/codepapr-core/src/download_verification.rs"]
 mod download_verification;
 #[cfg(not(windows))]
 use std::{io::Write, time::Instant};

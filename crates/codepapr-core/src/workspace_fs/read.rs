@@ -262,7 +262,7 @@ const MAX_ARTIFACT_SOURCE_BYTES: usize = 5_000_000;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ArtifactReadResult {
+pub struct ArtifactReadResult {
     pub(crate) artifact_id: String,
     pub(crate) content: String,
     pub(crate) total_chars: usize,
@@ -347,7 +347,7 @@ fn is_probably_binary_content(bytes: &[u8]) -> bool {    if bytes.contains(&0) {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct BatchFileRead {
+pub struct BatchFileRead {
     pub(crate) path: String,
     pub(crate) content: String,
     pub(crate) bytes: usize,

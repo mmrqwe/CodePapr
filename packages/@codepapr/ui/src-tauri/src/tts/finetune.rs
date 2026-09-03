@@ -29,7 +29,7 @@ pub(crate) fn cancel() {
     CANCELLED.store(true, Ordering::SeqCst);
     let pid = ACTIVE_PID.lock().ok().and_then(|mut guard| guard.take());
     if let Some(pid) = pid {
-        crate::shell::process_tree::kill_process_group_by_pid(pid);
+        codepapr_core::shell::process_tree::kill_process_group_by_pid(pid);
     }
 }
 
@@ -140,8 +140,8 @@ pub(crate) fn start_finetune(
         cmd.env("PYTORCH_ENABLE_MPS_FALLBACK", "1");
         cmd.env("TOKENIZERS_PARALLELISM", "false");
 
-        crate::shell::process_tree::prepare_new_process_group(&mut cmd);
-        crate::shell::process_tree::prepare_parent_death_signal(&mut cmd);
+        codepapr_core::shell::process_tree::prepare_new_process_group(&mut cmd);
+        codepapr_core::shell::process_tree::prepare_parent_death_signal(&mut cmd);
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -208,10 +208,10 @@ pub(crate) fn start_finetune(
         loop {
             if CANCELLED.load(Ordering::SeqCst) {
                 let pid = child.id();
-                let _ = crate::shell::process_tree::kill_process_tree(&mut child);
-                crate::shell::process_tree::wait_for_child_exit(
+                let _ = codepapr_core::shell::process_tree::kill_process_tree(&mut child);
+                codepapr_core::shell::process_tree::wait_for_child_exit(
                     &mut child,
-                    crate::shared::child_reap_timeout(),
+                    codepapr_core::shared::child_reap_timeout(),
                 );
                 clear_child_pid(pid);
                 return;

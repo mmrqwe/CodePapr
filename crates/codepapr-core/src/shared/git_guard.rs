@@ -33,14 +33,14 @@ fn lock_for(workspace: &Path) -> Arc<RwLock<()>> {
 }
 
 /// 在读锁下执行（同一工作区的读操作可并发）：status/log/diff/plan 等只读命令。
-pub(crate) fn with_workspace_git_read_lock<R>(workspace: &Path, f: impl FnOnce() -> R) -> R {
+pub fn with_workspace_git_read_lock<R>(workspace: &Path, f: impl FnOnce() -> R) -> R {
     let lock = lock_for(workspace);
     let _guard = read(&lock);
     f()
 }
 
 /// 在写锁下执行（同一工作区独占）：所有会改动 shadow repo 的命令。
-pub(crate) fn with_workspace_git_write_lock<R>(workspace: &Path, f: impl FnOnce() -> R) -> R {
+pub fn with_workspace_git_write_lock<R>(workspace: &Path, f: impl FnOnce() -> R) -> R {
     let lock = lock_for(workspace);
     let _guard = write(&lock);
     f()

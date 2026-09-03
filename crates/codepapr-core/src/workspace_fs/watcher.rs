@@ -15,7 +15,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use serde_json::json;
 
+use crate::events::SharedEventSink;
 use super::{path_touches_codepapr_content, path_touches_ignored_dir};
 
 /// Quiet window that must elapse after the last filesystem event before a
@@ -123,4 +125,16 @@ pub fn stop_workspace_watcher_impl() {
 pub fn stop_workspace_watcher() -> Result<(), String> {
     stop_workspace_watcher_impl();
     Ok(())
+}
+
+pub fn start_workspace_watcher(
+    workspace_path: String,
+    sink: SharedEventSink,
+) -> Result<(), String> {
+    start_workspace_watcher_impl(
+        workspace_path,
+        Arc::new(move || {
+            sink.emit(WORKSPACE_CHANGED_EVENT, json!({}));
+        }),
+    )
 }

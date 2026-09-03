@@ -3,7 +3,7 @@ use crate::browser::types::{
     BrowserPageScreenshotResult, BrowserPageSessionResult, BrowserScreenshotFormat,
     BrowserSelectorKind, ManagedBrowserPageSession, OpenBrowserResult,
 };
-use crate::shared::{
+use codepapr_core::shared::{
     canonical_workspace, normalize_relative_path, parse_browser_url, relative_string,
     resolve_existing_path, run_blocking_workspace_task, unix_millis,
 };
@@ -256,7 +256,7 @@ pub(crate) fn write_browser_binary_file(
     }
 
     // 父目录校验不能覆盖"目标本身是 symlink"的逃逸：写入走拒绝符号链接的闸门
-    crate::shared::write_file_rejecting_symlink(&target, workspace, bytes)?;
+    codepapr_core::shared::write_file_rejecting_symlink(&target, workspace, bytes)?;
     Ok(relative_string(workspace, &target))
 }
 
@@ -741,7 +741,7 @@ pub(crate) fn close_all_browser_pages() {
     for pid in &pids {
         // 整组/整树杀：只 SIGTERM 主进程会让 renderer/gpu/网络等子进程
         // 变成孤儿继续存活，长期占用资源与端口。
-        crate::shell::process_tree::kill_process_group_by_pid(*pid);
+        codepapr_core::shell::process_tree::kill_process_group_by_pid(*pid);
     }
     sessions.clear();
 }

@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::shared::canonical_workspace;
+use codepapr_core::shared::canonical_workspace;
 
 const ENGINE_EMBEDDED: u8 = 0;
 const ENGINE_HEADLESS: u8 = 1;

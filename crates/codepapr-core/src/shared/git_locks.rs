@@ -3,14 +3,14 @@ use std::time::Duration;
 
 /// 锁文件存活超过该阈值才视为崩溃残留。正常的 stage/commit/snapshot 操作秒级
 /// 完成，远小于此值。
-pub(crate) const GIT_LOCK_STALE_AFTER: Duration = Duration::from_secs(300);
+pub const GIT_LOCK_STALE_AFTER: Duration = Duration::from_secs(300);
 
 /// 仅清理「可证明陈旧」的 git 锁文件：正常的 stage/commit/snapshot 操作秒级完成，
 /// 锁文件存活超过该阈值才视为崩溃残留予以删除。旧实现每次打开仓库都无条件
 /// 删除全部锁文件——两个操作并发时（双实例、快照撞提交）会把另一个操作正在
 /// 使用的活锁删掉，导致 index/ref 写到一半被破坏。锁删掉后 libgit2 自身的
 /// index.lock 机制即可保护并发写入者互斥。
-pub(crate) fn remove_stale_git_locks(dot_git: &Path) {
+pub fn remove_stale_git_locks(dot_git: &Path) {
     for lock_name in &["config.lock", "index.lock", "HEAD.lock", "packed-refs.lock"] {
         let lock_file = dot_git.join(lock_name);
         let Ok(meta) = std::fs::metadata(&lock_file) else {

@@ -2,7 +2,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use crate::shared::home_dir;
+use codepapr_core::shared::home_dir;
 
 /// 把文本内容写入用户在保存对话框中选择的路径（主题 JSON 等导出用途）。
 ///
@@ -20,7 +20,7 @@ pub fn export_text_file(
 ) -> Result<(), String> {
     let target = PathBuf::from(&save_path);
     // 策略读取失败时退回空策略（与改造前 `if let Ok` 的静默降级一致）。
-    let policy = crate::db::load_external_access_policy().unwrap_or_default();
+    let policy = codepapr_core::db::load_external_access_policy().unwrap_or_default();
     validate_export_target_with_policy(&target, workspace_path.as_deref(), &policy)?;
     write_export_target(&target, content.as_bytes())
 }
@@ -82,7 +82,7 @@ fn resolve_dir(dir: &Path) -> Result<PathBuf, String> {
 fn validate_export_target_with_policy(
     target: &Path,
     workspace_path: Option<&str>,
-    policy: &crate::db::ExternalAccessPolicy,
+    policy: &codepapr_core::db::ExternalAccessPolicy,
 ) -> Result<(), String> {
     reject_dangerous_segments(target)?;
     let parent = target
@@ -95,7 +95,7 @@ fn validate_export_target_with_policy(
     let home = home_dir()?;
     // macOS 的 ~/Library 存放 Keychain 等敏感数据，即使未隐藏也必须排除。
     #[cfg(target_os = "macos")]
-    if crate::shared::path_is_same_or_child(&resolved_parent, &home.join("Library")) {
+    if codepapr_core::shared::path_is_same_or_child(&resolved_parent, &home.join("Library")) {
         return Err("导出路径不允许位于 ~/Library 内".into());
     }
     allowed_roots.push(home);
@@ -115,7 +115,7 @@ fn validate_export_target_with_policy(
             Ok(c) => c,
             Err(_) => root.clone(),
         };
-        crate::shared::path_is_same_or_child(&resolved_parent, &canon_root)
+        codepapr_core::shared::path_is_same_or_child(&resolved_parent, &canon_root)
     });
     if !inside {
         return Err("导出路径必须位于用户主目录、当前工作区或已授权目录内".into());
@@ -130,7 +130,7 @@ fn validate_export_target_with_policy(
                 Ok(c) => c,
                 Err(_) => root.clone(),
             };
-            crate::shared::path_is_same_or_child(&canon_target, &canon_root)
+            codepapr_core::shared::path_is_same_or_child(&canon_target, &canon_root)
         });
         if !still_inside {
             return Err("导出目标解析后位于允许范围之外".into());
@@ -147,7 +147,7 @@ fn write_export_target(target: &Path, bytes: &[u8]) -> Result<(), String> {
     } else {
         resolve_dir(parent)?
     };
-    crate::shared::write_file_rejecting_symlink(target, &base, bytes)
+    codepapr_core::shared::write_file_rejecting_symlink(target, &base, bytes)
 }
 
 #[cfg(test)]
@@ -160,8 +160,8 @@ mod tests {
 
     /// 空策略：白名单只含主目录/工作区。测试不读真实 app DB，
     /// 保证在任何机器上结果一致（否则本机授权的目录会污染断言）。
-    fn empty_policy() -> crate::db::ExternalAccessPolicy {
-        crate::db::ExternalAccessPolicy::default()
+    fn empty_policy() -> codepapr_core::db::ExternalAccessPolicy {
+        codepapr_core::db::ExternalAccessPolicy::default()
     }
 
     fn check(target: &Path, workspace_path: Option<&str>) -> Result<(), String> {
@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn authorized_external_dir_is_accepted() {
         let tmp = std::env::temp_dir();
-        let policy = crate::db::ExternalAccessPolicy {
+        let policy = codepapr_core::db::ExternalAccessPolicy {
             allowed_dirs: vec![tmp.to_string_lossy().into_owned()],
             ..Default::default()
         };

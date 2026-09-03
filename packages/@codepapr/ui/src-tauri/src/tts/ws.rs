@@ -9,7 +9,7 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::tts_player_lock;
-use crate::shared::lock;
+use codepapr_core::shared::lock;
 use crate::tts::server::GPT_SOVITS_API_PORT;
 
 static WS_APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
@@ -208,7 +208,7 @@ fn insert_and_drain(seq: u64, wav_chunks: Vec<Vec<u8>>, generation: u64) {
     }
     drop(buf);
     let lock = tts_player_lock();
-    let mut player = crate::shared::lock(lock);
+    let mut player = codepapr_core::shared::lock(lock);
     for wav in &to_enqueue {
         let _ = player.enqueue_wav(wav);
     }

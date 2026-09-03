@@ -69,14 +69,14 @@ fn unique_file_name(extension: &str) -> String {
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SaveChatImageResult {
+pub struct SaveChatImageResult {
     /// 工作区相对路径（.CodePapr/chat-images/<name>），持久化进 messages.extras。
     pub(crate) path: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ChatImageEntry {
+pub struct ChatImageEntry {
     pub(crate) path: String,
     pub(crate) media_type: String,
     pub(crate) data: String,
@@ -84,7 +84,7 @@ pub(crate) struct ChatImageEntry {
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct LoadChatImagesResult {
+pub struct LoadChatImagesResult {
     /// 成功读到的图片；缺失/非法/超限的路径不出现在结果中，
     /// 前端按剩余内容展示（图片位缺失，不影响其它消息）。
     pub(crate) images: Vec<ChatImageEntry>,

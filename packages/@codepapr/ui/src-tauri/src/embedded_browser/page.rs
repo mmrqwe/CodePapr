@@ -23,7 +23,7 @@ use crate::embedded_browser::{
     find_session_by_label, get_session, insert_session, js, remove_session, screenshot,
     workspace_key, EmbeddedPageState, EmbeddedSession,
 };
-use crate::shared::{parse_browser_url, unix_millis};
+use codepapr_core::shared::{parse_browser_url, unix_millis};
 
 const DEFAULT_WEBVIEW_WIDTH: f64 = 1280.0;
 const DEFAULT_WEBVIEW_HEIGHT: f64 = 900.0;
@@ -274,7 +274,7 @@ async fn open_or_navigate(
                 destination,
             } = event
             {
-                if let Ok(workspace) = crate::shared::canonical_workspace(&download_workspace) {
+                if let Ok(workspace) = codepapr_core::shared::canonical_workspace(&download_workspace) {
                     let file_name = download_url
                         .path_segments()
                         .and_then(|mut segments| segments.next_back())
@@ -562,7 +562,7 @@ pub(crate) async fn embedded_browser_screenshot(
     let bytes =
         screenshot::capture_webview_screenshot(session.webview.clone(), screenshot_format).await?;
 
-    let workspace = crate::shared::canonical_workspace(&key)?;
+    let workspace = codepapr_core::shared::canonical_workspace(&key)?;
     let path = write_browser_binary_file(
         &workspace,
         relative_path,

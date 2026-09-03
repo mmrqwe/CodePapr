@@ -11,7 +11,7 @@
 //! "用户实际打开过的工作区目录"。禁止把 `$HOME` 等目录外路径作为工作区授权：
 //! 父目录授权会连带暴露其下全部子树（含 `$HOME` 本身）。
 
-use crate::shared::canonical_workspace;
+use codepapr_core::shared::canonical_workspace;
 use tauri::Manager;
 
 /// 工作区授权的最低路径深度：拒绝 `/`、`/Users` 这类父目录被当作工作区传入，

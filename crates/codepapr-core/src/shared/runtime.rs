@@ -10,16 +10,16 @@ const FAST_CHILD_REAP: Duration = Duration::from_millis(200);
 static FAST_CHILD_REAP_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// 进入宿主退出路径：后续 `kill_process_tree` / MCP close 等改用短超时。
-pub(crate) fn enter_fast_child_reap() {
+pub fn enter_fast_child_reap() {
     FAST_CHILD_REAP_ENABLED.store(true, Ordering::SeqCst);
 }
 
-pub(crate) fn is_fast_child_reap() -> bool {
+pub fn is_fast_child_reap() -> bool {
     FAST_CHILD_REAP_ENABLED.load(Ordering::Relaxed)
 }
 
 /// SIGTERM 后等待子进程退出的上限。宿主退出时缩短，避免清理卡住 `RunEvent::Exit`。
-pub(crate) fn child_reap_timeout() -> Duration {
+pub fn child_reap_timeout() -> Duration {
     if is_fast_child_reap() {
         FAST_CHILD_REAP
     } else {

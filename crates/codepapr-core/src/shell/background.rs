@@ -111,7 +111,7 @@ const SHELL_SCRIPT_EXTENSIONS: [&str; 6] = [".sh", ".bash", ".zsh", ".command", 
 pub(crate) static BACKGROUND_PROCESSES: OnceLock<Mutex<HashMap<u32, ManagedBackgroundProcess>>> =
     OnceLock::new();
 
-pub(crate) fn background_processes() -> &'static Mutex<HashMap<u32, ManagedBackgroundProcess>> {
+pub fn background_processes() -> &'static Mutex<HashMap<u32, ManagedBackgroundProcess>> {
     BACKGROUND_PROCESSES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -320,7 +320,7 @@ fn utc_timestamp() -> String {
     )
 }
 
-pub(crate) fn with_background_processes<T>(
+pub fn with_background_processes<T>(
     handler: impl FnOnce(&mut HashMap<u32, ManagedBackgroundProcess>) -> Result<T, String>,
 ) -> Result<T, String> {
     let mut processes = background_processes()

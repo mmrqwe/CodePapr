@@ -7,13 +7,13 @@ use std::{
 /// 只杀直接子进程（shell 包装器）会让真正的工作进程（`npm run dev`、
 /// `vite`、管道下游等）变成孤儿继续运行、占用端口。
 #[cfg(unix)]
-pub(crate) fn prepare_new_process_group(cmd: &mut Command) {
+pub fn prepare_new_process_group(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;
     cmd.process_group(0);
 }
 
 #[cfg(not(unix))]
-pub(crate) fn prepare_new_process_group(_cmd: &mut Command) {}
+pub fn prepare_new_process_group(_cmd: &mut Command) {}
 
 /// Windows：把子进程放进 Job Object（KILL_ON_JOB_CLOSE）。宿主退出时关掉
 /// 泄漏的 job handle，后端进程树一并结束，不依赖 lsof。
@@ -118,7 +118,7 @@ extern "system" {
 
 /// Linux：父进程死后杀子进程，避免宿主崩溃留下占端口的孤儿。
 #[cfg(target_os = "linux")]
-pub(crate) fn prepare_parent_death_signal(cmd: &mut Command) {
+pub fn prepare_parent_death_signal(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;
     unsafe {
         cmd.pre_exec(|| {
@@ -129,14 +129,14 @@ pub(crate) fn prepare_parent_death_signal(cmd: &mut Command) {
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn prepare_parent_death_signal(_cmd: &mut Command) {}
+pub fn prepare_parent_death_signal(_cmd: &mut Command) {}
 
 /// 杀进程组（无 Child 句柄版）：按 pid 对整组先 SIGTERM 再 SIGKILL。
 /// 适用于只有 pid 的场景（如 CDP 浏览器主进程）。同样先 getpgid 确认
 /// 该 pid 是自身进程组组长，绝不用 `kill(-pid)` 误杀调用方所在组；
 /// 非组长则退回只杀该进程自身。
 #[cfg(unix)]
-pub(crate) fn kill_process_group_by_pid(pid: u32) {
+pub fn kill_process_group_by_pid(pid: u32) {
     let pid = pid as libc::pid_t;
     let group_leader = unsafe { libc::getpgid(pid) };
     let target: libc::pid_t = if group_leader == pid { -pid } else { pid };
@@ -158,7 +158,7 @@ pub(crate) fn kill_process_group_by_pid(pid: u32) {
 /// 杀进程树（仅 pid 版，Windows）：`taskkill /T /F` 递归杀整棵树，
 /// 而不是只杀主进程。
 #[cfg(windows)]
-pub(crate) fn kill_process_group_by_pid(pid: u32) {
+pub fn kill_process_group_by_pid(pid: u32) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     let _ = std::process::Command::new("taskkill")
@@ -173,7 +173,7 @@ pub(crate) fn kill_process_group_by_pid(pid: u32) {
 /// 阻塞。应用关闭/退出路径绝不能被清理调用卡住，否则进程残留在后台并触发
 /// macOS「正在后台运行」通知。到截止时间仍未退出则放弃等待（进程已 SIGKILL，
 /// 僵尸会被 init 收养回收）。
-pub(crate) fn wait_for_child_exit(child: &mut Child, timeout: Duration) {
+pub fn wait_for_child_exit(child: &mut Child, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -198,7 +198,7 @@ pub(crate) fn wait_for_child_exit(child: &mut Child, timeout: Duration) {
 /// `kill(-pid, SIG)` 作用于整组。防御性地先用 getpgid 确认组确实归子进程
 /// 所有（绝不误杀自身所在进程组），否则退回只对子进程本身发信号。
 /// Windows：`taskkill /T /F` 递归杀进程树，失败时退回只杀子进程。
-pub(crate) fn kill_process_tree(child: &mut Child) -> std::io::Result<()> {
+pub fn kill_process_tree(child: &mut Child) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         let pid = child.id() as libc::pid_t;

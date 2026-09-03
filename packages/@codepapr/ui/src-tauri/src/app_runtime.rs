@@ -187,8 +187,8 @@ fn skip_app_export_entry(name: &str) -> bool {
 /// 有 package.json 且尚未安装依赖时，在 app 目录跑 `npm install`（允许出站网络）。
 #[tauri::command]
 pub fn install_app_npm_deps(workspace_path: String, app_id: String) -> Result<String, String> {
-    use crate::shared::expanded_path;
-    use crate::shell::sandbox::{sandboxed_command, SandboxAccess};
+    use codepapr_core::shared::expanded_path;
+    use codepapr_core::shell::sandbox::{sandboxed_command, SandboxAccess};
     use std::io::Read;
     use std::process::Stdio;
     use std::time::{Duration, Instant};
@@ -201,7 +201,7 @@ pub fn install_app_npm_deps(workspace_path: String, app_id: String) -> Result<St
         return Ok("skipped: node_modules exists".to_string());
     }
 
-    let workspace = crate::shared::canonical_workspace(&workspace_path)?;
+    let workspace = codepapr_core::shared::canonical_workspace(&workspace_path)?;
     let access = SandboxAccess {
         network: true,
         workspace_write: false,

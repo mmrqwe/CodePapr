@@ -8,7 +8,7 @@ pub fn papr_storage_get(app_id: String, key: String) -> Result<Option<String>, S
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
     permission::check_permission(&manifest, &app_id, "storage:read")?;
-    crate::db::papr_storage_get(&ctx.workspace_path, &app_id, &key)
+    codepapr_core::db::papr_storage_get(&ctx.workspace_path, &app_id, &key)
 }
 
 #[tauri::command]
@@ -16,7 +16,7 @@ pub fn papr_storage_set(app_id: String, key: String, value: String) -> Result<()
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
     permission::check_permission(&manifest, &app_id, "storage:write")?;
-    crate::db::papr_storage_set(&ctx.workspace_path, &app_id, &key, &value)
+    codepapr_core::db::papr_storage_set(&ctx.workspace_path, &app_id, &key, &value)
 }
 
 #[tauri::command]
@@ -24,7 +24,7 @@ pub fn papr_storage_delete(app_id: String, key: String) -> Result<(), String> {
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
     permission::check_permission(&manifest, &app_id, "storage:write")?;
-    crate::db::papr_storage_delete(&ctx.workspace_path, &app_id, &key)
+    codepapr_core::db::papr_storage_delete(&ctx.workspace_path, &app_id, &key)
 }
 
 #[tauri::command]
@@ -32,7 +32,7 @@ pub fn papr_storage_keys(app_id: String) -> Result<Vec<String>, String> {
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
     permission::check_permission(&manifest, &app_id, "storage:read")?;
-    crate::db::papr_storage_keys(&ctx.workspace_path, &app_id)
+    codepapr_core::db::papr_storage_keys(&ctx.workspace_path, &app_id)
 }
 
 /// app_publish 追加结果：seq 供事件排序，ts 供 UI 展示。
@@ -55,7 +55,7 @@ pub fn papr_inbox_append(
     let ctx = crate::papr_runtime::app_context::get(&app_id)?;
     let manifest = crate::papr_runtime::manifest::get_manifest(&app_id)?;
     permission::check_permission(&manifest, &app_id, "storage:write")?;
-    let (seq, ts) = crate::db::papr_inbox_append(
+    let (seq, ts) = codepapr_core::db::papr_inbox_append(
         &ctx.workspace_path,
         &app_id,
         &channel,

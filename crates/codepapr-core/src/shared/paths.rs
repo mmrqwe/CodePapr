@@ -48,7 +48,7 @@ fn join_paths_or_current(paths: Vec<PathBuf>) -> String {
         .unwrap_or_else(|_| env::var("PATH").unwrap_or_default())
 }
 
-pub(crate) fn expanded_path() -> String {
+pub fn expanded_path() -> String {
     EXPANDED_PATH
         .get_or_init(|| {
             #[cfg(target_os = "macos")]
@@ -94,14 +94,14 @@ pub(crate) fn expanded_path() -> String {
 
 /// Parsed user input for a workspace-relative path with optional line/column anchor.
 #[derive(Debug, Clone)]
-pub(crate) struct PathLocationInput {
-    pub(crate) path: String,
-    pub(crate) line: Option<usize>,
-    pub(crate) column: Option<usize>,
+pub struct PathLocationInput {
+    pub path: String,
+    pub line: Option<usize>,
+    pub column: Option<usize>,
 }
 
 /// Resolve the user's home directory from environment variables.
-pub(crate) fn home_dir() -> Result<PathBuf, String> {
+pub fn home_dir() -> Result<PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
         if let Some(profile) = std::env::var_os("USERPROFILE") {
@@ -130,7 +130,7 @@ pub(crate) fn home_dir() -> Result<PathBuf, String> {
 }
 
 /// Canonicalise a workspace path and verify it is a directory.
-pub(crate) fn canonical_workspace(workspace_path: &str) -> Result<PathBuf, String> {
+pub fn canonical_workspace(workspace_path: &str) -> Result<PathBuf, String> {
     let workspace = std::fs::canonicalize(workspace_path)
         .map_err(|err| format!("无法访问项目文件夹: {err}"))?;
     if !workspace.is_dir() {
@@ -163,7 +163,7 @@ fn validate_filename_component(part: &OsStr) -> Result<(), String> {
 }
 
 /// Normalise a relative path, rejecting `..`, absolute paths and prefixes.
-pub(crate) fn normalize_relative_path(relative_path: Option<&str>) -> Result<PathBuf, String> {
+pub fn normalize_relative_path(relative_path: Option<&str>) -> Result<PathBuf, String> {
     let mut normalized = PathBuf::new();
     let raw = relative_path.unwrap_or("").trim();
     if raw.is_empty() || raw == "." {
@@ -189,7 +189,7 @@ pub(crate) fn normalize_relative_path(relative_path: Option<&str>) -> Result<Pat
 
 /// Parse a workspace path input that may contain line/column anchors
 /// (e.g. `src/main.ts#L10C5` or `src/main.ts:10:5`).
-pub(crate) fn parse_workspace_path_input(relative_path: Option<&str>) -> PathLocationInput {
+pub fn parse_workspace_path_input(relative_path: Option<&str>) -> PathLocationInput {
     let raw = relative_path.unwrap_or("").trim();
     if raw.is_empty() {
         return PathLocationInput {
@@ -273,13 +273,13 @@ pub(crate) fn parse_workspace_path_input(relative_path: Option<&str>) -> PathLoc
 }
 
 /// Return only the path component from a workspace path input.
-pub(crate) fn sanitize_workspace_path_input(relative_path: Option<&str>) -> String {
+pub fn sanitize_workspace_path_input(relative_path: Option<&str>) -> String {
     parse_workspace_path_input(relative_path).path
 }
 
 /// Resolve a path against a workspace, canonicalising it and applying the
 /// shared workspace/external access policy after traversal checks.
-pub(crate) fn resolve_existing_path(
+pub fn resolve_existing_path(
     workspace_path: &str,
     relative_path: Option<&str>,
 ) -> Result<(PathBuf, PathBuf), String> {
@@ -315,7 +315,7 @@ const PROTECTED_EXTERNAL_DIRS: &[&str] = &[
     ".CodePapr",
 ];
 
-pub(crate) fn is_protected_external_path(path: &Path) -> bool {
+pub fn is_protected_external_path(path: &Path) -> bool {
     let hidden_protected = path.components().any(|component| match component {
         Component::Normal(name) => PROTECTED_EXTERNAL_DIRS
             .iter()
@@ -354,7 +354,7 @@ fn is_protected_windows_system_path(path: &Path) -> bool {
         .any(|base| path_is_same_or_child(path, base))
 }
 
-pub(crate) fn path_is_same_or_child(path: &Path, base: &Path) -> bool {
+pub fn path_is_same_or_child(path: &Path, base: &Path) -> bool {
     let path_value = path_key(path);
     let base_key = path_key(base);
     if base_key == "/" {
@@ -363,7 +363,7 @@ pub(crate) fn path_is_same_or_child(path: &Path, base: &Path) -> bool {
     path_value == base_key || path_value.starts_with(&(base_key + "/"))
 }
 
-pub(crate) fn path_is_same(path: &Path, base: &Path) -> bool {
+pub fn path_is_same(path: &Path, base: &Path) -> bool {
     path_key(path) == path_key(base)
 }
 
@@ -375,7 +375,7 @@ fn path_key(path: &Path) -> String {
     value.trim_end_matches('/').to_string()
 }
 
-pub(crate) fn ensure_path_accessible(workspace: &Path, target: &Path) -> Result<(), String> {
+pub fn ensure_path_accessible(workspace: &Path, target: &Path) -> Result<(), String> {
     let policy = crate::db::load_external_access_policy()?;
     ensure_path_accessible_with_policy(workspace, target, &policy)
 }
@@ -383,7 +383,7 @@ pub(crate) fn ensure_path_accessible(workspace: &Path, target: &Path) -> Result<
 /// 策略参数化的授权判定核心：工作区内直通；受保护目录一律拒绝；
 /// 其余按 yolo / 已授权目录与文件裁决。供需要批量检查（一次载入策略）
 /// 或单元测试（构造策略）的调用方复用。
-pub(crate) fn ensure_path_accessible_with_policy(
+pub fn ensure_path_accessible_with_policy(
     workspace: &Path,
     target: &Path,
     policy: &crate::db::ExternalAccessPolicy,
@@ -421,7 +421,7 @@ pub(crate) fn ensure_path_accessible_with_policy(
     ))
 }
 
-pub(crate) fn ensure_write_path_accessible(workspace: &Path, target: &Path) -> Result<(), String> {
+pub fn ensure_write_path_accessible(workspace: &Path, target: &Path) -> Result<(), String> {
     if path_is_same_or_child(target, workspace) {
         return Ok(());
     }
@@ -491,7 +491,7 @@ fn reject_symlinked_ancestors(target: &Path, base: &Path) -> Result<(), String> 
 /// 3. 祖先链（base 之下的中间目录）不得含 symlink（防中间目录换入逃逸）；
 /// 4. Unix 上以 O_NOFOLLOW 打开，堵住"检查后、打开前被换入 symlink"的竞态窗口
 ///    （Windows 上创建 symlink 需要特权，回退到普通写入）。
-pub(crate) fn write_file_rejecting_symlink(
+pub fn write_file_rejecting_symlink(
     target: &Path,
     base: &Path,
     bytes: &[u8],
@@ -537,7 +537,7 @@ pub(crate) fn write_file_rejecting_symlink(
 }
 
 /// Convert an absolute path to a workspace-relative forward-slash string.
-pub(crate) fn relative_string(workspace: &Path, path: &Path) -> String {
+pub fn relative_string(workspace: &Path, path: &Path) -> String {
     path.strip_prefix(workspace)
         .unwrap_or(path)
         .to_string_lossy()
@@ -545,7 +545,7 @@ pub(crate) fn relative_string(workspace: &Path, path: &Path) -> String {
 }
 
 /// Normalise an optional workspace filter, canonicalising if present.
-pub(crate) fn normalize_workspace_filter(
+pub fn normalize_workspace_filter(
     workspace_path: Option<String>,
 ) -> Result<Option<String>, String> {
     workspace_path

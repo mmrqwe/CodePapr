@@ -30,7 +30,7 @@ pub(crate) struct WebSearchEntry {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct WebSearchResponse {
+pub struct WebSearchResponse {
     pub(crate) query: String,
     #[serde(rename = "abstract")]
     pub(crate) abstract_text: String,

@@ -1,12 +1,14 @@
 mod handler;
 mod rpc;
+mod tasks;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use clap::Parser;
 use codepapr_core::events::EventSink;
 use rpc::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Parser, Debug)]
 #[command(name = "codepapr-server", about = "CodePapr Host Server / Daemon")]
@@ -19,13 +21,17 @@ struct Cli {
     #[arg(long, default_value_t = true)]
     stdio: bool,
 
-    /// Listen port for TCP (JSON-RPC over TCP)
+    /// Listen port for TCP (JSON-RPC over TCP). Use 0 to bind an ephemeral port.
     #[arg(short, long)]
     port: Option<u16>,
+
+    /// Write the bound TCP port to this file (for desktop/CLI discovery)
+    #[arg(long)]
+    port_file: Option<String>,
 }
 
 struct ChannelEventSink {
-    tx: tokio::sync::mpsc::UnboundedSender<String>,
+    tx: UnboundedSender<String>,
 }
 
 impl EventSink for ChannelEventSink {
@@ -43,23 +49,51 @@ impl EventSink for ChannelEventSink {
     }
 }
 
+/// Fans core events out to every connected TCP client (and stdio).
+struct BroadcastEventSink {
+    clients: Arc<Mutex<Vec<UnboundedSender<String>>>>,
+}
+
+impl EventSink for BroadcastEventSink {
+    fn emit(&self, event: &str, payload: serde_json::Value) {
+        let notif = JsonRpcNotification::new(
+            "event",
+            serde_json::json!({
+                "event": event,
+                "payload": payload,
+            }),
+        );
+        let Ok(line) = serde_json::to_string(&notif) else {
+            return;
+        };
+        let msg = format!("{line}\n");
+        let mut clients = match self.clients.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        clients.retain(|tx| tx.send(msg.clone()).is_ok());
+    }
+}
+
+fn normalize_workspace_path(ws: String) -> String {
+    let p = std::path::PathBuf::from(&ws);
+    let s = std::fs::canonicalize(&p)
+        .map(|c| c.to_string_lossy().to_string())
+        .unwrap_or(ws);
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        stripped.to_string()
+    } else {
+        s
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let workspace = cli.workspace.map(|ws| {
-        let p = std::path::PathBuf::from(&ws);
-        let s = std::fs::canonicalize(&p)
-            .map(|c| c.to_string_lossy().to_string())
-            .unwrap_or(ws);
-        if let Some(stripped) = s.strip_prefix(r"\\?\") {
-            stripped.to_string()
-        } else {
-            s
-        }
-    });
+    let workspace = cli.workspace.map(normalize_workspace_path);
 
     if let Some(port) = cli.port {
-        run_tcp_server(port, workspace).await?;
+        run_tcp_server(port, workspace, cli.port_file).await?;
     } else {
         run_stdio_server(workspace).await?;
     }
@@ -79,6 +113,7 @@ async fn run_stdio_server(workspace: Option<String>) -> Result<(), Box<dyn std::
     });
 
     let sink = Arc::new(ChannelEventSink { tx: tx.clone() });
+    codepapr_core::symbol_provider::register_default_providers();
     let ctx = Arc::new(handler::ServerContext::new(workspace, sink.clone()));
 
     let stdin = tokio::io::stdin();
@@ -131,20 +166,39 @@ async fn run_stdio_server(workspace: Option<String>) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-async fn run_tcp_server(port: u16, workspace: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_tcp_server(
+    port: u16,
+    workspace: Option<String>,
+    port_file: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
-    eprintln!("[codepapr-server] listening on 127.0.0.1:{port}");
+    let bound = listener.local_addr()?;
+    eprintln!("[codepapr-server] listening on {bound}");
+    if let Some(path) = port_file {
+        let _ = std::fs::write(path, bound.port().to_string());
+    }
+
+    let clients: Arc<Mutex<Vec<UnboundedSender<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::new(BroadcastEventSink {
+        clients: Arc::clone(&clients),
+    });
+    codepapr_core::symbol_provider::register_default_providers();
+    let ctx = Arc::new(handler::ServerContext::new(workspace, sink));
 
     loop {
         let (socket, addr) = listener.accept().await?;
         eprintln!("[codepapr-server] client connected: {addr}");
-        let ws = workspace.clone();
+        let ctx = Arc::clone(&ctx);
+        let clients = Arc::clone(&clients);
 
         tokio::spawn(async move {
             let (read_half, mut write_half) = socket.into_split();
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-            // Writer task
+            if let Ok(mut guard) = clients.lock() {
+                guard.push(tx.clone());
+            }
+
             tokio::spawn(async move {
                 while let Some(line) = rx.recv().await {
                     if write_half.write_all(line.as_bytes()).await.is_err() {
@@ -154,8 +208,6 @@ async fn run_tcp_server(port: u16, workspace: Option<String>) -> Result<(), Box<
                 }
             });
 
-            let sink = Arc::new(ChannelEventSink { tx: tx.clone() });
-            let ctx = Arc::new(handler::ServerContext::new(ws, sink));
             let mut reader = BufReader::new(read_half).lines();
 
             while let Ok(Some(line)) = reader.next_line().await {

@@ -1,4 +1,4 @@
-pub(crate) fn truncate_text_to_bytes(content: String, max_bytes: usize) -> (String, bool) {
+pub fn truncate_text_to_bytes(content: String, max_bytes: usize) -> (String, bool) {
     if content.len() <= max_bytes {
         return (content, false);
     }
@@ -52,7 +52,7 @@ fn strip_tag_block(mut html: String, tag: &str) -> String {
     html
 }
 
-pub(crate) fn html_to_text(html: &str) -> String {
+pub fn html_to_text(html: &str) -> String {
     let without_scripts = strip_tag_block(html.to_string(), "script");
     let sanitized = strip_tag_block(without_scripts, "style");
     let mut output = String::with_capacity(sanitized.len());

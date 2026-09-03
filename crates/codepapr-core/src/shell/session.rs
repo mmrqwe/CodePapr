@@ -312,7 +312,7 @@ pub fn close_shell_session(session_id: String) -> Result<ShellCloseSessionResult
     })
 }
 
-pub(crate) fn stop_all_shell_sessions() {
+pub fn stop_all_shell_sessions() {
     // 先在锁内取走全部会话，再在锁外逐个 kill，避免持锁等待进程退出。
     let drained: Vec<ManagedShellSession> = match shell_sessions().lock() {
         Ok(mut sessions) => sessions.drain().map(|(_, session)| session).collect(),

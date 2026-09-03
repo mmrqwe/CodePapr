@@ -1,5 +1,5 @@
 /// Validate and normalise a browser URL (http/https only).
-pub(crate) fn parse_browser_url(raw: &str) -> Result<String, String> {
+pub fn parse_browser_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("URL 不能为空".to_string());

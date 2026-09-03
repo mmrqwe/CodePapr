@@ -86,7 +86,7 @@ pub(crate) fn ssrf_safe_blocking_get(
 ///
 /// 异步客户端：papr_http_get/post 是 async tauri command，绝不能用 blocking
 /// 客户端（会阻塞 tokio worker 线程）。
-pub(crate) fn build_papr_http_client(
+pub fn build_papr_http_client(
     pin: Option<(String, std::net::SocketAddr)>,
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()

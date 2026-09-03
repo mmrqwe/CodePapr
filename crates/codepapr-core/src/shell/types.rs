@@ -125,13 +125,13 @@ pub struct ShellCloseSessionResult {
 }
 
 pub struct ManagedBackgroundProcess {
-    pub(crate) child: Child,
-    pub(crate) command: String,
-    pub(crate) args: Vec<String>,
-    pub(crate) workspace_path: String,
-    pub(crate) started_at: i64,
-    pub(crate) preview_url: Option<String>,
-    pub(crate) log_tail: Arc<Mutex<VecDeque<String>>>,
+    pub child: Child,
+    pub command: String,
+    pub args: Vec<String>,
+    pub workspace_path: String,
+    pub started_at: i64,
+    pub preview_url: Option<String>,
+    pub log_tail: Arc<Mutex<VecDeque<String>>>,
 }
 
 pub struct ManagedShellSession {

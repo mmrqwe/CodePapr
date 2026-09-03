@@ -439,7 +439,7 @@ fn backend_app_dir(args: &[String], cwd: &Path) -> Option<PathBuf> {
 
 /// `cwd` 是进程的实际工作目录：backend_app_dir 按它解析 args 里的相对脚本
 /// 路径。调用方必须传入与 `current_dir` 一致的值，否则沙箱写放行会落错目录。
-pub(crate) fn sandboxed_command(
+pub fn sandboxed_command(
     program: &str,
     args: &[String],
     workspace: &Path,

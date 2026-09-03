@@ -246,7 +246,7 @@ pub fn export_character_card(
 }
 
 fn avatars_dir() -> PathBuf {
-    crate::shared::home_dir()
+    codepapr_core::shared::home_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".codepapr")
         .join("avatars")

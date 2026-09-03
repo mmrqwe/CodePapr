@@ -8,9 +8,9 @@ use base64::Engine;
 use serde::Serialize;
 
 use crate::papr_runtime::permission;
-use crate::shared::{canonical_workspace, parse_browser_url};
-use crate::web::client::build_papr_http_client;
-use crate::web::text::{html_to_text, truncate_text_to_bytes};
+use codepapr_core::shared::{canonical_workspace, parse_browser_url};
+use codepapr_core::web::client::build_papr_http_client;
+use codepapr_core::web::text::{html_to_text, truncate_text_to_bytes};
 
 const MAX_PAPR_HTTP_BYTES: usize = 500_000;
 const PAPR_HTTP_POST_MAX_BYTES: usize = 100_000;
@@ -599,7 +599,7 @@ pub fn papr_fs_write(
     }
 
     // 父目录校验不能覆盖"目标本身是 symlink"的逃逸：写入走拒绝符号链接的闸门
-    crate::shared::write_file_rejecting_symlink(&resolved, &canonical_base, &bytes)?;
+    codepapr_core::shared::write_file_rejecting_symlink(&resolved, &canonical_base, &bytes)?;
 
     Ok(())
 }
@@ -711,7 +711,7 @@ pub fn papr_delete_app(app_id: String) -> Result<(), String> {
         }
     }
 
-    let workspace = crate::shared::canonical_workspace(&ctx.workspace_path)?;
+    let workspace = codepapr_core::shared::canonical_workspace(&ctx.workspace_path)?;
     let app_dir = workspace
         .join(".CodePapr")
         .join("apps")
@@ -734,7 +734,30 @@ fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, 
     let target_url = format!("http://localhost:{}/", port);
     let target_url_no_slash = format!("http://localhost:{}", port);
 
-    crate::shell::background::with_background_processes(|processes| {
+    if let Ok(list) = crate::host::call_blocking(
+        "shell/listBackground",
+        serde_json::json!({ "workspacePath": workspace_path }),
+    ) {
+        let mut stopped = 0usize;
+        if let Some(arr) = list.as_array() {
+            for proc in arr {
+                let pid = proc.get("pid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let url = proc.get("previewUrl").and_then(|v| v.as_str()).unwrap_or("");
+                if pid > 0 && (url == target_url || url == target_url_no_slash) {
+                    let _ = crate::host::call_blocking(
+                        "shell/stopBackground",
+                        serde_json::json!({ "pid": pid, "source": "papr-delete-app" }),
+                    );
+                    stopped += 1;
+                }
+            }
+        }
+        if stopped > 0 {
+            return Ok(stopped);
+        }
+    }
+
+    codepapr_core::shell::background::with_background_processes(|processes| {
         let target_pids: Vec<u32> = processes
             .iter()
             .filter(|(_, p)| p.workspace_path == workspace_path)
@@ -748,7 +771,7 @@ fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, 
             .map(|(pid, _)| *pid)
             .collect();
 
-        let removed: Vec<crate::shell::types::ManagedBackgroundProcess> = target_pids
+        let removed: Vec<codepapr_core::shell::types::ManagedBackgroundProcess> = target_pids
             .into_iter()
             .filter_map(|pid| processes.remove(&pid))
             .collect();
@@ -767,10 +790,10 @@ fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, 
                 Err(_) => true,
             };
             if still_running {
-                let _ = crate::shell::process_tree::kill_process_tree(&mut process.child);
-                crate::shell::process_tree::wait_for_child_exit(
+                let _ = codepapr_core::shell::process_tree::kill_process_tree(&mut process.child);
+                codepapr_core::shell::process_tree::wait_for_child_exit(
                     &mut process.child,
-                    crate::shared::child_reap_timeout(),
+                    codepapr_core::shared::child_reap_timeout(),
                 );
                 stopped += 1;
             }
@@ -786,7 +809,7 @@ mod tests {
     use super::*;
     use crate::papr_runtime::permission::PaprLocalAccess;
     use crate::papr_runtime::manifest;
-    use crate::test_helpers::TestWorkspace;
+    use codepapr_core::test_helpers::TestWorkspace;
 
     #[cfg(unix)]
     fn is_process_alive(pid: u32) -> bool {
@@ -815,9 +838,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn stop_app_backend_processes_kills_whole_tree() {
-        use crate::shell::background::background_processes;
-        use crate::shell::process_tree::prepare_new_process_group;
-        use crate::shell::types::ManagedBackgroundProcess;
+        use codepapr_core::shell::background::background_processes;
+        use codepapr_core::shell::process_tree::prepare_new_process_group;
+        use codepapr_core::shell::types::ManagedBackgroundProcess;
         use std::collections::VecDeque;
         use std::process::{Command, Stdio};
         use std::sync::{Arc, Mutex};
@@ -1132,7 +1155,7 @@ mod tests {
         fs::write(app_dir.join("index.html"), b"<html></html>").unwrap();
 
         papr_fs_write("del-app".into(), "settings.json".into(), r#"{"theme":"dark"}"#.into(), None).unwrap();
-        crate::db::papr_storage_set(&ws.workspace_arg(), "del-app", "k", "v").unwrap();
+        codepapr_core::db::papr_storage_set(&ws.workspace_arg(), "del-app", "k", "v").unwrap();
         assert!(app_dir.join("db.sqlite").exists());
 
         papr_delete_app("del-app".into()).unwrap();

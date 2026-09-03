@@ -31,7 +31,7 @@ use std::sync::Mutex;
 use reqwest::blocking::Client;
 use tauri::Emitter;
 
-use crate::shared::run_blocking_workspace_task;
+use codepapr_core::shared::run_blocking_workspace_task;
 use server::GptSovitsServer;
 
 static TTS_SERVER: std::sync::OnceLock<Mutex<Option<GptSovitsServer>>> = std::sync::OnceLock::new();
@@ -131,14 +131,14 @@ fn last_model_lock() -> &'static Mutex<Option<String>> {
 }
 
 pub(crate) fn default_gpt_sovits_path() -> PathBuf {
-    crate::shared::home_dir()
+    codepapr_core::shared::home_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".codepapr")
         .join("gpt-sovits")
 }
 
 fn voices_dir() -> PathBuf {
-    crate::shared::home_dir()
+    codepapr_core::shared::home_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".codepapr")
         .join("voices")

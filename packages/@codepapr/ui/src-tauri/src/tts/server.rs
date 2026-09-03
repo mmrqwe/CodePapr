@@ -125,8 +125,8 @@ impl GptSovitsServer {
         // Suppress tokenizers parallelism warning.
         cmd.env("TOKENIZERS_PARALLELISM", "false");
 
-        crate::shell::process_tree::prepare_new_process_group(&mut cmd);
-        crate::shell::process_tree::prepare_parent_death_signal(&mut cmd);
+        codepapr_core::shell::process_tree::prepare_new_process_group(&mut cmd);
+        codepapr_core::shell::process_tree::prepare_parent_death_signal(&mut cmd);
 
         // Set LD_LIBRARY_PATH for ffmpeg shared libs if available.
         for lib_dir in &[
@@ -212,10 +212,10 @@ impl GptSovitsServer {
             return Ok(());
         };
 
-        let _ = crate::shell::process_tree::kill_process_tree(child_ref);
-        crate::shell::process_tree::wait_for_child_exit(
+        let _ = codepapr_core::shell::process_tree::kill_process_tree(child_ref);
+        codepapr_core::shell::process_tree::wait_for_child_exit(
             child_ref,
-            crate::shared::child_reap_timeout(),
+            codepapr_core::shared::child_reap_timeout(),
         );
 
         if let Some(mut orphan) = child.take() {
@@ -225,7 +225,7 @@ impl GptSovitsServer {
             let still_running = matches!(orphan.try_wait(), Ok(None) | Err(_));
             if still_running {
                 let _ = orphan.kill();
-                if !crate::shared::is_fast_child_reap() {
+                if !codepapr_core::shared::is_fast_child_reap() {
                     std::thread::spawn(move || {
                         let _ = orphan.wait();
                     });

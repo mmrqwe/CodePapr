@@ -116,16 +116,16 @@ pub struct ProjectStateResult {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalAccessPolicy {
-    pub(crate) yolo: bool,
-    pub(crate) allowed_dirs: Vec<String>,
-    pub(crate) allowed_files: Vec<String>,
+    pub yolo: bool,
+    pub allowed_dirs: Vec<String>,
+    pub allowed_files: Vec<String>,
 }
 
 fn external_access_policy_cache() -> &'static Mutex<Option<(i64, ExternalAccessPolicy)>> {
     EXTERNAL_ACCESS_POLICY_CACHE.get_or_init(|| Mutex::new(None))
 }
 
-pub(crate) fn load_external_access_policy() -> Result<ExternalAccessPolicy, String> {
+pub fn load_external_access_policy() -> Result<ExternalAccessPolicy, String> {
     let cache = external_access_policy_cache();
     if let Some((cached_at, policy)) = cache
         .lock()
@@ -1167,23 +1167,23 @@ static SETTINGS_SAVE_EPOCH: AtomicU64 = AtomicU64::new(0);
 // 直接退出（旧实现对每次退出都无条件忙等满 2 秒）。
 static SETTINGS_SAVE_REQUESTS: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) fn settings_save_epoch() -> u64 {
+pub fn settings_save_epoch() -> u64 {
     SETTINGS_SAVE_EPOCH.load(Ordering::SeqCst)
 }
 
-pub(crate) fn settings_save_requests() -> u64 {
+pub fn settings_save_requests() -> u64 {
     SETTINGS_SAVE_REQUESTS.load(Ordering::SeqCst)
 }
 
 /// 有界等待设置保存纪元推进（退出前 flush 用）。返回 true 表示 epoch 已推进
 /// （一次保存已处理完毕），false 表示超时（前端不可用/无保存发生）。
-pub(crate) fn wait_for_settings_save_epoch(epoch_before: u64, timeout: Duration) -> bool {
+pub fn wait_for_settings_save_epoch(epoch_before: u64, timeout: Duration) -> bool {
     wait_for_epoch(&SETTINGS_SAVE_EPOCH, epoch_before, timeout)
 }
 
 /// 有界等待「出现新的保存请求」（退出前探测用）。返回 true 表示前端已发起
 /// 保存调用，随后才值得等待其完成；false 表示探测窗口内无保存，可立即退出。
-pub(crate) fn wait_for_settings_save_requests(requests_before: u64, timeout: Duration) -> bool {
+pub fn wait_for_settings_save_requests(requests_before: u64, timeout: Duration) -> bool {
     wait_for_epoch(&SETTINGS_SAVE_REQUESTS, requests_before, timeout)
 }
 
@@ -2280,7 +2280,7 @@ pub fn cache_remove(key: String) -> Result<(), String> {
 
 // ── Papr App Storage ─────────────────────────────────────────────────
 
-pub(crate) fn papr_storage_get(
+pub fn papr_storage_get(
     workspace_path: &str,
     app_id: &str,
     key: &str,
@@ -2295,7 +2295,7 @@ pub(crate) fn papr_storage_get(
     .map_err(|err| format!("读取 app_storage 失败: {err}"))
 }
 
-pub(crate) fn papr_storage_set(
+pub fn papr_storage_set(
     workspace_path: &str,
     app_id: &str,
     key: &str,
@@ -2314,7 +2314,7 @@ pub(crate) fn papr_storage_set(
     Ok(())
 }
 
-pub(crate) fn papr_storage_delete(
+pub fn papr_storage_delete(
     workspace_path: &str,
     app_id: &str,
     key: &str,
@@ -2325,7 +2325,7 @@ pub(crate) fn papr_storage_delete(
     Ok(())
 }
 
-pub(crate) fn papr_storage_keys(workspace_path: &str, app_id: &str) -> Result<Vec<String>, String> {
+pub fn papr_storage_keys(workspace_path: &str, app_id: &str) -> Result<Vec<String>, String> {
     let (conn, ..) = open_papr_app_db(workspace_path, app_id)?;
     let mut stmt = conn
         .prepare("SELECT key FROM app_storage ORDER BY key")
@@ -2358,7 +2358,7 @@ pub(crate) const PAPR_INBOX_DEFAULT_CAP: usize = 200;
 ///
 /// 原子性：进程内 Mutex + 跨进程 `BEGIN IMMEDIATE`（WAL 下全局单 writer，
 /// busy_timeout=5000 使竞争方等待而非失败）。
-pub(crate) fn papr_inbox_append(
+pub fn papr_inbox_append(
     workspace_path: &str,
     app_id: &str,
     channel: &str,
@@ -2421,7 +2421,7 @@ pub(crate) fn papr_inbox_append(
 
 // ── Papr App Permission Settings ────────────────────────────────────
 
-pub(crate) fn papr_load_permission_settings() -> Result<Option<String>, String> {
+pub fn papr_load_permission_settings() -> Result<Option<String>, String> {
     let (conn, _) = open_app_db()?;
     conn.query_row(
         "SELECT value FROM settings WHERE key = ?1",
@@ -2435,7 +2435,7 @@ pub(crate) fn papr_load_permission_settings() -> Result<Option<String>, String> 
 // 测试构建下调用方（permission.rs 的 persist_settings）被 #[cfg(not(test))]
 // 排除（避免测试污染真实用户 DB），此处仅在测试 profile 静默。
 #[cfg_attr(test, allow(dead_code))]
-pub(crate) fn papr_save_permission_settings(settings_json: &str) -> Result<(), String> {
+pub fn papr_save_permission_settings(settings_json: &str) -> Result<(), String> {
     let (conn, _) = open_app_db()?;
     conn.execute(
         "INSERT INTO settings (key, value, data_type, updated_at)

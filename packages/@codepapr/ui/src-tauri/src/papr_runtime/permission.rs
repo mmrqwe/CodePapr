@@ -7,7 +7,7 @@ static APP_SETTINGS: OnceLock<Mutex<AppPermissionSettings>> = OnceLock::new();
 
 fn app_settings() -> &'static Mutex<AppPermissionSettings> {
     APP_SETTINGS.get_or_init(|| {
-        let persisted = crate::db::papr_load_permission_settings()
+        let persisted = codepapr_core::db::papr_load_permission_settings()
             .ok()
             .flatten()
             .and_then(|json| serde_json::from_str::<AppPermissionSettings>(&json).ok());
@@ -22,7 +22,7 @@ fn persist_settings(settings: &AppPermissionSettings) {
     // services 的 "test-app" 用例在后续运行中永久失败）。
     #[cfg(not(test))]
     if let Ok(json) = serde_json::to_string(settings) {
-        let _ = crate::db::papr_save_permission_settings(&json);
+        let _ = codepapr_core::db::papr_save_permission_settings(&json);
     }
     #[cfg(test)]
     let _ = settings;

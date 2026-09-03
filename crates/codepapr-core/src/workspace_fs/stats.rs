@@ -575,7 +575,7 @@ pub(crate) struct LargestFile {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ProjectStatsResult {
+pub struct ProjectStatsResult {
     total_files: u64,
     total_directories: u64,
     text_files: u64,
