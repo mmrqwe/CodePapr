@@ -1,6 +1,6 @@
 # 安装、验证与运维
 
-日常交互见 docs/USAGE.md。
+日常交互见 docs/USAGE.md。架构全貌见 docs/ARCHITECTURE.md。
 
 ## 2. 支持环境
 
@@ -10,7 +10,13 @@
 - npm 9+
 - Rust toolchain 和 Cargo
 
-CLI 只需 Node。桌面端、cargo check、打包需要 Rust。浏览器烟测需要本机 Chrome / Chromium。
+**Rust 不是可选项。** 仓库是 Node workspace + Cargo workspace 双栈：
+
+- `crates/codepapr-core`、`crates/codepapr-server`、`crates/codepapr-cli`、`packages/@codepapr/ui/src-tauri` 都是 Rust crate（见根 `Cargo.toml`）；
+- CLI（`codepapr-cli`）是 Rust 二进制，不是 Node 脚本，必须 `cargo build -p codepapr-cli`；
+- 连 `npm run build` 都需要 cargo——`@codepapr/ui` 的 build 是 `typecheck && build:host-server && build:sidecar && build:frontend`，其中 `build:host-server` 会调用 `scripts/prepare-host-server.mjs` 编译 `codepapr-server`。
+
+只有单跑 `npm run lint`、`npm run test`（纯 vitest 部分）这类命令时才不碰 Rust。浏览器烟测需要本机 Chrome / Chromium。
 
 ### 2.2 当前主要开发环境
 
@@ -41,7 +47,7 @@ npm run build
 
 桌面端构建（`cargo check` / `npm run debug` / `release` / `publish`）通过 crates.io 拉取 tree-sitter 及各语言 grammar 的最新兼容版本，不再依赖 `.cargo-vendor/*` 子模块。
 
-如果你只打算阅读源码或使用 CLI，完成这两步通常就够了。
+`npm run build` 已经包含了 `codepapr-server` 的编译，所以这两步跑完你手上就有一个可用的宿主二进制。
 如果你要对仓库做提交级别修改，建议继续跑完整验证。
 
 ### 3.2 安装验收
@@ -55,9 +61,18 @@ npm run verify
 通过这一步，说明当前机器至少满足：
 
 - Node 依赖安装正确
-- workspace build 正常
+- workspace build 正常（含 codepapr-server 编译）
 - workspace tests 正常
 - Tauri cargo check 正常
+
+### 3.3 只要 Rust 侧
+
+```bash
+cargo check --workspace          # core + server + cli + 桌面 crate
+cargo build -p codepapr-server   # 宿主守护进程
+cargo build -p codepapr-cli      # CLI 客户端
+cargo test -p codepapr-core      # 领域库单测，不需要 Tauri
+```
 
 ## 4. 配置与本地运行前提
 
@@ -69,6 +84,12 @@ CodePapr 当前将应用级配置保存在：
 
 其中包括 provider、model、API key、system prompt、语言和采样参数。
 
+> 注意所有权：这个库由 `codepapr-core::db` 打开和写入，也就是**宿主进程（codepapr-server）**在写，桌面端通过 `db/loadSettings`、`db/saveSettings` 等 RPC 访问，不再自己拿着 SQLite 句柄。API key 是例外：明文只在客户端的 Stronghold vault / keyring 里，启动后经 `secrets/import` 单向推给宿主的内存态存储。
+
+全局 App（.papr 插件）安装在：
+
+- ~/.codepapr/apps/&lt;appId&gt;/
+
 角色参考音频和 TTS 语音模型数据保存在：
 
 - ~/.codepapr/voices
@@ -78,19 +99,50 @@ CodePapr 当前将应用级配置保存在：
 
 工作区被打开后，项目级状态保存在：
 
-- <workspace>/.CodePapr
+- &lt;workspace&gt;/.CodePapr
 
-这部分现在主要包括 project.sqlite、项目级 store 和 skills；旧版 state.json / project.json 会在首次打开或保存时自动导入到 SQLite。
+这部分现在主要包括 project.sqlite、项目级 store 和 skills；旧版 state.json / project.json 会在首次打开或保存时自动导入到 SQLite。工作区作用域的 App 装在 `&lt;workspace&gt;/.CodePapr/apps/&lt;appId&gt;/`，同 `appId` 时优先于全局安装。
 
 ### 4.3 真实模型相关前提
 
 以下场景依赖有效模型配置：
 
 - 桌面端实际对话与执行
-- CLI 真实 ask、plan、agent 调用
+- CLI 真实 chat / run 调用
 - smoke:agent-tools
 
 如果只跑 test、verify:ci，通常不需要真实模型凭据。
+
+### 4.4 宿主进程与两个 sidecar
+
+运行期一共会牵扯三个可执行体，别搞混：
+
+| 名字 | 是什么 | 谁编译 / 谁拉起 |
+| --- | --- | --- |
+| `codepapr-server` | Rust 宿主守护进程，Tauri `externalBin` sidecar | `scripts/prepare-host-server.mjs`（`npm run build:host-server`）编译并 stage 到 `src-tauri/binaries`；运行时由桌面端 `host.rs` 拉起 |
+| `agent-runtime.mjs` | Node ESM agent 运行时，Tauri `resources` | `packages/@codepapr/ui/scripts/build-sidecar.mjs`（esbuild）打包；运行时由 **宿主侧** `codepapr-core::agent_runtime` 拉起（桌面端只在 `agent/start` 里把 `resourceDir` 传过去） |
+| `codepapr`（Tauri bin）/ `codepapr-cli` | 客户端 | `cargo` |
+
+桌面端启动宿主的规则（`src-tauri/src/host.rs`）：
+
+1. 设置了 `CODEPAPR_SERVER_URL`（例如 `127.0.0.1:9090`）→ 直接连该地址，**不**拉子进程、退出时也不杀它；
+2. 否则查找二进制：`CODEPAPR_SERVER_BIN` → 与当前可执行文件同目录 → Tauri `resourceDir`（含 `bin/`、`_up_/`）→ `target/{debug,release}` → `../../../../target/{debug,release}` → `PATH`；
+3. 以 `--port 0 --port-file <temp>/codepapr-server-<pid>.port` 拉起，从 port-file 或 stderr 行 `[codepapr-server] listening on <addr>` 拿到实际端口（15s 超时、40ms 轮询）；
+4. 连上后发 `initialize`。
+
+找不到二进制时报错是 `Could not locate 'codepapr-server' binary. Build it with 'cargo build -p codepapr-server' or set CODEPAPR_SERVER_BIN.`
+
+开发时想把宿主拆出来单独调试：
+
+```bash
+# 终端 A：手工起宿主（带工作区默认值）
+cargo run -p codepapr-server -- --port 9090 --workspace /absolute/path/to/workspace
+
+# 终端 B：让桌面端挂上去，而不是自己再拉一个
+CODEPAPR_SERVER_URL=127.0.0.1:9090 npm run debug
+```
+
+不带 `--port` 时 `codepapr-server` 走 stdio 模式，这也是 `codepapr-cli` 在没有 `--server` 时自动拉起的形态。
 
 ## 5. 验证策略
 
@@ -100,16 +152,18 @@ CodePapr 当前的验证链路可以按“范围”和“成本”来理解。
 
 | 命令 | 范围 | 适合场景 |
 | --- | --- | --- |
-| npm run build | 全 workspace 构建 | 改完源码后确认产物可生成（UI 包构建前会先跑 `tsc --noEmit`） |
+| npm run build | 全 workspace 构建（含 codepapr-server 编译 + agent sidecar 打包） | 改完源码后确认产物可生成（UI 包构建前会先跑 `tsc --noEmit`） |
 | npm run test | 全 workspace 测试 | 日常主回归 |
 | npm run test:e2e:ui | Playwright UI E2E | 改到桌面端 UI 组件、Toast、权限对话框、代码审查面板 |
 | npm run test:e2e:ui:install | 安装 Playwright Chromium | 首次运行 UI E2E 或 CI 环境准备 |
 | npm run lint | 静态检查 | 提交前质量门禁 |
 | npm run audit | 依赖安全检查 | 发布前或依赖变更后 |
+| cargo check --workspace | Rust 四个 crate 类型检查 | 改到 core / server / cli / 桌面 crate |
+| cargo test -p codepapr-core | 领域库单测 | 改到 fs / git / shell / lsp / db / snapshot 实现 |
 | CODEPAPR_EXTERNAL_WORKSPACE=/absolute/path/to/workspace npm run smoke:desktop-diagnostics | 外部 workspace 桌面烟测 | 改到工作台项目诊断、文件树、代码预览、本地标记降级 |
 | npm run smoke:lsp-preview | 真实多语言 LSP 烟测 | 改到代码预览的 hover、definition、后台预热，或外部 LSP / 内建 fallback 接线 |
 | npm run verify:ci | lint + audit + build + test | 提交前一键本地检查 |
-| npm run verify | verify:ci + cargo check | 本地最完整验证 |
+| npm run verify | verify:ci + check:tauri | 本地最完整验证 |
 | npm run smoke:agent-tools | 真实模型工具烟测 | 改到工具选择、预览、shell、浏览器交互、project diagnostics 或绝对路径文件读取 |
 
 > `npm run audit` 对注册表不可达默认**按失败处理**（避免网络波动时静默放行含已知漏洞的依赖进入发布链路）。确需离线跳过时，显式设置 `CODEPAPR_AUDIT_SKIP_ON_NETWORK_FAILURE=1`。
@@ -127,6 +181,13 @@ CodePapr 当前的验证链路可以按“范围”和“成本”来理解。
 
 ```bash
 npm run test:e2e:ui:install
+```
+
+如果你改到了 RPC 路由（`crates/codepapr-server/src/handler.rs`）、领域库或桌面端的 RPC 代理，先补：
+
+```bash
+cargo check --workspace
+cargo test -p codepapr-core
 ```
 
 如果你改到了桌面端原生桥接、后台命令、浏览器交互、预览会话或工具选择，再补跑一次：
@@ -157,7 +218,7 @@ npm run smoke:lsp-preview
 npm run test
 ```
 
-这条链路覆盖 core、api、ui 等主路径的 vitest 测试，是最常用的本地回归入口。
+这条链路覆盖 core、api、ui 等主路径的 vitest 测试，是最常用的本地回归入口。注意它不覆盖 Rust 侧，Rust 走 `cargo test`。
 
 #### 完整验证
 
@@ -165,7 +226,7 @@ npm run test
 npm run verify
 ```
 
-这是当前仓库默认的本地发布前验证入口。
+这是当前仓库默认的本地发布前验证入口（`verify:ci` 再加 `check:tauri`）。
 
 #### Agent 工具烟测
 
@@ -183,9 +244,19 @@ npm run smoke:agent-tools
 
 因此它更像本地运维级回归，不是最基础的 CI 门禁。
 
+#### 宿主连通性自检
+
+```bash
+cargo run -p codepapr-cli -- doctor
+cargo run -p codepapr-cli -- ping
+cargo run -p codepapr-cli -- --server 127.0.0.1:9090 server info
+```
+
+`doctor` 即使连不上宿主也会输出环境报告，适合排查“桌面端起不来到底是前端还是宿主的问题”。
+
 #### 桌面端 LSP 检查
 
-代码预览现在会按语言族启动对应的 stdio LSP server，并在同一工作区内按 family 复用 server。默认随 `npm install` 安装的语言族包括：
+代码预览现在会按语言族启动对应的 stdio LSP server，并在同一工作区内按 family 复用 server。LSP 进程由**宿主侧** `codepapr-core::lsp` 管理，桌面端只通过 `lsp/*` RPC 驱动。默认随 `npm install` 安装的语言族包括：
 
 - TypeScript / TSX / JavaScript / JSX
 - HTML / CSS / SCSS / LESS
@@ -200,7 +271,7 @@ npm run check:tauri
 node ./scripts/run-module-bin.mjs typescript/bin/tsc -p packages/@codepapr/ui/tsconfig.json --noEmit
 ```
 
-运行桌面端时至少打开一个 `.ts`/`.tsx`/`.js`/`.jsx`/`.html`/`.css`/`.json`/`.yaml`/`.py` 文件，预览应先尽快显示文件内容；随后只有当前打开文件才会在后台异步懒加载 LSP、符号和 diagnostics，工作区启动本身不应批量触发 `lsp_open_document`、lint、typecheck 或项目诊断。再分别打开 `.cs`、`.rs`、`.java`、`.c` 或 `.cpp`、`.sh` 文件确认：`.cs` 会按优先级依次尝试系统 `csharp-ls`、内置 Roslyn sidecar 和 `omnisharp`，并能跨文件 / 跨项目跳转；`.rs` 会优先接到内置或缓存的 `rust-analyzer`；`.java` / `.c` / `.cpp` 会优先查找打包资源，再回退到托管缓存。代码区不再常驻显示行数、LSP 成功态、静态检查或项目诊断；没有问题就不提示，只有 LSP 不可用、托管安装失败、安装进行中或检测到问题才会显示提示。若上层 server 不可用，CodePapr 会继续回退到内建符号能力；对没有内建 fallback 的语言，预览会明确提示缺哪个 server。
+运行桌面端时至少打开一个 `.ts`/`.tsx`/`.js`/`.jsx`/`.html`/`.css`/`.json`/`.yaml`/`.py` 文件，预览应先尽快显示文件内容；随后只有当前打开文件才会在后台异步懒加载 LSP、符号和 diagnostics，工作区启动本身不应批量触发 `lsp/openDocument`、lint、typecheck 或项目诊断。再分别打开 `.cs`、`.rs`、`.java`、`.c` 或 `.cpp`、`.sh` 文件确认：`.cs` 会按优先级依次尝试系统 `csharp-ls`、内置 Roslyn sidecar 和 `omnisharp`，并能跨文件 / 跨项目跳转；`.rs` 会优先接到内置或缓存的 `rust-analyzer`；`.java` / `.c` / `.cpp` 会优先查找打包资源，再回退到托管缓存。代码区不再常驻显示行数、LSP 成功态、静态检查或项目诊断；没有问题就不提示，只有 LSP 不可用、托管安装失败、安装进行中或检测到问题才会显示提示。若上层 server 不可用，CodePapr 会继续回退到内建符号能力；对没有内建 fallback 的语言，预览会明确提示缺哪个 server。
 
 ## 6. 日常开发运维
 
@@ -215,6 +286,8 @@ npm run debug
 - 缺少 workspace `node_modules` 时会自动执行 `npm install`
 - 缺少或损坏 Rust toolchain（`cargo/rustc` 不可用）时会自动尝试修复或安装
 - release / publish 额外会检查 `.NET SDK`，缺失时自动安装
+
+`packages/@codepapr/ui/scripts/tauri-cli.mjs` 会在 `dev` 和 `build` 两条路径上都先调用 `prepareHostServerBinary()`，所以开发态也能拿到最新编译的 `codepapr-server`——改了 `crates/codepapr-*` 之后重启 `npm run debug` 即可生效，不需要手工 `cargo build`。
 
 如果自动安装失败，通常是网络或代理导致无法访问官方源（例如 `static.rust-lang.org` 或 `dot.net`），排除网络后重新执行同一命令即可继续。
 
@@ -237,6 +310,8 @@ npm run release
 - 改了源码，不一定立刻反映在所有下游验证里
 - 当结果看起来像“没生效”时，先怀疑 build 没补，而不是先怀疑运行时异常
 
+对 Rust 侧同理：改了 `crates/codepapr-core` 或 `crates/codepapr-server` 之后，运行中的桌面端不会热更新宿主；必须重启（或重新 `npm run debug`）让新的 `codepapr-server` 被 stage 和拉起。
+
 推荐做法：
 
 - 改动后先跑 build
@@ -249,6 +324,7 @@ CLI / 烟测工具启动：
 
 ```bash
 npm run smoke:agent-tools
+cargo run -p codepapr-cli -- chat
 ```
 
 桌面端常用启动：
@@ -306,6 +382,8 @@ npm run publish
 - macOS: `./publish-codepapr.command`
 - Windows: `publish-codepapr.cmd`
 
+`tauri.conf.json` 里 `codepapr-server` 是 `externalBin`、`agent-runtime.mjs` 是 `resources`，两者都会被打进安装包，所以最终用户不需要装 Rust 或 Node 也能跑起完整的宿主链路。
+
 桌面端打包现在会在 `tauri build` 前自动清理 `target/*/bundle/macos` 与 `target/*/bundle/dmg` 中残留的 `.dmg` / `rw.*.dmg` 临时产物，避免上一次失败或中断后，下一次 macOS DMG 构建继续被旧产物污染。构建成功后，最终运行文件和安装包会从 Tauri 默认 target 目录同步到仓库根目录 `Release/`，作为统一对外输出目录。
 
 ### 7.4 发布前人工检查建议
@@ -321,10 +399,11 @@ npm run publish
 
 当前仓库没有配置自动化 CI 工作流，所有验证都在本地手动执行：
 
-- `npm run verify`（= `verify:ci` + `cargo check`）是本地最完整的验证，覆盖 lint、audit、build、test 与 Rust 类型检查。
+- `npm run verify`（= `verify:ci` + `check:tauri`）是本地最完整的验证，覆盖 lint、audit、build、test 与 Tauri crate 检查。
+- `cargo check --workspace` / `cargo test -p codepapr-core` 覆盖 Rust 四个 crate。
 - `scripts/release-readiness.mjs` 是发布前文档与关键资源完整性的最后一道静态门禁，由 `npm run release:prep` 调用。
 
-如果后续需要接入 CI，建议至少覆盖：PR 门禁（lint + build + test）、定期依赖安全扫描（audit / cargo audit）、以及打 tag 时的发布前校验。
+如果后续需要接入 CI，建议至少覆盖：PR 门禁（lint + build + test + cargo check）、定期依赖安全扫描（audit / cargo audit）、以及打 tag 时的发布前校验。
 
 ## 9. 运维注意事项
 
@@ -341,6 +420,10 @@ npm run publish
 
 smoke:agent-tools 更适合本地回归，不建议把它当作最基础 CI 门禁，因为它依赖真实模型配置和本机环境。
 
+### 9.4 宿主进程残留
+
+桌面端正常退出时会依次发 `lsp/stopAll`、`agent/stopAll`、`fs/stopWatcher`、`shell/stopAllBackground`、`mcp/disconnectAll`，然后 kill 并回收它自己拉起的 `codepapr-server`。强杀桌面端（或用 `CODEPAPR_SERVER_URL` 挂外部宿主）时不会走这套清理，可能留下宿主进程和它管理的 LSP / shell 子进程，需要手工确认。
+
 ## 10. 常见问题运行手册
 
 ### 10.1 npm install 后某些脚本仍异常
@@ -356,6 +439,7 @@ smoke:agent-tools 更适合本地回归，不建议把它当作最基础 CI 门�
 
 - 是否已经重新 build 受影响包
 - 下游测试是否走了 dist 入口
+- 改的是 Rust 侧的话，桌面端是否重启过（宿主不热更新）
 
 ### 10.3 cargo check 或桌面端调试失败
 
@@ -364,7 +448,16 @@ smoke:agent-tools 更适合本地回归，不建议把它当作最基础 CI 门�
 - Rust toolchain 是否安装完整
 - Cargo 是否在 PATH 中
 
-### 10.4 Agent 工具烟测失败
+### 10.4 桌面端启动后报“codepapr-server 尚未连接”或定位不到二进制
+
+优先排查：
+
+- 是否跑过 `npm run build`（或至少 `npm run build:host-server --workspace=@codepapr/ui` / `cargo build -p codepapr-server`）
+- `CODEPAPR_SERVER_BIN` 指向的路径是否真实存在
+- 设了 `CODEPAPR_SERVER_URL` 但对应端口上没有宿主在听
+- 15 秒内没拿到端口：看桌面端 stderr 里有没有 `[codepapr-server] listening on ...`，以及临时目录里的 `codepapr-server-<pid>.port`
+
+### 10.5 Agent 工具烟测失败
 
 优先排查：
 
