@@ -1,6 +1,6 @@
 # Installation, Verification & Operations
 
-Day-to-day use: docs/USAGE.en.md.
+Day-to-day use: docs/USAGE.en.md. Full architecture: docs/ARCHITECTURE.en.md.
 
 ## 2. Supported Environments
 
@@ -10,7 +10,13 @@ Day-to-day use: docs/USAGE.en.md.
 - npm 9+
 - Rust toolchain and Cargo
 
-CLI needs Node only. Desktop, cargo check, and packaging need Rust. Browser smoke tests need Chrome / Chromium.
+**Rust is not optional.** The repository is a dual stack — an npm workspace plus a Cargo workspace:
+
+- `crates/codepapr-core`, `crates/codepapr-server`, `crates/codepapr-cli`, and `packages/@codepapr/ui/src-tauri` are all Rust crates (see the root `Cargo.toml`);
+- the CLI (`codepapr-cli`) is a Rust binary, not a Node script — build it with `cargo build -p codepapr-cli`;
+- even `npm run build` needs cargo: the `@codepapr/ui` build is `typecheck && build:host-server && build:sidecar && build:frontend`, and `build:host-server` runs `scripts/prepare-host-server.mjs`, which compiles `codepapr-server`.
+
+Only narrow commands such as `npm run lint` or the pure-vitest part of `npm run test` avoid Rust entirely. Browser smoke tests need Chrome / Chromium.
 
 ### 2.2 Current Primary Development Environments
 
@@ -41,7 +47,7 @@ npm run build
 
 The desktop build (`cargo check` / `npm run debug` / `release` / `publish`) pulls tree-sitter and language grammars from crates.io. `.cargo-vendor/*` git submodules are no longer required.
 
-If you only plan to read source or use the CLI, these two steps are usually sufficient. If you plan to make commit-level changes to the repository, continue with full verification.
+`npm run build` already compiles `codepapr-server`, so after these two steps you have a working host binary on disk. If you plan to make commit-level changes to the repository, continue with full verification.
 
 ### 3.2 Installation Acceptance
 
@@ -53,9 +59,18 @@ npm run verify
 
 Passing verifies that your machine meets at least:
 - Node dependencies are correctly installed
-- Workspace build succeeds
+- Workspace build succeeds (including the codepapr-server compile)
 - Workspace tests pass
 - Tauri cargo check succeeds
+
+### 3.3 Rust side only
+
+```bash
+cargo check --workspace          # core + server + cli + desktop crate
+cargo build -p codepapr-server   # host daemon
+cargo build -p codepapr-cli      # CLI client
+cargo test -p codepapr-core      # domain library unit tests, no Tauri needed
+```
 
 ## 4. Configuration & Local Prerequisites
 
@@ -67,6 +82,12 @@ CodePapr currently stores application-level configuration at:
 
 This includes provider, model, API key, system prompt, language, and sampling parameters.
 
+> Ownership note: this database is opened and written by `codepapr-core::db`, i.e. by the **host process (codepapr-server)**. The desktop reaches it through RPC methods such as `db/loadSettings` and `db/saveSettings`; it no longer holds a SQLite handle itself. API keys are the exception: plaintext lives only in the client-side Stronghold vault / keyring and is pushed one-way to the in-memory secret store of the host via `secrets/import` at startup.
+
+Global apps (.papr plugins) are installed at:
+
+- ~/.codepapr/apps/&lt;appId&gt;/
+
 Character reference audio and TTS voice model data are stored at:
 
 - ~/.codepapr/voices
@@ -76,19 +97,50 @@ Character reference audio and TTS voice model data are stored at:
 
 When a workspace is opened, project-level state is stored at:
 
-- <workspace>/.CodePapr
+- &lt;workspace&gt;/.CodePapr
 
-This currently includes project.sqlite, project-level store, and skills; legacy state.json / project.json are auto-imported to SQLite on first open or save.
+This currently includes project.sqlite, project-level store, and skills; legacy state.json / project.json are auto-imported to SQLite on first open or save. Workspace-scoped apps live in `&lt;workspace&gt;/.CodePapr/apps/&lt;appId&gt;/` and take precedence over a global install of the same `appId`.
 
 ### 4.3 Live Model Prerequisites
 
 The following scenarios depend on valid model configuration:
 
 - Desktop actual conversations and execution
-- CLI real ask, plan, agent calls
+- CLI real chat / run calls
 - smoke:agent-tools
 
 Running test and verify:ci typically does not require live model credentials.
+
+### 4.4 The host process and the two sidecars
+
+Three executables are involved at runtime — do not confuse them:
+
+| Name | What it is | Who builds / who launches it |
+| --- | --- | --- |
+| `codepapr-server` | Rust host daemon, a Tauri `externalBin` sidecar | `scripts/prepare-host-server.mjs` (`npm run build:host-server`) compiles and stages it into `src-tauri/binaries`; at runtime the desktop `host.rs` launches it |
+| `agent-runtime.mjs` | Node ESM agent runtime, a Tauri `resources` entry | bundled by `packages/@codepapr/ui/scripts/build-sidecar.mjs` (esbuild); at runtime it is launched by the **host side**, `codepapr-core::agent_runtime` (the desktop only passes `resourceDir` in `agent/start`) |
+| `codepapr` (Tauri bin) / `codepapr-cli` | Clients | `cargo` |
+
+How the desktop brings up the host (`src-tauri/src/host.rs`):
+
+1. If `CODEPAPR_SERVER_URL` is set (e.g. `127.0.0.1:9090`) it connects to that address, **does not** spawn a child, and does not kill it on exit;
+2. otherwise it locates the binary: `CODEPAPR_SERVER_BIN` → next to the current executable → Tauri `resourceDir` (including `bin/` and `_up_/`) → `target/{debug,release}` → `../../../../target/{debug,release}` → `PATH`;
+3. it spawns `--port 0 --port-file <temp>/codepapr-server-<pid>.port` and reads the real port from the port file or from the stderr line `[codepapr-server] listening on <addr>` (15 s deadline, 40 ms poll);
+4. once connected it sends `initialize`.
+
+When the binary cannot be found the error is `Could not locate 'codepapr-server' binary. Build it with 'cargo build -p codepapr-server' or set CODEPAPR_SERVER_BIN.`
+
+To debug the host separately during development:
+
+```bash
+# Terminal A: run the host by hand (with a default workspace)
+cargo run -p codepapr-server -- --port 9090 --workspace /absolute/path/to/workspace
+
+# Terminal B: attach the desktop instead of letting it spawn its own
+CODEPAPR_SERVER_URL=127.0.0.1:9090 npm run debug
+```
+
+Without `--port`, `codepapr-server` runs in stdio mode — the same shape `codepapr-cli` auto-spawns when no `--server` is given.
 
 ## 5. Verification Strategy
 
@@ -98,16 +150,18 @@ CodePapr's current verification pipeline can be understood in terms of "scope" a
 
 | Command | Scope | Best For |
 | --- | --- | --- |
-| npm run build | Full workspace build | Confirming artifacts after source changes (UI package runs `tsc --noEmit` before build) |
+| npm run build | Full workspace build (includes the codepapr-server compile and agent sidecar bundle) | Confirming artifacts after source changes (UI package runs `tsc --noEmit` before build) |
 | npm run test | Full workspace tests | Daily main regression |
 | npm run test:e2e:ui | Playwright UI E2E | Changing desktop UI components, Toast, permissions dialog, code review panel |
 | npm run test:e2e:ui:install | Install Playwright Chromium | First-time UI E2E or CI environment prep |
 | npm run lint | Static analysis | Pre-commit quality gate |
 | npm run audit | Dependency security audit | Before release or after dependency changes |
+| cargo check --workspace | Type check for all four Rust crates | Changing core / server / cli / desktop crate |
+| cargo test -p codepapr-core | Domain library unit tests | Changing fs / git / shell / lsp / db / snapshot implementations |
 | CODEPAPR_EXTERNAL_WORKSPACE=/absolute/path/to/workspace npm run smoke:desktop-diagnostics | External workspace desktop smoke | Changing workbench project diagnostics, file tree, code preview, local marker fallback |
 | npm run smoke:lsp-preview | Real multi-language LSP smoke | Changing code preview hover, definition, background warmup, or external LSP / built-in fallback wiring |
 | npm run verify:ci | lint + audit + build + test | One-shot pre-commit local check |
-| npm run verify | verify:ci + cargo check | Most complete local verification |
+| npm run verify | verify:ci + check:tauri | Most complete local verification |
 | npm run smoke:agent-tools | Live model tool smoke | Changing tool selection, preview, shell, browser interaction, project diagnostics, or absolute path file reading |
 
 > `npm run audit` now **fails by default** when the registry is unreachable (so a transient network issue can't silently pass dependencies with known vulnerabilities into the release path). To skip while offline, explicitly set `CODEPAPR_AUDIT_SKIP_ON_NETWORK_FAILURE=1`.
@@ -125,6 +179,13 @@ Install browser dependencies before first UI E2E run:
 
 ```bash
 npm run test:e2e:ui:install
+```
+
+If you changed the RPC router (`crates/codepapr-server/src/handler.rs`), the domain library, or the RPC proxies on the desktop side, add:
+
+```bash
+cargo check --workspace
+cargo test -p codepapr-core
 ```
 
 If you changed desktop native bridges, background commands, browser interaction, preview sessions, or tool selection, also run:
@@ -155,7 +216,7 @@ This smoke generates small TypeScript, C#, Rust, Java, Python, and C++ projects 
 npm run test
 ```
 
-Covers core, api, ui and other primary path vitest tests. Most commonly used local regression entry point.
+Covers core, api, ui and other primary path vitest tests. Most commonly used local regression entry point. Note it does not cover the Rust side — that is `cargo test`.
 
 #### Full Verification
 
@@ -163,7 +224,7 @@ Covers core, api, ui and other primary path vitest tests. Most commonly used loc
 npm run verify
 ```
 
-Default local pre-release verification entry point for this repository.
+Default local pre-release verification entry point for this repository (`verify:ci` plus `check:tauri`).
 
 #### Agent Tool Smoke
 
@@ -180,9 +241,19 @@ Currently smoke:agent-tools covers 5 required scenarios by default: file search,
 
 This is more of a local operations-level regression, not the most basic CI gate.
 
+#### Host connectivity self-check
+
+```bash
+cargo run -p codepapr-cli -- doctor
+cargo run -p codepapr-cli -- ping
+cargo run -p codepapr-cli -- --server 127.0.0.1:9090 server info
+```
+
+`doctor` still prints an environment report even when it cannot reach a host, which makes it the fastest way to tell whether a desktop startup failure is a frontend problem or a host problem.
+
 #### Desktop LSP Check
 
-Code preview now launches per-language-family stdio LSP servers, reusing them within the same workspace by family. Default language families installed with `npm install` include:
+Code preview launches per-language-family stdio LSP servers, reusing them within the same workspace by family. Those LSP processes are owned by the **host side** (`codepapr-core::lsp`); the desktop only drives them over `lsp/*` RPC. Default language families installed with `npm install` include:
 
 - TypeScript / TSX / JavaScript / JSX
 - HTML / CSS / SCSS / LESS
@@ -197,7 +268,7 @@ npm run check:tauri
 node ./scripts/run-module-bin.mjs typescript/bin/tsc -p packages/@codepapr/ui/tsconfig.json --noEmit
 ```
 
-When running the desktop, open at least one `.ts`/`.tsx`/`.js`/`.jsx`/`.html`/`.css`/`.json`/`.yaml`/`.py` file. The preview should quickly display file content; only the currently open file will then lazily load LSP, symbols, and diagnostics in the background. Workspace startup itself should not batch-trigger `lsp_open_document`, lint, typecheck, or project diagnostics. Then open `.cs`, `.rs`, `.java`, `.c` or `.cpp`, `.sh` files to confirm: `.cs` tries system `csharp-ls`, then built-in Roslyn sidecar, then `omnisharp` by priority, and can cross-file/cross-project jump; `.rs` preferentially uses built-in or cached `rust-analyzer`; `.java`/`.c`/`.cpp` search for packaged resources first, then fall back to managed cache. The code area no longer permanently shows line count, LSP success status, static analysis, or project diagnostics; only prompts when LSP is unavailable, managed installation fails, installation is in progress, or issues are detected. If the upper-layer server is unavailable, CodePapr will continue to fall back to built-in symbol capabilities; for languages without built-in fallback, the preview explicitly notes which server is missing.
+When running the desktop, open at least one `.ts`/`.tsx`/`.js`/`.jsx`/`.html`/`.css`/`.json`/`.yaml`/`.py` file. The preview should quickly display file content; only the currently open file will then lazily load LSP, symbols, and diagnostics in the background. Workspace startup itself should not batch-trigger `lsp/openDocument`, lint, typecheck, or project diagnostics. Then open `.cs`, `.rs`, `.java`, `.c` or `.cpp`, `.sh` files to confirm: `.cs` tries system `csharp-ls`, then built-in Roslyn sidecar, then `omnisharp` by priority, and can cross-file/cross-project jump; `.rs` preferentially uses built-in or cached `rust-analyzer`; `.java`/`.c`/`.cpp` search for packaged resources first, then fall back to managed cache. The code area no longer permanently shows line count, LSP success status, static analysis, or project diagnostics; only prompts when LSP is unavailable, managed installation fails, installation is in progress, or issues are detected. If the upper-layer server is unavailable, CodePapr will continue to fall back to built-in symbol capabilities; for languages without built-in fallback, the preview explicitly notes which server is missing.
 
 ## 6. Daily Development Operations
 
@@ -212,6 +283,8 @@ From the current version, `debug / release / publish` all first run a unified de
 - Auto-runs `npm install` if workspace `node_modules` is missing
 - Auto-attempts to fix or install Rust toolchain if `cargo/rustc` is missing or broken
 - release / publish additionally checks for `.NET SDK` and auto-installs if missing
+
+`packages/@codepapr/ui/scripts/tauri-cli.mjs` calls `prepareHostServerBinary()` on both the `dev` and `build` paths, so dev mode also picks up a freshly compiled `codepapr-server` — after editing `crates/codepapr-*` a restart of `npm run debug` is enough, no manual `cargo build` needed.
 
 If auto-install fails, it's typically network or proxy issues preventing access to official sources (e.g. `static.rust-lang.org` or `dot.net`). After resolving network issues, re-run the same command to continue.
 
@@ -234,6 +307,8 @@ This means:
 - Source changes don't necessarily immediately reflect in all downstream verification
 - When results look like they "didn't take effect", suspect a missing build before suspecting a runtime anomaly
 
+The same applies on the Rust side: after editing `crates/codepapr-core` or `crates/codepapr-server`, a running desktop will not hot-reload the host — restart it (or re-run `npm run debug`) so the new `codepapr-server` is staged and spawned.
+
 Recommended practice:
 
 - Run build after changes
@@ -246,6 +321,7 @@ CLI / Smoke tools launch:
 
 ```bash
 npm run smoke:agent-tools
+cargo run -p codepapr-cli -- chat
 ```
 
 Common desktop launch:
@@ -302,6 +378,8 @@ Or use root directory scripts directly:
 - macOS: `./publish-codepapr.command`
 - Windows: `publish-codepapr.cmd`
 
+In `tauri.conf.json`, `codepapr-server` is an `externalBin` and `agent-runtime.mjs` is a `resources` entry, so both ship inside the installer — end users need neither Rust nor Node to run the full host pipeline.
+
 Desktop packaging now auto-cleans leftover `.dmg` / `rw.*.dmg` artifacts in `target/*/bundle/macos` and `target/*/bundle/dmg` before `tauri build`, preventing contamination from previous failed or interrupted builds. After a successful build, the final runtime files and installers are synced from Tauri's default target directory to the repo root `Release/` directory as the unified output directory.
 
 ### 7.4 Pre-Release Manual Check Suggestions
@@ -316,10 +394,11 @@ Before releasing, confirm:
 
 This repository does not currently configure automated CI workflows; all verification is run locally by hand:
 
-- `npm run verify` (= `verify:ci` + `cargo check`) is the most complete local verification, covering lint, audit, build, test and Rust type checking.
+- `npm run verify` (= `verify:ci` + `check:tauri`) is the most complete local verification, covering lint, audit, build, test and the Tauri crate check.
+- `cargo check --workspace` / `cargo test -p codepapr-core` cover the four Rust crates.
 - `scripts/release-readiness.mjs` is the final static gate for doc and key resource integrity before release, invoked by `npm run release:prep`.
 
-If CI is added later, it should at least cover: a PR gate (lint + build + test), periodic dependency security scans (audit / cargo audit), and pre-release validation on tag push.
+If CI is added later, it should at least cover: a PR gate (lint + build + test + cargo check), periodic dependency security scans (audit / cargo audit), and pre-release validation on tag push.
 
 ## 9. Operational Notes
 
@@ -335,6 +414,10 @@ Browser interaction and screenshot tools currently depend on a detectable Chrome
 
 smoke:agent-tools is better suited for local regression, not as the most basic CI gate, because it depends on live model configuration and local environment.
 
+### 9.4 Leftover host processes
+
+On a clean desktop exit the client sends `lsp/stopAll`, `agent/stopAll`, `fs/stopWatcher`, `shell/stopAllBackground`, `mcp/disconnectAll`, then kills and reaps the `codepapr-server` it spawned. Force-killing the desktop (or attaching to an external host via `CODEPAPR_SERVER_URL`) skips that cleanup and can leave the host process plus the LSP / shell children it manages running — check manually.
+
 ## 10. Troubleshooting Runbook
 
 ### 10.1 Scripts still misbehaving after npm install
@@ -348,6 +431,7 @@ First check:
 First check:
 - Whether affected packages have been rebuilt
 - Whether downstream tests use dist entry points
+- For Rust changes, whether the desktop was restarted (the host does not hot-reload)
 
 ### 10.3 cargo check or desktop debugging fails
 
@@ -355,7 +439,15 @@ First check:
 - Whether Rust toolchain is fully installed
 - Whether Cargo is in PATH
 
-### 10.4 Agent tool smoke fails
+### 10.4 Desktop reports that codepapr-server is not connected, or the binary cannot be located
+
+First check:
+- Whether `npm run build` has been run (or at least `npm run build:host-server --workspace=@codepapr/ui` / `cargo build -p codepapr-server`)
+- Whether the path in `CODEPAPR_SERVER_BIN` actually exists
+- Whether `CODEPAPR_SERVER_URL` is set but nothing is listening on that port
+- If the port never arrives within 15 s: look for `[codepapr-server] listening on ...` in the desktop stderr, and for `codepapr-server-<pid>.port` in the temp directory
+
+### 10.5 Agent tool smoke fails
 
 First check:
 - Whether API key is valid
