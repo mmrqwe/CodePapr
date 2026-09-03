@@ -3,7 +3,6 @@ import {
   DEFAULT_MAX_TOKENS,
   DEEPSEEK_DEFAULT_MAX_TOKENS,
   DEFAULT_MAX_CONTEXT_TOKENS,
-  DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
 } from '@codepapr/api';
 import { normalizeMcpSettings } from '../../utils/mcpTypes';
 import type { ConversationStats, CumulativeStats, ModelProfile, ModelTierStats, Settings } from './types';

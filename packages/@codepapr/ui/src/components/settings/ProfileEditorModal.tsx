@@ -3,7 +3,6 @@ import {
   DEFAULT_MAX_TOKENS,
   DEEPSEEK_DEFAULT_MAX_TOKENS,
   DEFAULT_MAX_CONTEXT_TOKENS,
-  DEEPSEEK_DEFAULT_MAX_CONTEXT_TOKENS,
 } from '@codepapr/api';
 import type { ApiFormat, Lang, ModelProfile } from '../../store/agentStore';
 import type { Translation } from './types';
