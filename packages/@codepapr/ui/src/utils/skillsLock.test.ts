@@ -100,6 +100,12 @@ describe('skillsLock', () => {
     ).toBe(false);
   });
 
+  it('ignores frontmatter name so user-renamed skills never masquerade as market installs', () => {
+    const definitionIds = collectDefinitionIds([{ id: 'my-notes', name: 'search' }]);
+    expect(definitionIds.has('search')).toBe(false);
+    expect(isSkillListingInstalled(SIMPLE_LISTING, emptySkillsLock(), definitionIds)).toBe(false);
+  });
+
   it('stops showing installed after every locked sub-skill is gone', () => {
     const afterDelete = pruneSkillFromLock(
       pruneSkillFromLock(pluginLock(), 'illustrator'),

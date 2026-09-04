@@ -7,6 +7,7 @@ import {
   asSafeSkillName,
   boundedNumber,
   isSkillAvailableToLoad,
+  skillRootFromPath,
 } from '@codepapr/core';
 import { toolByName } from './workspaceToolDefinitions';
 import {
@@ -103,7 +104,7 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
     return {
       ...result,
       skillPath: relativePath,
-      skillRoot: relativePath.replace(/\/SKILL\.md$/i, '').replace(/\.md$/i, ''),
+      skillRoot: skillRootFromPath(relativePath),
     };
   });
 

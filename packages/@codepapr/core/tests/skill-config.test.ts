@@ -5,6 +5,8 @@ import {
   buildSkillsSection,
   isSkillAvailableToLoad,
   parseSkillMarkdown,
+  resolveSkillCatalogName,
+  skillRootFromPath,
 } from '../src/agent/skillConfig';
 
 describe('skillConfig', () => {
@@ -75,5 +77,29 @@ describe('skillConfig', () => {
     expect(skill.enabled).toBeUndefined();
     expect(DEFAULT_SEARCH_SKILL_TEMPLATE).toContain('name: search');
     expect(DEFAULT_SEARCH_SKILL_TEMPLATE).not.toContain('enabled:');
+  });
+
+  it('derives the skill root the same way as the Rust host', () => {
+    expect(skillRootFromPath('.CodePapr/skills/search/SKILL.md')).toBe('.CodePapr/skills/search');
+    expect(skillRootFromPath('.CodePapr/skills/suite/illustrator/SKILL.md')).toBe(
+      '.CodePapr/skills/suite/illustrator'
+    );
+    expect(skillRootFromPath('.CodePapr/skills/notes.md')).toBe('.CodePapr/skills/notes');
+    // 目录名本身以 .md 结尾时不能被二次剥掉（旧实现的正则回归）。
+    expect(skillRootFromPath('.CodePapr/skills/foo.md/SKILL.md')).toBe('.CodePapr/skills/foo.md');
+    expect(skillRootFromPath('.CodePapr\\skills\\search\\SKILL.md')).toBe('.CodePapr/skills/search');
+  });
+
+  it('prefers the loadable id for catalog names', () => {
+    expect(
+      resolveSkillCatalogName({
+        name: '文章配图',
+        description: '',
+        prompt: '',
+        id: 'suite/article-illustrator',
+        displayName: 'article-illustrator',
+      })
+    ).toBe('suite/article-illustrator');
+    expect(resolveSkillCatalogName({ name: 'search', description: '', prompt: '' })).toBe('search');
   });
 });

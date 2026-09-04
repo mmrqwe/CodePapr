@@ -148,13 +148,16 @@ export function serializeSkillsLock(lock: SkillsLockFile): string {
   return `${JSON.stringify({ version: 1, skills: lock.skills }, null, 2)}\n`;
 }
 
+/**
+ * 「已安装」判定与卸载匹配只用磁盘目录 id（安装时写入的路径片段）。
+ * frontmatter `name` 用户可随时改、也可能恰好撞上市场卡片名，
+ * 参与匹配会误报已安装、卸载时误删用户手建的同名 skill。
+ */
 export function collectDefinitionIds(skills: readonly SkillCatalogRef[]): Set<string> {
   const ids = new Set<string>();
   for (const skill of skills) {
     const id = skill.id?.trim();
-    const name = skill.name?.trim();
     if (id) ids.add(id);
-    if (name) ids.add(name);
   }
   return ids;
 }

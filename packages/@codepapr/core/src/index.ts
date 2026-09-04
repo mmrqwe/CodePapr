@@ -315,6 +315,8 @@ export {
   applySkillEnablement,
   isSkillAvailableToLoad,
   buildSkillsSection,
+  skillRootFromPath,
+  resolveSkillCatalogName,
 } from './agent/skillConfig';
 export type { SkillDefinition, SkillEnablementMap } from './agent/skillConfig';
 export {

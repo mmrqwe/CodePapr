@@ -27,4 +27,21 @@ describe('buildMentionItems', () => {
     const items = buildMentionItems(agents, skills, 'zh-CN', false);
     expect(items.map((item) => item.name)).toEqual(['explore', 'helper', 'reviewer']);
   });
+
+  it('mentions skills by loadable catalog id, not the frontmatter name', () => {
+    const skills: SkillDefinition[] = [
+      {
+        name: '文章配图',
+        description: '生成配图',
+        prompt: 'body',
+        id: 'suite/article-illustrator',
+        displayName: 'article-illustrator',
+        enabled: true,
+      },
+      { name: 'search', description: '搜索', prompt: 'body', enabled: true },
+      { name: '停用', description: 'x', prompt: 'body', id: 'off-skill', enabled: false },
+    ];
+    const items = buildMentionItems([], skills, 'zh-CN');
+    expect(items.map((item) => item.name)).toEqual(['suite/article-illustrator', 'search']);
+  });
 });

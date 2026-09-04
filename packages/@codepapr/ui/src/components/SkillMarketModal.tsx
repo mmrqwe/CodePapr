@@ -577,6 +577,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const marketOpQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // #19：toast 定时清除统一入口。旧实现用闭包里的 toastMessage 判断是否
   // 安排清除——首次安装时闭包值为 null，永远不安排 → toast 常驻不消失；
@@ -657,7 +658,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
       });
   }, []);
 
-  const handleInstall = useCallback(async (listing: SkillMarketListing) => {
+  const runInstall = useCallback(async (listing: SkillMarketListing) => {
     if (!workspacePath) {
       showToast(c.noWorkspace);
       return;
@@ -750,6 +751,21 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
     }
   }, [workspacePath, c, showToast, settings.lang]);
 
+  // 安装/卸载串行执行：并发时两个操作各自 load 同一份锁、再先后覆盖写回，
+  // 会丢掉先完成那条卡片的锁条目（文件在磁盘上但市场显示未安装）。
+  const enqueueMarketOp = useCallback((op: () => Promise<void>) => {
+    marketOpQueueRef.current = marketOpQueueRef.current
+      .then(() => op())
+      .catch(() => undefined);
+  }, []);
+
+  const handleInstall = useCallback(
+    (listing: SkillMarketListing) => {
+      enqueueMarketOp(() => runInstall(listing));
+    },
+    [enqueueMarketOp, runInstall]
+  );
+
   const handleRetryInstall = useCallback(
     (listing: SkillMarketListing) => {
       setInstallErrors((prev) => {
@@ -762,7 +778,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
     [handleInstall]
   );
 
-  const handleUninstall = useCallback(async (listing: SkillMarketListing) => {
+  const runUninstall = useCallback(async (listing: SkillMarketListing) => {
     if (!workspacePath) {
       showToast(c.noWorkspace);
       return;
@@ -822,6 +838,13 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
       finish();
     }
   }, [workspacePath, c, showToast, settings.lang, definitionIds]);
+
+  const handleUninstall = useCallback(
+    (listing: SkillMarketListing) => {
+      enqueueMarketOp(() => runUninstall(listing));
+    },
+    [enqueueMarketOp, runUninstall]
+  );
 
   const availableTags = useMemo(() => listSkillTags(listings), [listings]);
 

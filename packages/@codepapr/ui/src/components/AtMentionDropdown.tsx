@@ -8,6 +8,7 @@ import {
   useCallback,
 } from 'react';
 import type { AgentDefinition, SkillDefinition } from '@codepapr/core';
+import { resolveSkillCatalogName } from '@codepapr/core';
 
 export interface AtMentionDropdownHandle {
   navigateDown: () => void;
@@ -60,7 +61,9 @@ export function buildMentionItems(
     .filter((s) => s.enabled !== false)
     .map((s) => ({
       type: 'skill' as const,
-      name: s.name,
+      // 必须用 catalog id（可加载名）：frontmatter name 可能是中文/含空格，
+      // skill_load 的安全校验只接受 ASCII 路径片段，插入后模型无法加载。
+      name: resolveSkillCatalogName(s),
       description: s.description,
     }));
 

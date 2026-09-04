@@ -53,11 +53,13 @@ interface SkillEntryRef extends SkillEntryRefBase {
   skillName: string;
   description: string;
   enabled: boolean;
+  bodyEmpty: boolean;
 }
 
 interface SkillMetadata {
   name: string;
   description: string;
+  promptEmpty: boolean;
 }
 
 type ConfigTab = 'rules' | 'agents' | 'skills' | 'commands';
@@ -148,6 +150,7 @@ function readSkillMetadata(skillId: string, content: string): SkillMetadata {
   return {
     name: resolvedName,
     description: parsed.description.trim() || defaultSkillDescription(resolvedName),
+    promptEmpty: !parsed.prompt.trim(),
   };
 }
 
@@ -236,6 +239,16 @@ function truncatedSkillsListHint(lang?: Lang): string {
     return 'Skill 列表被截斷，部分 Skill 可能未顯示。';
   }
   return 'Skill 列表被截断，部分 Skill 可能未显示。';
+}
+
+function emptySkillBodyHint(lang?: Lang): string {
+  if (lang === 'en') {
+    return 'Body is empty; this skill is not injected into the model catalog.';
+  }
+  if (lang === 'zh-TW') {
+    return '正文為空，不會注入模型 Skill 目錄。';
+  }
+  return '正文为空，不会注入模型 Skill 目录。';
 }
 
 export function ProjectConfigModal({
@@ -395,6 +408,7 @@ export function ProjectConfigModal({
               skillName: metadata.name,
               description: metadata.description,
               enabled: resolveSkillEnabled(entry.id, enabledById),
+              bodyEmpty: metadata.promptEmpty,
             };
           } catch {
             return {
@@ -402,6 +416,7 @@ export function ProjectConfigModal({
               skillName: entry.displayName,
               description: defaultSkillDescription(entry.displayName),
               enabled: resolveSkillEnabled(entry.id, enabledById),
+              bodyEmpty: false,
             };
           }
         })
@@ -1204,6 +1219,11 @@ export function ProjectConfigModal({
                         )}
                       </div>
                       <div className="mt-1 truncate text-[10px] text-fg-muted">{entry.description}</div>
+                      {entry.bodyEmpty && (
+                        <div className="mt-1 text-[10px] leading-snug text-warn">
+                          {emptySkillBodyHint(lang ?? settings.lang)}
+                        </div>
+                      )}
                     </button>
                   ))}
                 </div>

@@ -111,7 +111,8 @@ function parseFrontmatter(raw: string): Frontmatter {
   return { fields, body: body.trim() };
 }
 
-function resolveSkillCatalogName(skill: SkillDefinition): string {
+/** skill_load / @mention 使用的可加载名：优先目录 id。 */
+export function resolveSkillCatalogName(skill: SkillDefinition): string {
   const loadName = skill.id?.trim() || skill.displayName?.trim() || skill.name.trim();
   return loadName || skill.name.trim();
 }
@@ -190,6 +191,23 @@ export function isSkillAvailableToLoad(
     return true;
   }
   return matched.enabled !== false;
+}
+
+/**
+ * Skill 包根目录：`<root>/SKILL.md` 去掉文件名，扁平 `<name>.md` 去掉扩展名。
+ * 与 Rust 侧 `skill_root_from_path` 保持一致（不能用两次正则 replace：
+ * 目录名本身以 .md 结尾时会被多剥一层）。
+ */
+export function skillRootFromPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  const lower = normalized.toLowerCase();
+  if (lower.endsWith('/skill.md')) {
+    return normalized.slice(0, -'/skill.md'.length);
+  }
+  if (lower.endsWith('.md')) {
+    return normalized.slice(0, -'.md'.length);
+  }
+  return normalized;
 }
 
 export function buildSkillsSection(
