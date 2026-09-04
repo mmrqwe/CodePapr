@@ -28,7 +28,7 @@ import {
 import { useAgentStore } from '../store/agentStore';
 import { resolveSkillFilePath } from '../utils/projectConfigLoader';
 import { type WorkspaceToolContext } from './workspaceToolContext';
-import { effectiveCodePaprMode } from './codepaprAgentAccess';
+import { effectiveCodePaprMode, assertAgentCodePaprAccess } from './codepaprAgentAccess';
 
 export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void {
   const {
@@ -154,11 +154,19 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       });
     });
 
-    registry.register(toolByName('web_download_file'), async (args: Record<string, unknown>) => {
+    registry.register(toolByName('web_download_file'), async (args: Record<string, unknown>, context) => {
       const parsed: WebDownloadArgs = {
         url: asHttpOrHttpsUrl(args.url, 'url'),
         relativePath: asOptionalString(args.relativePath),
       };
+      // 下载即写盘：与 write/edit 同一 .CodePapr 闸门，否则 webfetch(save) 可绕过
+      // 覆写 AGENTS.md 等非 app 模式禁写路径。未传 relativePath 时 Rust 侧落到
+      // .CodePapr/downloads（草稿区，闸门放行）。
+      assertAgentCodePaprAccess(
+        parsed.relativePath,
+        'write',
+        effectiveCodePaprMode(options.mode, context?.appAccess)
+      );
 
       const result = await invoke<DownloadFileResult>('download_web_file', {
         workspacePath: workspace(),

@@ -280,6 +280,8 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   'lsp_edit',
   'bash',
   'git',
+  // webfetch(save:true) 经分发器落到 web_download_file：写盘操作，ask 只读必须硬拦。
+  'web_download_file',
   'app_render',
   'app_start',
   'app_stop',

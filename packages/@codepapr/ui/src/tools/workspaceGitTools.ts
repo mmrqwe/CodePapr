@@ -10,13 +10,28 @@ import { type GitHistorySummary, assertValidGitReference } from '@codepapr/commo
 import { toolByName } from './workspaceToolDefinitions';
 import { buildGitUnavailableDiff, type GitDiffSummary } from './workspaceToolUtils';
 import { type WorkspaceToolContext } from './workspaceToolContext';
+import { assertAgentCodePaprAccess, effectiveCodePaprMode, type CodePaprAgentOp } from './codepaprAgentAccess';
 
 export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
   const {
     registry,
     workspace,
     readGitStatus,
+    options,
   } = ctx;
+
+  // pathspec 与 write/edit 走同一 .CodePapr 闸门：否则 `git stage(['.CodePapr/AGENTS.md'])`
+  // 能把运行时内部文件塞进用户仓库提交，而 `bash: git add` 同一路径会被拦——一拦一放不一致。
+  const assertPathspecs = (
+    pathspecs: string[] | undefined,
+    op: CodePaprAgentOp,
+    appAccess?: { allowCodepaprApps?: boolean }
+  ): void => {
+    const mode = effectiveCodePaprMode(options.mode, appAccess);
+    for (const spec of pathspecs ?? []) {
+      assertAgentCodePaprAccess(spec, op, mode);
+    }
+  };
 
   registry.register(toolByName('workspace_git_status'), async () => {
     return await readGitStatus();
@@ -56,9 +71,10 @@ export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
     } satisfies GitHistorySummary;
   });
 
-  registry.register(toolByName('workspace_git_diff'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_git_diff'), async (args: Record<string, unknown>, context) => {
     const staged = asOptionalBoolean(args.staged, 'staged') === true;
     const pathspecs = asOptionalStringArray(args.pathspecs) ?? [];
+    assertPathspecs(pathspecs, 'read', context?.appAccess);
 
     try {
       const result = await invoke<import('../utils/snapshot').GitDiffResult>('git_diff', {
@@ -106,9 +122,10 @@ export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
     }
   });
 
-  registry.register(toolByName('workspace_git_stage'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_git_stage'), async (args: Record<string, unknown>, context) => {
     const all = asOptionalBoolean(args.all, 'all');
     const pathspecs = asOptionalStringArray(args.pathspecs);
+    assertPathspecs(pathspecs, 'write', context?.appAccess);
     // 与工具文档一致：未给 pathspecs 时默认暂存全部，避免 stage({}) 成功但 0 文件。
     const stageAll = all ?? (pathspecs == null || pathspecs.length === 0);
 
@@ -125,10 +142,11 @@ export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
     }
   });
 
-  registry.register(toolByName('workspace_git_commit'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_git_commit'), async (args: Record<string, unknown>, context) => {
     const message = asString(args.message, 'message');
     const stageAll = asOptionalBoolean(args.stageAll, 'stageAll');
     const pathspecs = asOptionalStringArray(args.pathspecs);
+    assertPathspecs(pathspecs, 'write', context?.appAccess);
     const allowEmpty = asOptionalBoolean(args.allowEmpty, 'allowEmpty');
 
     try {
@@ -146,8 +164,9 @@ export function registerWorkspaceGitTools(ctx: WorkspaceToolContext): void {
     }
   });
 
-  registry.register(toolByName('workspace_git_restore'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('workspace_git_restore'), async (args: Record<string, unknown>, context) => {
     const pathspecs = asOptionalStringArray(args.pathspecs);
+    assertPathspecs(pathspecs, 'write', context?.appAccess);
     const source = asOptionalString(args.source);
     const includeUntracked = asOptionalBoolean(args.includeUntracked, 'includeUntracked');
 

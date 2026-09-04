@@ -1,6 +1,13 @@
 use crate::snapshot::types::GitOperationResult;
 use super::open_repo;
 
+/// pathspec 是否触及 `.CodePapr` 目录（任一路径段，大小写不敏感）。
+fn pathspec_touches_codepapr(pathspec: &str) -> bool {
+    pathspec
+        .split(['/', '\\'])
+        .any(|segment| segment.eq_ignore_ascii_case(".codepapr"))
+}
+
 pub fn git_stage_impl(
     workspace: &std::path::Path,
     all: bool,
@@ -46,6 +53,17 @@ pub fn git_stage_impl(
 
         let mut added = 0;
         for path in pathspecs {
+            // 纵深防御：与 all 分支（IgnoreResolver 排除 .CodePapr）同口径，
+            // pathspec 分支也不暂存运行时内部文件，否则 `git stage(['.CodePapr/...'])`
+            // 可把内部状态塞进用户仓库提交。
+            if pathspec_touches_codepapr(path) {
+                return GitOperationResult {
+                    ok: false,
+                    action: "stage".to_string(),
+                    message: format!("{path} 位于 .CodePapr 运行时目录内，不允许暂存/提交"),
+                    backup_ref: None,
+                };
+            }
             let p = crate::snapshot::ignore_resolver::git_relative_path(std::path::Path::new(path));
             if workspace.join(&p).exists() {
                 if let Err(e) = index.add_path(&p) {
@@ -207,6 +225,32 @@ mod tests {
         let gone = diff_result.files.iter().find(|f| f.path == "gone.txt");
         assert!(gone.is_some(), "gone.txt 应出现在 staged diff: {:?}", diff_result.files);
         assert_eq!(gone.unwrap().status, "D", "gone.txt 应为删除状态");
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    // 批次 A（P1-4）：pathspec 分支与 all 分支（IgnoreResolver 排除 .CodePapr）
+    // 同口径，拒绝暂存运行时内部文件。
+    #[test]
+    fn test_stage_rejects_codepapr_pathspec() {
+        let workspace = temp_workspace("codepapr-guard");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+
+        let internal_dir = workspace.join(".CodePapr");
+        fs::create_dir_all(&internal_dir).unwrap();
+        fs::write(internal_dir.join("AGENTS.md"), "clean\n").unwrap();
+        engine.create("baseline").expect("baseline");
+        fs::write(internal_dir.join("AGENTS.md"), "evil\n").unwrap();
+
+        let result = git_stage_impl(&workspace, false, &[".CodePapr/AGENTS.md".to_string()]);
+        assert!(!result.ok, "拒绝 .CodePapr pathspec: {}", result.message);
+        assert!(result.message.contains(".CodePapr"));
+
+        // 大小写与根目录形态同样被拒
+        assert!(pathspec_touches_codepapr(".codepapr/tmp/x"));
+        assert!(pathspec_touches_codepapr("sub\\\\..\\\\.CodePapr\\\\y"));
+        assert!(!pathspec_touches_codepapr("src/main.rs"));
 
         fs::remove_dir_all(&workspace).ok();
     }

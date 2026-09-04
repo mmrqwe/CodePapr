@@ -398,13 +398,19 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
     // （受权限管控）或后端 app 自身的 localhost 服务。CSP 由浏览器引擎执行，
     // JS 无法绕过。CDN 图表库（script-src https:）始终放行——脚本 URL 静态、
     // 且 connect-src/img-src 关闭时外部脚本无法回传数据。
+    // fail-closed：manifest 缓存缺失时按最严档（PaprAccess::NONE）生成 CSP，
+    // 绝不因缓存未命中而裸奔（无 CSP = network:false 承诺失效）。
     let csp: Option<String> = if file_path.ends_with(".html") || file_path.ends_with(".htm") {
-        papr_runtime::manifest::get_manifest(app_id)
-            .ok()
-            .map(|m| {
+        Some(match papr_runtime::manifest::get_manifest(app_id) {
+            Ok(m) => {
                 let access = papr_runtime::permission::resolve_effective_access(&m, app_id);
                 build_app_csp(access, m.port)
-            })
+            }
+            Err(_) => build_app_csp(
+                papr_runtime::permission::PaprAccess::NONE,
+                None,
+            ),
+        })
     } else {
         None
     };

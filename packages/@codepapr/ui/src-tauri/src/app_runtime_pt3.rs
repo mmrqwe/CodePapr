@@ -214,6 +214,45 @@ mod tests {
         // split_once('/') → ("my-app", "")
     }
 
+    #[test]
+    fn register_with_manifest_json_populates_cache() {
+        let tmp = std::env::temp_dir().join(format!("papr-regmanifest-{}", std::process::id()));
+        fs::create_dir_all(&tmp).unwrap();
+
+        // 带合法 manifest_json：注册即写缓存（app_render 后首开不再 "manifest not loaded"）。
+        let manifest = r#"{"spec":"papr/0.1","name":"RegApp","local":"read","network":false}"#;
+        register_app_workspace(
+            "reg-manifest-app".into(),
+            tmp.to_string_lossy().to_string(),
+            Some(manifest.into()),
+        )
+        .expect("register should succeed");
+        let cached = papr_runtime::manifest::get_manifest("reg-manifest-app").expect("manifest cached");
+        assert_eq!(cached.name, "RegApp");
+        assert_eq!(cached.local, Some(papr_runtime::permission::PaprLocalAccess::Read));
+
+        // 非法 spec 拒绝且不动缓存。
+        let bad = register_app_workspace(
+            "reg-manifest-app".into(),
+            tmp.to_string_lossy().to_string(),
+            Some(r#"{"spec":"bad/1.0","name":"X"}"#.into()),
+        );
+        assert!(bad.is_err());
+        assert_eq!(
+            papr_runtime::manifest::get_manifest("reg-manifest-app").unwrap().name,
+            "RegApp"
+        );
+
+        // 不带 manifest_json：保持旧行为（只注册 workspace 映射）。
+        register_app_workspace("reg-nomanifest-app".into(), tmp.to_string_lossy().to_string(), None)
+            .expect("register without manifest ok");
+        assert!(papr_runtime::manifest::get_manifest("reg-nomanifest-app").is_err());
+
+        unregister_app_workspace("reg-manifest-app".into());
+        unregister_app_workspace("reg-nomanifest-app".into());
+        fs::remove_dir_all(&tmp).ok();
+    }
+
     fn workspace_scan(workspace: impl Into<String>) -> Vec<DiscoveredApp> {
         scan_workspace_apps(workspace.into())
             .into_iter()

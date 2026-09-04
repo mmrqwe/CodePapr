@@ -1546,4 +1546,51 @@ describe('Agent .CodePapr isolation', () => {
       build().execute('bash', { command: 'node server.js', workdir: '.CodePapr/apps/demo' }, { appAccess })
     ).resolves.toBeTruthy();
   });
+
+  it('blocks download/screenshot writes into internal .CodePapr in agent mode', async () => {
+    const registry = build();
+    await expect(
+      registry.execute('web_download_file', {
+        url: 'https://example.com/f.md',
+        relativePath: '.CodePapr/AGENTS.md',
+      })
+    ).rejects.toThrow(/运行时管理/);
+    await expect(
+      registry.execute('browser_take_screenshot', { relativePath: '.CodePapr/apps/demo/x.png' })
+    ).rejects.toThrow(/运行时管理/);
+    // webfetch(save) 经分发器落到同一闸门
+    await expect(
+      registry.execute('webfetch', {
+        url: 'https://example.com/f.md',
+        save: true,
+        relativePath: '.CodePapr/AGENTS.md',
+      })
+    ).rejects.toThrow(/运行时管理/);
+    // 草稿区与 app 模式放行
+    await expect(
+      registry.execute('web_download_file', {
+        url: 'https://example.com/f.bin',
+        relativePath: '.CodePapr/downloads/f.bin',
+      })
+    ).resolves.toBeTruthy();
+    await expect(
+      build({ mode: 'app' }).execute('web_download_file', {
+        url: 'https://example.com/i.png',
+        relativePath: '.CodePapr/apps/demo/i.png',
+      })
+    ).resolves.toBeTruthy();
+  });
+
+  it('blocks git pathspecs touching internal .CodePapr in agent mode', async () => {
+    const registry = build();
+    await expect(
+      registry.execute('git', { action: 'stage', pathspecs: ['.CodePapr/AGENTS.md'] })
+    ).rejects.toThrow(/运行时管理/);
+    await expect(
+      registry.execute('git', { action: 'restore', pathspecs: ['.CodePapr/project.sqlite'] })
+    ).rejects.toThrow(/运行时管理/);
+    await expect(
+      registry.execute('git', { action: 'stage', pathspecs: ['src/a.ts'] })
+    ).resolves.toBeTruthy();
+  });
 });

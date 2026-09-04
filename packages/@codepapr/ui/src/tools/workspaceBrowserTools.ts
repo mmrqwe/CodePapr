@@ -33,11 +33,13 @@ import {
 import { usePreviewStore, type PreviewSession } from '../store/previewStore';
 import { useBrowserViewStore } from '../store/browserViewStore';
 import { type WorkspaceToolContext } from './workspaceToolContext';
+import { assertAgentCodePaprAccess, effectiveCodePaprMode } from './codepaprAgentAccess';
 
 export function registerWorkspaceBrowserTools(ctx: WorkspaceToolContext): void {
   const {
     registry,
     workspace,
+    options,
   } = ctx;
 
   registry.register(toolByName('browser_open_preview'), async (args: Record<string, unknown>) => {
@@ -243,7 +245,7 @@ export function registerWorkspaceBrowserTools(ctx: WorkspaceToolContext): void {
     return result;
   });
 
-  registry.register(toolByName('browser_take_screenshot'), async (args: Record<string, unknown>) => {
+  registry.register(toolByName('browser_take_screenshot'), async (args: Record<string, unknown>, context) => {
     const parsed: BrowserScreenshotArgs = {
       relativePath: asOptionalString(args.relativePath),
       selector: asOptionalString(args.selector),
@@ -251,6 +253,12 @@ export function registerWorkspaceBrowserTools(ctx: WorkspaceToolContext): void {
       format: asOptionalString(args.format),
       timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
     };
+    // 截图写盘与 write 同闸门；未传 relativePath 时 Rust 落 .CodePapr/screenshots（草稿区）。
+    assertAgentCodePaprAccess(
+      parsed.relativePath,
+      'write',
+      effectiveCodePaprMode(options.mode, context?.appAccess)
+    );
 
     const result = await invoke<BrowserPageScreenshotResult>('screenshot_browser_page', {
       workspacePath: workspace(),

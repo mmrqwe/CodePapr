@@ -9,6 +9,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import {
+  assertListingPermissions,
+  assertOfficialRawUrl,
   downloadAppFiles,
   extractLocalAssetsFromHtml,
   fetchAppTreeFileList,
@@ -214,5 +216,110 @@ describe('marketAppInstall download and installation strategies', () => {
       scope: 'global',
     });
     expect(res.ok).toBe(true);
+  });
+});
+
+describe('marketAppInstall supply-chain guards', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue('/home/.codepapr/apps/weather-hud');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function sha256Hex(text: string): Promise<string> {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  function stubManifestAndEntry(manifestContent: string) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes('api.github.com')) return { ok: false, status: 403 };
+        if (u.includes('manifest.json')) {
+          return { ok: true, status: 200, text: async () => manifestContent };
+        }
+        if (u.includes('index.html')) {
+          return { ok: true, status: 200, text: async () => '<html>ok</html>' };
+        }
+        return { ok: false, status: 404 };
+      }),
+    );
+  }
+
+  it('rejects listing.directory that escapes the official repo', async () => {
+    await expect(
+      downloadAppFiles({ ...mockListing, directory: '../../../evil/repo/main' }),
+    ).rejects.toThrow(/不合法|遍历/);
+  });
+
+  it('assertOfficialRawUrl blocks cross-repo URLs and allows official ones', () => {
+    expect(() =>
+      assertOfficialRawUrl('https://raw.githubusercontent.com/evil/repo/main/x.js'),
+    ).toThrow(/官方仓库/);
+    expect(() =>
+      assertOfficialRawUrl('https://raw.githubusercontent.com/mmrqwe/codepapr-apps/main/apps/a/manifest.json'),
+    ).not.toThrow();
+  });
+
+  it('aborts install when a declared sha256 does not match', async () => {
+    stubManifestAndEntry('{"spec":"papr/0.1","name":"Weather"}');
+    await expect(
+      downloadAppFiles({
+        ...mockListing,
+        sha256: { 'manifest.json': '00'.repeat(32) },
+      }),
+    ).rejects.toThrow(/校验和不匹配/);
+  });
+
+  it('accepts install when declared sha256 matches', async () => {
+    const manifest = '{"spec":"papr/0.1","name":"Weather"}';
+    stubManifestAndEntry(manifest);
+    const files = await downloadAppFiles({
+      ...mockListing,
+      sha256: { 'manifest.json': await sha256Hex(manifest) },
+    });
+    expect(files.map((f) => f.relativePath)).toContain('manifest.json');
+  });
+
+  it('assertListingPermissions blocks manifest over-granting vs listing', () => {
+    expect(() =>
+      assertListingPermissions(
+        { ...mockListing, permissions: { local: 'read', network: false } },
+        { spec: 'papr/0.1', name: 'X', local: 'write', network: true },
+      ),
+    ).toThrow(/local/);
+    expect(() =>
+      assertListingPermissions(
+        { ...mockListing, permissions: { local: 'write', network: false } },
+        { spec: 'papr/0.1', name: 'X', level: 3 },
+      ),
+    ).toThrow(/网络|local/);
+    expect(() =>
+      assertListingPermissions(
+        { ...mockListing, permissions: { local: 'write', network: true } },
+        { spec: 'papr/0.1', name: 'X', local: 'read', network: false },
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertListingPermissions(mockListing, { spec: 'papr/0.1', name: 'X', local: 'write', network: true }),
+    ).not.toThrow();
+  });
+
+  it('installMarketApp aborts when manifest over-grants vs listing.permissions', async () => {
+    stubManifestAndEntry('{"spec":"papr/0.1","name":"Weather","local":"write","network":true}');
+    const res = await installMarketApp({
+      listing: { ...mockListing, permissions: { local: 'none', network: false } },
+      scope: 'global',
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/local|网络/);
+    expect(invokeMock).not.toHaveBeenCalledWith('papr_install_app_files', expect.anything());
   });
 });

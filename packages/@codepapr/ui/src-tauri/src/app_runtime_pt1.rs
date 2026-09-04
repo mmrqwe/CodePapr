@@ -67,13 +67,29 @@ fn global_apps_dir() -> Result<std::path::PathBuf, String> {
 }
 
 #[tauri::command]
-pub fn register_app_workspace(app_id: String, workspace_path: String) {
+pub fn register_app_workspace(
+    app_id: String,
+    workspace_path: String,
+    manifest_json: Option<String>,
+) -> Result<(), String> {
     if !is_valid_app_id(&app_id) {
-        return;
+        return Err(format!("invalid app id: {app_id}"));
+    }
+    // 注册时同步刷新 manifest 缓存：否则新建/修改后的 app 要等到下一次
+    // scan_workspace_apps 才有缓存，期间协议层 CSP fail-open、papr.db/fs
+    // 全部报 "manifest not loaded"。
+    if let Some(json) = &manifest_json {
+        let manifest: papr_runtime::manifest::PaprManifest =
+            serde_json::from_str(json).map_err(|err| format!("解析 manifest 失败: {err}"))?;
+        if manifest.spec != "papr/0.1" {
+            return Err(format!("不支持的 manifest spec '{}'", manifest.spec));
+        }
+        papr_runtime::manifest::store_manifest(&app_id, manifest);
     }
     let mut map = app_workspaces().lock().unwrap_or_else(|e| e.into_inner());
     map.insert(app_id.clone(), workspace_path.clone());
     papr_runtime::app_context::register(&app_id, &workspace_path);
+    Ok(())
 }
 
 #[tauri::command]

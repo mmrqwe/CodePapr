@@ -3,6 +3,7 @@ import type { AppInstallScope, PaprAppListing } from '../utils/marketAppTypes';
 import { OFFICIAL_APPS_RAW_BASE } from './marketAppApi';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { isPluginApp, pluginIsEnabled, pluginShouldAutostartOverlay } from '../papr/pluginSurface';
+import { legacyLevelToAccess, LOCAL_ORDER, type PaprLocalAccess } from '../papr/levelGrants';
 
 const GITHUB_TREE_API =
   'https://api.github.com/repos/mmrqwe/codepapr-apps/git/trees/main?recursive=1';
@@ -40,6 +41,67 @@ export function sanitizeRelativePath(raw: string): string | null {
   return clean;
 }
 
+/**
+ * directory 消毒 + URL 同源断言：listing.directory 只去首尾斜杠时，
+ * `../../evil/repo/branch` 会被 WHATWG URL 规范化成另一个仓库的 raw 地址，
+ * 让任意 GitHub 内容以"官方市场"名义落盘。这里要求最终 URL 仍钉在
+ * 官方仓库 main 分支路径内，越界即拒装。
+ */
+const OFFICIAL_RAW_ORIGIN = 'https://raw.githubusercontent.com';
+const OFFICIAL_RAW_PATH_PREFIX = '/mmrqwe/codepapr-apps/main/';
+
+export function assertOfficialRawUrl(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`非法的应用下载地址: ${url}`);
+  }
+  if (parsed.origin !== OFFICIAL_RAW_ORIGIN || !parsed.pathname.startsWith(OFFICIAL_RAW_PATH_PREFIX)) {
+    throw new Error(`拒绝下载官方仓库之外的内容: ${url}`);
+  }
+  return url;
+}
+
+function safeNormDirectory(raw: string | undefined): string {
+  const clean = raw ? sanitizeRelativePath(raw) : null;
+  if (!clean) {
+    throw new Error(`应用目录不合法（疑似路径遍历）: ${JSON.stringify(raw)}`);
+  }
+  return clean.replace(/\/+$/, '');
+}
+
+function officialRawUrl(normDir: string, rel: string): string {
+  return assertOfficialRawUrl(`${OFFICIAL_APPS_RAW_BASE}/${normDir}/${rel}`);
+}
+
+/** 内容 SHA-256（hex）。crypto.subtle 缺失时返回 null，由调用方 fail-closed。 */
+async function sha256Hex(content: string): Promise<string | null> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return null;
+  const digest = await subtle.digest('SHA-256', new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/** 完整性校验：listing.sha256 声明了该文件就必须匹配，否则中止安装。 */
+async function verifyFileIntegrity(
+  rel: string,
+  content: string,
+  expected: Record<string, string> | undefined,
+): Promise<void> {
+  const want = expected?.[rel]?.toLowerCase();
+  if (!want) return;
+  const got = await sha256Hex(content);
+  if (!got) {
+    throw new Error(`无法校验文件完整性（crypto.subtle 不可用）: ${rel}`);
+  }
+  if (got !== want) {
+    throw new Error(`文件校验和不匹配 (${rel}): 期望 ${want}，实际 ${got}`);
+  }
+}
+
 /** 从 HTML 源码中智能解析引用的本地相对资源 (JS / CSS / 图片 / 字体等) */
 export function extractLocalAssetsFromHtml(html: string): string[] {
   if (!html || typeof html !== 'string') return [];
@@ -72,7 +134,12 @@ export function extractLocalAssetsFromHtml(html: string): string[] {
 
 /** 从 GitHub Git Tree API 动态解析应用目录下的所有文件 */
 export async function fetchAppTreeFileList(appDirectory: string): Promise<string[] | null> {
-  const normDir = appDirectory.replace(/^\/+|\/+$/g, '');
+  let normDir: string;
+  try {
+    normDir = safeNormDirectory(appDirectory);
+  } catch {
+    return null;
+  }
   try {
     const res = await fetch(GITHUB_TREE_API, {
       headers: { Accept: 'application/json' },
@@ -100,8 +167,9 @@ export async function fetchAppTreeFileList(appDirectory: string): Promise<string
 export async function downloadAppFiles(
   listing: PaprAppListing,
 ): Promise<AppInstallFile[]> {
-  const normDir = listing.directory.replace(/^\/+|\/+$/g, '');
+  const normDir = safeNormDirectory(listing.directory);
   const entryFile = sanitizeRelativePath(listing.entry || 'index.html') || 'index.html';
+  const expectedHashes = listing.sha256;
 
   if (Array.isArray(listing.files) && listing.files.length > 0) {
     const explicitFiles = Array.from(
@@ -113,7 +181,7 @@ export async function downloadAppFiles(
     );
     const downloaded: AppInstallFile[] = [];
     for (const rel of explicitFiles) {
-      const url = `${OFFICIAL_APPS_RAW_BASE}/${normDir}/${rel}`;
+      const url = officialRawUrl(normDir, rel);
       const res = await fetch(url, { headers: { Accept: 'text/plain' } });
       if (!res.ok) {
         if (rel === 'manifest.json' || rel === entryFile) {
@@ -122,6 +190,7 @@ export async function downloadAppFiles(
         continue;
       }
       const content = await res.text();
+      await verifyFileIntegrity(rel, content, expectedHashes);
       downloaded.push({ relativePath: rel, content });
     }
     if (downloaded.length > 0) return downloaded;
@@ -131,7 +200,7 @@ export async function downloadAppFiles(
   if (treeFiles && treeFiles.length > 0) {
     const downloaded: AppInstallFile[] = [];
     for (const rel of treeFiles) {
-      const url = `${OFFICIAL_APPS_RAW_BASE}/${normDir}/${rel}`;
+      const url = officialRawUrl(normDir, rel);
       const res = await fetch(url, { headers: { Accept: 'text/plain' } });
       if (!res.ok) {
         if (rel === 'manifest.json' || rel === entryFile) {
@@ -140,6 +209,7 @@ export async function downloadAppFiles(
         continue;
       }
       const content = await res.text();
+      await verifyFileIntegrity(rel, content, expectedHashes);
       downloaded.push({ relativePath: rel, content });
     }
     if (downloaded.length > 0) return downloaded;
@@ -150,7 +220,7 @@ export async function downloadAppFiles(
 
   for (const rel of queue) {
     if (downloadedMap.has(rel)) continue;
-    const url = `${OFFICIAL_APPS_RAW_BASE}/${normDir}/${rel}`;
+    const url = officialRawUrl(normDir, rel);
     try {
       const res = await fetch(url, { headers: { Accept: 'text/plain' } });
       if (!res.ok) {
@@ -160,6 +230,7 @@ export async function downloadAppFiles(
         continue;
       }
       const content = await res.text();
+      await verifyFileIntegrity(rel, content, expectedHashes);
       downloadedMap.set(rel, content);
 
       if (rel.endsWith('.html') || rel.endsWith('.htm')) {
@@ -188,6 +259,34 @@ export async function downloadAppFiles(
   return downloaded;
 }
 
+/** 安装前反欺骗校验：下载回来的 manifest.json 自声明权限不得超出市场条目
+ *  向用户展示的 permissions。否则市场卡片显示"离线/无本地访问"，装完却是
+ *  local:write + network:true——声明与契约脱钩。 */
+export function assertListingPermissions(
+  listing: PaprAppListing,
+  manifest: Record<string, unknown>,
+): void {
+  const declared = listing.permissions;
+  if (!declared) return;
+  const legacy =
+    typeof manifest.level === 'number' ? legacyLevelToAccess(manifest.level) : null;
+  const local =
+    manifest.local === 'none' || manifest.local === 'read' || manifest.local === 'write'
+      ? manifest.local
+      : legacy?.local;
+  const network =
+    typeof manifest.network === 'boolean' ? manifest.network : legacy?.network ?? false;
+  const rank = (l: PaprLocalAccess) => LOCAL_ORDER.indexOf(l);
+  if (declared.local && local && rank(local) > rank(declared.local)) {
+    throw new Error(
+      `manifest 声明 local:"${local}" 超出市场条目标注的 "${declared.local}"，已中止安装`,
+    );
+  }
+  if (declared.network === false && network) {
+    throw new Error('manifest 声明需要网络，但市场条目标注为离线，已中止安装');
+  }
+}
+
 export async function installMarketApp(options: {
   listing: PaprAppListing;
   scope: AppInstallScope;
@@ -201,6 +300,15 @@ export async function installMarketApp(options: {
 
   try {
     const files = await downloadAppFiles(listing);
+
+    // 落盘前反欺骗：manifest 自声明权限 ⊆ 市场条目展示权限。
+    const manifestFileForCheck = files.find((f) => f.relativePath === 'manifest.json');
+    if (manifestFileForCheck) {
+      assertListingPermissions(
+        listing,
+        JSON.parse(manifestFileForCheck.content) as Record<string, unknown>,
+      );
+    }
 
     const targetDir = await invoke<string>('papr_install_app_files', {
       workspacePath: workspacePath || null,
@@ -230,6 +338,7 @@ export async function installMarketApp(options: {
             await invoke('register_app_workspace', {
               appId: app.app_id,
               workspacePath,
+              manifestJson: app.manifest_json ?? undefined,
             });
             break;
           }

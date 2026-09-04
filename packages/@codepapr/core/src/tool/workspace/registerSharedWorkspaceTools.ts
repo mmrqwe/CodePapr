@@ -103,7 +103,7 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
   });
 
   // ──── Git ────
-  registry.register(findTool('git'), async (args) => {
+  registry.register(findTool('git'), async (args, context) => {
     const a = asString(args.action, 'action');
     const m: Record<string, string> = {
       status: 'workspace_git_status',
@@ -117,7 +117,7 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
     };
     const target = m[a];
     if (!target) throw new Error(`未知的 git action: ${a}`);
-    return await registry.execute(target, args);
+    return await registry.execute(target, args, context);
   });
 
   // ──── bash：shell 命令执行 + 后台进程管理 ────
@@ -146,17 +146,22 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
 
   // ──── Web ────
   // websearch 是原生细粒度工具，直接对 LLM 可见，不需要额外分发器
-  registry.register(findTool('webfetch'), async (args) => {
+  registry.register(findTool('webfetch'), async (args, context) => {
     if (args.save === true) {
+      // save 分支是写盘操作：ask 只读模式下 web_download_file 的 handler 未注册
+      // （MUTATING_TOOL_NAMES 硬拦），这里给出明确报错而非 "tool not found"。
+      if (!registry.has('web_download_file')) {
+        throw new Error('当前为只读模式，webfetch 不能保存文件（save 不可用）。');
+      }
       return await registry.execute('web_download_file', {
         url: args.url,
         relativePath: args.relativePath,
-      });
+      }, context);
     }
     return await registry.execute('web_fetch_url', {
       url: args.url,
       maxBytes: args.maxBytes,
-    });
+    }, context);
   });
 
   // ──── 辅助 ────

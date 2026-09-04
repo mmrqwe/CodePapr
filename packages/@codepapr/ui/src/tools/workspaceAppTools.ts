@@ -397,6 +397,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     await invoke('register_app_workspace', {
       appId: rawAppId,
       workspacePath: workspace(),
+      manifestJson: JSON.stringify(manifest),
     });
 
     useAppRuntimeStore.getState().mountApp({
