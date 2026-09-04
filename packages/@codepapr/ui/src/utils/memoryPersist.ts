@@ -9,10 +9,11 @@ import {
   buildMemoryCandidateInput,
   decideMemoryCandidate,
 } from './memoryLedger';
-import { admitMemoryCandidate, saveMemoryCandidate } from './projectStorage';
+import { admitMemoryCandidate, loadMemoryEntries, saveMemoryCandidate } from './projectStorage';
 
 export interface PersistMemoryResult {
   status: 'saved' | 'stored-as-citation' | 'duplicate' | 'dropped';
+  /** 可直接交给 memory_forget 的 entry id（非候选 id）。dropped 时为空串。 */
   id: string;
   kind?: string;
   projectToBootstrap?: boolean;
@@ -56,18 +57,30 @@ export async function persistMemoryProposal(params: {
   }
 
   if (!inserted) {
+    // 去重命中：找到既有 active entry，返回可直接 forget 的 entry id。
+    let duplicateEntryId = '';
+    try {
+      const entries = await loadMemoryEntries(params.workspacePath, true);
+      duplicateEntryId = entries.find((entry) => entry.contentHash === input.contentHash)?.id ?? '';
+    } catch {
+      // 查不到就退回空 id：好过返回一个不可 forget 的候选 id。
+    }
     return {
       status: 'duplicate',
-      id: input.id,
+      id: duplicateEntryId,
       kind: decision.kind,
       projectToBootstrap: decision.projectToBootstrap,
       redacted,
-      note: '相同内容已存在，未重复写入。',
+      note: duplicateEntryId
+        ? '相同内容已存在，未重复写入。如需遗忘，用返回的 id 调 memory_forget。'
+        : '相同内容已存在，未重复写入。',
     };
   }
 
+  let entryId: string;
   try {
-    await admitMemoryCandidate(params.workspacePath, input.id, createId());
+    // admit 返回真正落库的 entry id（同内容 active 时幂等返回既有 id）。
+    entryId = await admitMemoryCandidate(params.workspacePath, input.id, createId());
   } catch (err) {
     throw new Error(`记忆写入失败: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -75,7 +88,7 @@ export async function persistMemoryProposal(params: {
   const citation = decision.kind === 'citation';
   return {
     status: citation ? 'stored-as-citation' : 'saved',
-    id: input.id,
+    id: entryId,
     kind: decision.kind,
     projectToBootstrap: decision.projectToBootstrap,
     redacted,

@@ -865,13 +865,49 @@ fn language_id_for(path: &str, args: &Value) -> Result<String, String> {
     }
     lsp_language_from_path(path)
         .map(str::to_string)
-        .ok_or_else(|| format!("无法从路径推断 languageId: {path}"))
+        .ok_or_else(|| {
+            let extension = path
+                .rsplit(['/', '\\'])
+                .next()
+                .and_then(|name| name.rsplit_once('.'))
+                .map(|(_, ext)| format!("扩展名 `.{ext}` 的文件"))
+                .unwrap_or_else(|| "该路径（无文件扩展名）".to_string());
+            format!(
+                "{extension}没有对应的语言服务，LSP 导航/格式化/诊断不可用（支持：ts/tsx、js/jsx、rs、py、go、java、c/cpp、cs、html、css/scss/less、json、yaml、md、sh、sql、swift）。读取内容请改用 read 工具。"
+            )
+        })
+}
+
+fn json_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }
 
 fn require_path(args: &Value) -> Result<String, String> {
-    arg_string(args, "relativePath")
-        .or_else(|| arg_string(args, "path"))
-        .ok_or_else(|| "relativePath 必须是字符串".to_string())
+    for key in ["relativePath", "path"] {
+        match args.get(key) {
+            None | Some(Value::Null) => continue,
+            Some(Value::String(value)) if value.trim().is_empty() => {
+                return Err(format!(
+                    "{key} 不能为空字符串，请传入文件的相对路径，如 \"src/main.ts\""
+                ));
+            }
+            Some(Value::String(value)) => return Ok(value.trim().to_string()),
+            Some(value) => {
+                return Err(format!(
+                    "{key} 必须是非空字符串（实际类型: {}），请传入文件的相对路径，如 \"src/main.ts\"",
+                    json_type_name(value)
+                ));
+            }
+        }
+    }
+    Err("缺少 relativePath 参数：需要文件的相对路径，如 \"src/main.ts\"".to_string())
 }
 
 fn arg_string(args: &Value, key: &str) -> Option<String> {
@@ -1140,5 +1176,37 @@ mod tests {
     fn utf16_offset_handles_ascii() {
         assert_eq!(utf16_to_byte("ab\ncd", 1, 1), 4);
         assert_eq!(utf16_to_byte("hello", 0, 2), 2);
+    }
+
+    #[test]
+    fn require_path_rejects_missing_with_clear_hint() {
+        let err = require_path(&json!({ "action": "hover" })).unwrap_err();
+        assert!(err.contains("缺少 relativePath"), "{err}");
+    }
+
+    #[test]
+    fn require_path_reports_actual_type_for_broken_shape() {
+        let err = require_path(&json!({ "relativePath": 7 })).unwrap_err();
+        assert!(err.contains("number"), "{err}");
+        assert!(err.contains("src/main.ts"), "{err}");
+    }
+
+    #[test]
+    fn require_path_falls_back_to_path_key() {
+        assert_eq!(
+            require_path(&json!({ "path": " a/b.ts " })).unwrap(),
+            "a/b.ts"
+        );
+    }
+
+    #[test]
+    fn language_id_for_unsupported_extension_gives_friendly_message() {
+        let err = language_id_for("notes.txt", &json!({})).unwrap_err();
+        assert!(err.contains(".txt"), "{err}");
+        assert!(err.contains("语言服务"), "{err}");
+        assert!(!err.contains("languageId"), "{err}");
+        let explicit =
+            language_id_for("notes.txt", &json!({ "languageId": "plaintext" })).unwrap();
+        assert_eq!(explicit, "plaintext");
     }
 }

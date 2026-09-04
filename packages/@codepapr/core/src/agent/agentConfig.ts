@@ -695,6 +695,7 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 - **lsp (action: workspaceSymbol, relativePath+query)** — Search symbols across the whole workspace
 - **lsp (action: goToImplementation, relativePath+line)** — Jump to interface/abstract class implementations
 - **lsp (action: incomingCalls | outgoingCalls, relativePath+line)** — Call hierarchy (callers / callees)
+- **lsp parameter rule** — \`relativePath\` is always a non-empty string relative file path (e.g. \`"src/main.ts"\`), never a number/array/object. If an lsp step fails, retry with \`grep\`/\`read\` and report the failed step honestly in your final output.
 - **diagnostics** — Query file or project LSP diagnostics (to check if code currently has errors)
 - **read** — Read file content (after lsp/list gives you file+line, precisely read relevant lines)
 - **grep** — Regex search file content. Default tool for finding text/identifiers/usages; use lsp/graph for cross-module references & impact

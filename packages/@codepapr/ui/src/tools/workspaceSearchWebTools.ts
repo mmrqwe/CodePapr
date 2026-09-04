@@ -93,8 +93,9 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       throw new Error(`Skill 不存在: ${parsed.name}`);
     }
     const { _skillDefinitions } = useAgentStore.getState();
+    // 停用的 Skill 对 Agent 完全不可见：报「不存在」而非「已停用」，避免泄漏停用状态。
     if (!isSkillAvailableToLoad(parsed.name, _skillDefinitions) || !isSkillAvailableToLoad(relativePath, _skillDefinitions)) {
-      throw new Error(`Skill 已停用: ${parsed.name}`);
+      throw new Error(`Skill 不存在: ${parsed.name}`);
     }
     const result = await invoke<ReadFileResult>('read_text_file', {
       workspacePath: workspace(),

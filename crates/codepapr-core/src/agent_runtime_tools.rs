@@ -1117,10 +1117,12 @@ fn dispatch_skill(ctx: &RuntimeToolContext, args: &Value) -> Result<HostedOutcom
     }
     let relative_path = resolve_skill_file_path(&ctx.workspace_path, &name)
         .ok_or_else(|| format!("Skill 不存在: {name}"))?;
+    // 停用的 Skill 对 Agent 完全不可见：报「不存在」而非「已停用」，
+    // 避免把停用状态（即文件的存在性）泄漏给模型。
     if !skill_available_to_load(&name, &ctx.skill_catalog)
         || !skill_available_to_load(&relative_path, &ctx.skill_catalog)
     {
-        return Err(format!("Skill 已停用: {name}"));
+        return Err(format!("Skill 不存在: {name}"));
     }
     let result = workspace_fs::read::read_text_file_impl(
         ctx.workspace_path.clone(),
@@ -1784,7 +1786,38 @@ fn sandbox_skip_prefixes() -> Vec<String> {
 }
 
 fn require_path(args: &Value) -> Result<String, String> {
-    extract_path(args, false)?.ok_or_else(|| "relativePath 必须是字符串".to_string())
+    if let Some(path) = extract_path(args, false)? {
+        return Ok(path);
+    }
+    // 区分「参数缺失」与「传了错误类型」：后者给出实际类型，便于模型自纠。
+    const PATH_KEYS: [&str; 8] = [
+        "relativePath",
+        "path",
+        "filePath",
+        "file_path",
+        "imagePath",
+        "image_path",
+        "file",
+        "src",
+    ];
+    for key in PATH_KEYS {
+        match args.get(key) {
+            None | Some(Value::Null) | Some(Value::String(_)) => continue,
+            Some(value) => {
+                let type_name = match value {
+                    Value::Bool(_) => "boolean",
+                    Value::Number(_) => "number",
+                    Value::Array(_) => "array",
+                    Value::Object(_) => "object",
+                    _ => "unknown",
+                };
+                return Err(format!(
+                    "{key} 必须是非空字符串（实际类型: {type_name}），请传入文件的相对路径，如 \"src/main.ts\"",
+                ));
+            }
+        }
+    }
+    Err("缺少路径参数：需要文件的相对路径（relativePath），如 \"src/main.ts\"".to_string())
 }
 
 fn extract_path(args: &Value, _required: bool) -> Result<Option<String>, String> {
@@ -2000,7 +2033,9 @@ mod tests {
             Ok(_) => panic!("disabled skill should not load"),
             Err(error) => error,
         };
-        assert!(err.contains("已停用"), "{err}");
+        // 停用项必须伪装成「不存在」：错误信息不得泄漏停用状态。
+        assert!(err.contains("不存在"), "{err}");
+        assert!(!err.contains("已停用"), "{err}");
     }
 
     #[test]

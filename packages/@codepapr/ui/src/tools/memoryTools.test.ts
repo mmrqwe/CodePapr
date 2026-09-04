@@ -74,7 +74,8 @@ describe('memoryTools (ADR-008 PR4)', () => {
 
     expect(result.status).toBe('saved');
     expect(result.kind).toBe('decision');
-    expect(typeof result.id).toBe('string');
+    // write 返回的必须是 admit 落库的 entry id（可直接 forget），不是候选 id。
+    expect(result.id).toBe('e1');
     const saveCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === 'save_memory_candidate');
     expect(saveCalls).toHaveLength(1);
     const payload = JSON.parse(saveCalls[0]![1]!.candidateJson as string) as {
@@ -99,17 +100,28 @@ describe('memoryTools (ADR-008 PR4)', () => {
   });
 
   it('memory_write reports duplicate when the same content was already proposed', async () => {
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'save_memory_candidate') return false;
+    let lastCandidateHash = '';
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'save_memory_candidate') {
+        const candidate = JSON.parse(String(args?.candidateJson ?? '{}')) as { contentHash?: string };
+        lastCandidateHash = candidate.contentHash ?? '';
+        return false;
+      }
+      if (command === 'load_memory_entries') {
+        return [{ id: 'entry-dup', contentHash: lastCandidateHash, status: 'active' }];
+      }
       return {};
     });
     const registry = buildRegistry();
     const result = (await registry.execute('memory_write', {
       content: '项目使用 pnpm workspace',
-    })) as { status: string; note: string };
+    })) as { status: string; note: string; id: string };
 
     expect(result.status).toBe('duplicate');
     expect(result.note).toContain('未重复写入');
+    // duplicate 也要返回可直接 forget 的 entry id，而不是候选 id。
+    expect(lastCandidateHash).not.toBe('');
+    expect(result.id).toBe('entry-dup');
   });
 
   it('memory_write stores web evidence as citation and does not project bootstrap', async () => {
