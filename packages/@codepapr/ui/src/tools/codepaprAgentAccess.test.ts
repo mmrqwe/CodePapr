@@ -116,15 +116,29 @@ describe('agentSandboxArgs', () => {
     expect(agentSandboxArgs('app').allowCodepaprApps).toBe(true);
   });
 
-  it('grants apps to in-app agents', () => {
+  it('grants apps to in-app agents only when allowCodepaprApps is true', () => {
+    expect(
+      agentSandboxArgs('agent', { network: false, workspaceWrite: true, allowCodepaprApps: true })
+        .allowCodepaprApps
+    ).toBe(true);
+    // 不带 allowCodepaprApps（或显式 false）的 appAccess 不再默认放行 apps
     expect(
       agentSandboxArgs('agent', { network: false, workspaceWrite: true }).allowCodepaprApps
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      agentSandboxArgs('agent', {
+        network: false,
+        workspaceWrite: true,
+        allowCodepaprApps: false,
+      }).allowCodepaprApps
+    ).toBe(false);
   });
 
   it('promotes file-gate mode to app when allowCodepaprApps is set', () => {
     expect(effectiveCodePaprMode('agent')).toBe('agent');
     expect(effectiveCodePaprMode('app')).toBe('app');
     expect(effectiveCodePaprMode('agent', { allowCodepaprApps: true })).toBe('app');
+    expect(effectiveCodePaprMode('agent', { allowCodepaprApps: false })).toBe('agent');
+    expect(effectiveCodePaprMode('agent', {})).toBe('agent');
   });
 });

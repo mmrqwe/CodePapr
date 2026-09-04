@@ -437,6 +437,37 @@ impl From<SandboxAccessArgs> for SandboxAccess {
     }
 }
 
+/// C-5：两轴沙箱 profile 目前仅 macOS（sandbox-exec）强制执行；其余平台
+/// `sandboxed_command` / `sandboxed_shell_command` 只校验 cwd，收窄档形同虚设。
+pub fn sandbox_enforced_on_this_platform() -> bool {
+    cfg!(target_os = "macos")
+}
+
+/// 收窄档（network:false / workspace_write:false）在当前平台不会被进程级
+/// 强制执行时返回明确告警文案；macOS 或全权档返回 None。调用方（UI / 工具
+/// 结果）负责呈现——完整跨平台沙箱另立项。
+pub fn platform_sandbox_warning(access: Option<SandboxAccess>) -> Option<String> {
+    if sandbox_enforced_on_this_platform() {
+        return None;
+    }
+    let access = access?;
+    if access.network && access.workspace_write {
+        return None;
+    }
+    let mut narrowed: Vec<&str> = Vec::new();
+    if !access.network {
+        narrowed.push("断网（network:false）");
+    }
+    if !access.workspace_write {
+        narrowed.push("工作区只读（local≤read）");
+    }
+    Some(format!(
+        "进程级沙箱仅 macOS 生效：该应用声明的 {} 在当前平台无法强制执行，\
+         其 bash/后端进程实际不受此限制（CSP 只约束 iframe 内 JS，管不到进程层）。请自行评估风险。",
+        narrowed.join(" + ")
+    ))
+}
+
 /// 后端进程（allow_bind）的脚本所在目录：即使工作区只读，app 也要能写自己的
 /// 运行时数据（DB/WAL/日志）。相对路径按进程工作目录解析（后端 app 的 cwd
 /// 是其 app 目录，manifest args 里的 "server.js" 即相对该目录）；args[0] 是

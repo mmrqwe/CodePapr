@@ -3,6 +3,8 @@ import {
   accessAllows,
   accessMeetsTool,
   agentToolsFor,
+  appOverrideKey,
+  findAccessOverride,
   intersectAccess,
   legacyLevelToAccess,
   legacyAccessToLevel,
@@ -99,6 +101,57 @@ describe('two-axis levelGrants', () => {
     expect(resolveEffectiveAccess(manifest, narrowed, 'app-x')).toEqual({
       local: 'read',
       network: false,
+    });
+  });
+
+  it('C-2 override 按工作区命名空间隔离，跨项目同名 app 互不影响', () => {
+    const manifest = makeManifest({ local: 'write', network: true });
+    const scoped: PaprAppSettings = {
+      defaultLocal: 'none',
+      defaultNetwork: false,
+      appOverrides: {
+        [appOverrideKey('/proj-a', 'app-x')]: { local: 'none', network: false },
+        [appOverrideKey('/proj-b', 'app-x')]: { local: 'read', network: true },
+      },
+    };
+    expect(resolveEffectiveAccess(manifest, scoped, 'app-x', '/proj-a')).toEqual({
+      local: 'none',
+      network: false,
+    });
+    expect(resolveEffectiveAccess(manifest, scoped, 'app-x', '/proj-b')).toEqual({
+      local: 'read',
+      network: true,
+    });
+    // 未带工作区键的第三个工作区：无任何匹配 override → manifest 声明原样
+    expect(resolveEffectiveAccess(manifest, scoped, 'app-x', '/proj-c')).toEqual({
+      local: 'write',
+      network: true,
+    });
+  });
+
+  it('C-2 读时兼容裸 appId 旧键；命名空间键存在则优先', () => {
+    const manifest = makeManifest({ local: 'write', network: true });
+    const legacy: PaprAppSettings = {
+      defaultLocal: 'none',
+      defaultNetwork: false,
+      appOverrides: { 'app-x': { local: 'read', network: false } },
+    };
+    expect(resolveEffectiveAccess(manifest, legacy, 'app-x', '/proj-a')).toEqual({
+      local: 'read',
+      network: false,
+    });
+    const both: PaprAppSettings = {
+      defaultLocal: 'none',
+      defaultNetwork: false,
+      appOverrides: {
+        'app-x': { local: 'none', network: false },
+        [appOverrideKey('/proj-a', 'app-x')]: { local: 'read', network: true },
+      },
+    };
+    expect(findAccessOverride(both, 'app-x', '/proj-a')).toEqual({ local: 'read', network: true });
+    expect(resolveEffectiveAccess(manifest, both, 'app-x', '/proj-a')).toEqual({
+      local: 'read',
+      network: true,
     });
   });
 

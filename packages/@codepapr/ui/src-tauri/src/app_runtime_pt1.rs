@@ -213,21 +213,34 @@ fn skip_app_export_entry(name: &str) -> bool {
         || lower.starts_with("db.sqlite-")
 }
 
-/// 有 package.json 且尚未安装依赖时，在 app 目录跑 `npm install`（允许出站网络）。
+/// 有 package.json 且尚未安装依赖时，在 app 目录跑 `npm install`。
+/// `allow_network`（缺省 true 保持兼容）来自 app 生效档的 network 轴：
+/// 声明离线（network:false）的 app 依赖未装时直接报错，而不是静默联网拉包。
 #[tauri::command]
-pub fn install_app_npm_deps(workspace_path: String, app_id: String) -> Result<String, String> {
+pub fn install_app_npm_deps(
+    workspace_path: String,
+    app_id: String,
+    allow_network: Option<bool>,
+) -> Result<String, String> {
     use codepapr_core::shared::expanded_path;
     use codepapr_core::shell::sandbox::{sandboxed_command, SandboxAccess};
     use std::io::Read;
     use std::process::Stdio;
     use std::time::{Duration, Instant};
 
+    let allow_network = allow_network.unwrap_or(true);
     let app_dir = app_dir_path(&workspace_path, &app_id)?;
     if !app_dir.join("package.json").is_file() {
         return Ok("skipped: no package.json".to_string());
     }
     if app_dir.join("node_modules").is_dir() {
         return Ok("skipped: node_modules exists".to_string());
+    }
+    if !allow_network {
+        return Err(
+            "该应用声明离线（network: false）且尚未安装依赖：请在应用权限设置中放开网络后重试"
+                .to_string(),
+        );
     }
 
     // 沙箱根：workspace 应用用工作区；global 应用（~/.codepapr/apps/<id>）在
@@ -240,7 +253,7 @@ pub fn install_app_npm_deps(workspace_path: String, app_id: String) -> Result<St
     };
     let workspace = std::fs::canonicalize(&workspace).unwrap_or(workspace);
     let access = SandboxAccess {
-        network: true,
+        network: allow_network,
         workspace_write: false,
         allow_bind: true,
         allow_codepapr_apps: false,
@@ -419,4 +432,61 @@ pub fn check_port_available(port: u16) -> Result<bool, String> {
     // IPv4/IPv6 都探测：node 可能监听 :: 双栈，也可能只监听其一。
     let occupied = port_has_listener(("127.0.0.1", port)) || port_has_listener(("::1", port));
     Ok(!occupied)
+}
+
+#[cfg(test)]
+mod install_npm_deps_tests {
+    // 注意：pt1/pt2/pt3 经 include! 拼成同一模块，tests 名已被 pt3 占用
+    use super::*;
+
+    fn test_workspace_app(
+        tag: &str,
+        app_id: &str,
+        with_node_modules: bool,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!(
+            "codepapr-npm-deps-{tag}-{app_id}-{}-{unique}",
+            std::process::id()
+        ));
+        let app_dir = workspace.join(".CodePapr").join("apps").join(app_id);
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(app_dir.join("manifest.json"), "{\"id\":\"demo\"}").unwrap();
+        fs::write(app_dir.join("package.json"), "{\"name\":\"demo\"}").unwrap();
+        if with_node_modules {
+            fs::create_dir_all(app_dir.join("node_modules")).unwrap();
+        }
+        (workspace, app_dir)
+    }
+
+    #[test]
+    fn install_app_npm_deps_offline_app_without_node_modules_errors() {
+        let (workspace, app_dir) = test_workspace_app("deny", "demo", false);
+        let err = install_app_npm_deps(
+            workspace.display().to_string(),
+            "demo".to_string(),
+            Some(false),
+        )
+        .expect_err("network:false 且依赖未装时必须拒绝");
+        assert!(err.contains("离线"), "unexpected error: {err}");
+        // 拒绝路径绝不能真的跑 npm
+        assert!(!app_dir.join("node_modules").exists());
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn install_app_npm_deps_offline_app_skips_when_node_modules_exists() {
+        let (workspace, _app_dir) = test_workspace_app("skip", "demo", true);
+        let out = install_app_npm_deps(
+            workspace.display().to_string(),
+            "demo".to_string(),
+            Some(false),
+        )
+        .expect("node_modules 已存在时离线 app 应正常跳过");
+        assert!(out.contains("skipped"), "unexpected output: {out}");
+        let _ = fs::remove_dir_all(workspace);
+    }
 }

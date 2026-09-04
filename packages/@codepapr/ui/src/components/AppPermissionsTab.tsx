@@ -1,8 +1,16 @@
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import { useAgentStore } from '../store/agentStore';
 import { getTranslation } from '../utils/i18n';
 import type { Lang } from '../utils/i18n';
 import type { PaprAccess, PaprAppSettings, PaprLocalAccess } from '@codepapr/types';
-import { LOCAL_ORDER, legacyLevelToAccess, patchAccessOverride } from '../papr/levelGrants';
+import {
+  LOCAL_ORDER,
+  appOverrideKey,
+  findAccessOverride,
+  legacyLevelToAccess,
+  patchAccessOverride,
+} from '../papr/levelGrants';
+import { normalizeWorkspaceId } from '../papr/projectRecordScope';
 
 interface AppPermissionsTabProps {
   lang?: Lang;
@@ -14,6 +22,7 @@ interface AppPermissionsTabProps {
 export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermissionsTabProps) {
   const t = getTranslation(lang);
   const apps = useAppRuntimeStore((state) => state.apps);
+  const workspaceId = normalizeWorkspaceId(useAgentStore((state) => state.workspacePath));
   const localLabel: Record<PaprLocalAccess, string> = {
     none: t.appPermL0Label,
     read: t.appPermL1Label,
@@ -50,12 +59,19 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
     onChange({ ...settings, defaultNetwork: network });
   };
 
+  const getOverride = (appId: string): PaprAccess | undefined =>
+    findAccessOverride(settings, appId, workspaceId);
+
   const updateAppOverride = (appId: string, patch: Partial<PaprAccess> | 'auto') => {
     const overrides = { ...settings.appOverrides };
+    const scopedKey = appOverrideKey(workspaceId, appId);
     if (patch === 'auto') {
+      delete overrides[scopedKey];
       delete overrides[appId];
     } else {
-      overrides[appId] = patchAccessOverride(overrides[appId], getAppDeclared(appId), patch);
+      overrides[scopedKey] = patchAccessOverride(getOverride(appId), getAppDeclared(appId), patch);
+      // 旧格式一次性回写：以命名空间键为准，删除歧义的裸键
+      delete overrides[appId];
     }
     onChange({ ...settings, appOverrides: overrides });
   };
@@ -83,7 +99,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
 
   const getAppEffective = (appId: string): PaprAccess => {
     const declared = getAppDeclared(appId);
-    const override = settings.appOverrides[appId];
+    const override = getOverride(appId);
     if (!override) return declared;
     const rank = (l: PaprLocalAccess) => LOCAL_ORDER.indexOf(l);
     return {
@@ -182,10 +198,11 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
             {apps.map((app) => {
               const declared = getAppDeclared(app.appId);
               const effective = getAppEffective(app.appId);
-              const hasOverride = settings.appOverrides[app.appId] !== undefined;
+              const override = getOverride(app.appId);
+              const hasOverride = override !== undefined;
               const declaredRank = LOCAL_ORDER.indexOf(declared.local);
               const allowedLocals = LOCAL_ORDER.filter((_, i) => i <= declaredRank);
-              const rawOverride = hasOverride ? settings.appOverrides[app.appId]!.local : 'auto';
+              const rawOverride = hasOverride ? override!.local : 'auto';
               const selectValue = rawOverride === 'auto' || allowedLocals.includes(rawOverride)
                 ? rawOverride
                 : declared.local;
@@ -236,7 +253,7 @@ export function AppPermissionsTab({ lang, value, onChange, loadError }: AppPermi
                       onClick={() => {
                         if (networkLocked) return;
                         if (hasOverride) {
-                          updateAppOverride(app.appId, { network: !settings.appOverrides[app.appId]!.network });
+                          updateAppOverride(app.appId, { network: !override!.network });
                         } else {
                           updateAppOverride(app.appId, { network: false });
                         }

@@ -100,7 +100,7 @@ function allowsCodePaprApps(
   mode: string | undefined,
   appAccess?: { allowCodepaprApps?: boolean } | null
 ): boolean {
-  return mode === 'app' || appAccess?.allowCodepaprApps === true || Boolean(appAccess);
+  return mode === 'app' || appAccess?.allowCodepaprApps === true;
 }
 
 export function agentSandboxArgs(

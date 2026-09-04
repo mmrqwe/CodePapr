@@ -12,6 +12,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import { AppModal } from './AppModal';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import { useAgentStore } from '../store/agentStore';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
@@ -292,5 +293,71 @@ describe('AppModal', () => {
     await flush();
 
     expect(container.textContent).toContain('hello from app');
+  });
+
+  it('C-1 热重载换 iframe 文档（updatedAt 变化）时取消旧文档在飞的 agent run', async () => {
+    useAppRuntimeStore.setState({
+      apps: [
+        {
+          appId: 'app-1',
+          title: 'Test App',
+          html: '',
+          filePath: '.CodePapr/apps/app-1/index.html',
+          createdAt: 1,
+          updatedAt: 2,
+          manifestJson: JSON.stringify({
+            local: 'none',
+            network: false,
+            agents: [{ name: 'assistant' }],
+          }),
+        },
+      ],
+      openedAppId: 'app-1',
+    });
+
+    const cancelAppAgent = vi.fn();
+    const fakeAgent = {
+      runAppAgent: () => new Promise<never>(() => {}),
+      cancelAppAgent,
+      destroy: vi.fn(),
+    };
+    const ensureSpy = vi
+      .spyOn(useAgentStore.getState(), 'ensureAgentForApp')
+      .mockResolvedValue(fakeAgent as never);
+
+    try {
+      await act(async () => {
+        root.render(<AppModal lang="en" />);
+      });
+      const iframe = container.querySelector('iframe');
+      expect(iframe).toBeTruthy();
+
+      const event = new MessageEvent('message', {
+        data: {
+          __papr: true,
+          reqId: 'run-1',
+          type: 'papr://agent.run',
+          payload: { agent: 'assistant', task: 'do it' },
+        },
+      });
+      Object.defineProperty(event, 'origin', { value: 'codepapr-app://app-1' });
+      Object.defineProperty(event, 'source', { value: iframe?.contentWindow });
+      await act(async () => {
+        window.dispatchEvent(event);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(ensureSpy).toHaveBeenCalled();
+      expect(cancelAppAgent).not.toHaveBeenCalled();
+
+      // 模拟 mtime 轮询触发的热重载：updatedAt 变化 → iframe key 换文档，宿主不卸载。
+      act(() => {
+        useAppRuntimeStore.getState().reloadApp('app-1');
+      });
+      await flush();
+
+      expect(cancelAppAgent).toHaveBeenCalledWith('run-1');
+    } finally {
+      ensureSpy.mockRestore();
+    }
   });
 });

@@ -5,6 +5,7 @@ import { useAgentStore, isApiConfigured } from './store/agentStore';
 import { usePreviewStore } from './store/previewStore';
 import { useBrowserViewStore } from './store/browserViewStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
+import { usePermissionStore as usePaprPermissionStore } from './papr/permissionStore';
 import { selectDockedPluginId } from './papr/pluginSurface';
 import { useCharactersStore } from './store/charactersStore';
 import { pushDebugLog } from './store/debugLogStore';
@@ -159,6 +160,10 @@ export default function App() {
       }
     }
     clearApps();
+    // C-2：papr 权限缓存（manifest 缓存 + appSettings）随工作区失效——
+    // 否则切项目后 manifestRef 为 null 的 app 会命中上个项目同 id 的陈旧
+    // manifest（错误的 agents/访问档）。appSettings 置 null 会触发重新拉取。
+    usePaprPermissionStore.getState().clearAll();
 
     // 扫描 .CodePapr/apps/ 目录，恢复之前创建的应用。
     // 应用文件持久化在磁盘上，但注册信息（内存 map + store）在进程重启后丢失，

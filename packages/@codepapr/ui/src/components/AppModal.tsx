@@ -11,6 +11,7 @@ import { readAppManifest, resolvePaprEntryFile } from '../papr/pluginSurface';
 import { launchAppBackend } from '../tools/workspaceAppTools';
 import { usePermissionStore as usePaprPermissionStore } from '../papr/permissionStore';
 import { resolveEffectiveAccess } from '../papr/levelGrants';
+import { normalizeWorkspaceId } from '../papr/projectRecordScope';
 
 interface AppModalProps {
   lang?: Lang;
@@ -111,7 +112,7 @@ export function AppModal({ lang }: AppModalProps) {
 
   const entryFile = useMemo(() => resolvePaprEntryFile(manifest), [manifest]);
 
-  const { postThemeNow } = usePaprBridge({
+  const { postThemeNow, cancelAllRuns } = usePaprBridge({
     iframeRef,
     appId: openedApp?.appId ?? '',
     manifest,
@@ -125,6 +126,16 @@ export function AppModal({ lang }: AppModalProps) {
       setConsoleLogs((prev) => [...prev.slice(-199), entry]);
     },
   });
+
+  // C-1：热重载换 iframe 文档（key 含 updatedAt）时宿主不卸载、handleMessage
+  // 刻意稳定 → 订阅 cleanup 不触发。必须在纪元切换时显式取消，否则旧文档
+  // 在飞的 papr.agent.run 变孤儿（继续烧 token、respond 被新文档丢弃）。
+  useEffect(
+    () => () => {
+      cancelAllRuns();
+    },
+    [openedApp?.appId, openedApp?.updatedAt, cancelAllRuns],
+  );
 
   const handleRestartBackend = useCallback(async () => {
     if (!openedApp?.command || !openedApp.port) return;
@@ -157,7 +168,12 @@ export function AppModal({ lang }: AppModalProps) {
 
   const appSettings = usePaprPermissionStore((state) => state.appSettings);
   const effectiveAccess = manifest
-    ? resolveEffectiveAccess(manifest, appSettings, openedApp.appId)
+    ? resolveEffectiveAccess(
+        manifest,
+        appSettings,
+        openedApp.appId,
+        normalizeWorkspaceId(workspacePath),
+      )
     : null;
   const hasMeta = !!manifest;
   const hasBackend = !!(openedApp.command && openedApp.port);

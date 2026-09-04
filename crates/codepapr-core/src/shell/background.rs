@@ -7,8 +7,9 @@ use crate::shell::process_tree::{
     kill_process_tree, prepare_new_process_group, prepare_parent_death_signal, wait_for_child_exit,
 };
 use crate::shell::sandbox::{
-    sandboxed_command, sandboxed_shell_command, validate_restricted_command,
-    validate_restricted_shell_command, SandboxAccess, SandboxAccessArgs,
+    platform_sandbox_warning, sandboxed_command, sandboxed_shell_command,
+    validate_restricted_command, validate_restricted_shell_command, SandboxAccess,
+    SandboxAccessArgs,
 };
 use crate::shell::types::{
     BackgroundCommandResult, BackgroundProcessEntry, BackgroundProcessExitInfo, CommandResult,
@@ -914,7 +915,12 @@ fn start_background_common(
     prepare_new_process_group(&mut bg_cmd);
     prepare_parent_death_signal(&mut bg_cmd);
 
-    spawn_and_register_background(workspace_path, command, args, preview_url, bg_cmd)
+    let mut result =
+        spawn_and_register_background(workspace_path, command, args, preview_url, bg_cmd)?;
+    // C-5：非 macOS 平台沙箱 profile 不生效——向调用方（UI/agent）显式告警，
+    // 别让用户以为「完全断网/只读」已在进程层强制执行。
+    result.warning = platform_sandbox_warning(sandbox.map(Into::into));
+    Ok(result)
 }
 
 /// 启动子进程并登记到后台进程注册表（含去重、日志捕获）。供直接 spawn 与 shell spawn 复用。
@@ -947,6 +953,7 @@ fn spawn_and_register_background(
                         pid: Some(*pid),
                         started: false,
                         preview_url: process.preview_url.clone(),
+                        warning: None,
                     });
                     break;
                 }
@@ -1008,6 +1015,7 @@ fn spawn_and_register_background(
         pid: Some(pid),
         started: true,
         preview_url,
+        warning: None,
     })
 }
 
@@ -1035,7 +1043,10 @@ pub fn start_workspace_shell_background_command(
         .transpose()?;
     let workspace_path = workspace.to_string_lossy().to_string();
     let cmd = build_shell_spawn_command(&command, &cwd, &workspace, sandbox.map(Into::into))?;
-    spawn_and_register_background(workspace_path, command, Vec::new(), preview_url, cmd)
+    let mut result =
+        spawn_and_register_background(workspace_path, command, Vec::new(), preview_url, cmd)?;
+    result.warning = platform_sandbox_warning(sandbox.map(Into::into));
+    Ok(result)
 }
 
 pub fn list_background_processes(

@@ -22,6 +22,8 @@ import { getPluginDockSlot } from './pluginDockSlot';
 import { useThemeStore } from '../store/themeStore';
 import type { ThemeMode } from '../theme/types';
 import { WorkerCrashError } from '../agent/WorkerBackedAgent';
+import { pushDebugLog } from '../store/debugLogStore';
+import { platformSandboxWarning } from '../utils/platformSandbox';
 import { acquireSleepPrevention, releaseSleepPrevention } from '../utils/sleepPrevention';
 
 // Each app is served from its own origin (codepapr-app://<appId>) so apps are
@@ -55,6 +57,16 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
   const setAppSettings = usePermissionStore((s) => s.setAppSettings);
 
   const activeAgentRuns = useRef<Map<string, { cancel: () => void; agentName: string }>>(new Map());
+
+  /** 取消全部在飞的 papr.agent.run。iframe 文档被换（热重载 key 变更）而宿主
+   * 不卸载时，订阅 effect 的 cleanup 不会触发（handleMessage 刻意稳定），
+   * 必须由宿主在换 key 前显式调用，否则旧文档的 run 成为烧 token 的孤儿。 */
+  const cancelAllRuns = useCallback(() => {
+    for (const [, run] of activeAgentRuns.current) {
+      run.cancel();
+    }
+    activeAgentRuns.current.clear();
+  }, []);
 
   useEffect(() => {
     if (manifest) {
@@ -132,7 +144,13 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
     postTheme(themeId, themeMode, themeMode === 'dark');
   }, [themeId, themeMode, postTheme]);
 
-  const effectiveAccess = resolveEffectiveAccess(manifest, appSettings, appId);
+  const workspacePath = useAgentStore((s) => s.workspacePath);
+  const effectiveAccess = resolveEffectiveAccess(
+    manifest,
+    appSettings,
+    appId,
+    normalizeWorkspaceId(workspacePath),
+  );
   const effectiveAccessRef = useRef(effectiveAccess);
   effectiveAccessRef.current = effectiveAccess;
 
@@ -396,6 +414,14 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
 
           const workspacePath = useAgentStore.getState().workspacePath;
 
+          // C-5：非 macOS 平台两轴沙箱不生效——app agent 的 bash 进程实际
+          // 不受 network:false / local 收窄约束，向 UI 显式推一条告警。
+          const sandboxWarning = platformSandboxWarning({
+            network: currentAccess.network,
+            local: currentAccess.local,
+          });
+          if (sandboxWarning) pushDebugLog('papr', `[${appId}] ${sandboxWarning}`);
+
           // App Agent 运行期间防休眠：专用 Worker 被系统休眠杀掉后，
           // iframe 内的 papr.agent.run 会挂起。
           void acquireSleepPrevention();
@@ -657,12 +683,9 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
     window.addEventListener('message', handleMessage);
     return () => {
       window.removeEventListener('message', handleMessage);
-      for (const [, run] of activeAgentRuns.current) {
-        run.cancel();
-      }
-      activeAgentRuns.current.clear();
+      cancelAllRuns();
     };
-  }, [handleMessage]);
+  }, [handleMessage, cancelAllRuns]);
 
-  return { postThemeNow, postWindowBounds };
+  return { postThemeNow, postWindowBounds, cancelAllRuns };
 }

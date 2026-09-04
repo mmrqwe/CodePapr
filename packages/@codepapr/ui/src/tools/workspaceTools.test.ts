@@ -913,6 +913,11 @@ describe('app_start 后端启动工作目录', () => {
       env: { PORT: '3456', HOST: '127.0.0.1' },
     });
     expect(spawnCall?.[1]).not.toHaveProperty('workdir');
+
+    const installCall = invokeMock.mock.calls.find(
+      ([command]) => command === 'install_app_npm_deps',
+    );
+    expect(installCall?.[1]).toMatchObject({ allowNetwork: true });
   });
 
   it('后端沙箱使用设置覆盖后的生效档（覆盖只能收窄）', async () => {
@@ -960,6 +965,12 @@ describe('app_start 后端启动工作目录', () => {
     expect(spawnCall?.[1]).toMatchObject({
       sandbox: { network: false, workspaceWrite: false, allowBind: true },
     });
+
+    // C-4 回归：离线生效档必须把 network=false 传给依赖安装，禁止静默联网 npm 拉包
+    const installCall = invokeMock.mock.calls.find(
+      ([command]) => command === 'install_app_npm_deps',
+    );
+    expect(installCall?.[1]).toMatchObject({ allowNetwork: false });
   });
 
   it('权限变更后停掉并按新沙箱重启正在运行的后端', async () => {

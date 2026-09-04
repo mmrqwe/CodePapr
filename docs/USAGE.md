@@ -155,7 +155,9 @@ App 的访问权限由**两个正交轴**组成，在 `manifest.json` 中声明�
 | `local` | `read` | + 读取项目文件（Agent 只读工具 read/grep/list/lsp/diagnostics 等） |
 | `local` | `write` | + 修改项目文件并执行命令（Agent write/edit/patch/bash，直接写项目文件） |
 | `network` | `true` | + 访问公网（papr.http + Agent websearch/webfetch + MCP） |
-| `network` | `false` | 完全断网（iframe CSP + 后端沙箱强制，JS 无法绕过） |
+| `network` | `false` | 完全断网（iframe CSP + 后端沙箱强制，JS 无法绕过；**bash/后端进程级隔离仅 macOS 生效**，见下） |
+
+> **平台限制（C-5）**：`sandbox-exec` 进程级沙箱目前仅在 macOS 上强制。Windows / Linux 上，`network: false` / `local ≤ read` 的 app 其 **bash 工具与后端进程**实际不受这两轴限制（iframe 内的 CSP/storage 隔离仍然生效）；应用启动或 Agent 运行时会向调试日志推一条告警。跨平台进程沙箱为独立立项。
 
 - `papr.db` / `papr.fs` 是 app 自有沙箱，**永远可用，无需任何权限**
 - 后端服务（`command`）要求 `local` 至少为 `read`
@@ -505,6 +507,8 @@ model: fast
 - 写入、编辑、命令执行等操作仍限制在工作区内，不经过此弹窗
 
 ## macOS 命令沙箱
+
+> **仅 macOS 生效**：Windows / Linux 上目前**没有**对应的进程级沙箱实现——app 的 `network: false` / `local ≤ read` 收窄档对 bash/后端进程不构成实际约束（iframe 内 CSP 隔离不受影响）。检测到收窄档时 UI 调试日志会推告警；跨平台沙箱为独立立项。
 
 macOS 上 `bash` 工具、Shell 会话与 app 后端进程都通过 `sandbox-exec` 沙箱运行：
 

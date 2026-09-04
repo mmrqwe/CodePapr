@@ -114,6 +114,11 @@ export class ToolRegistry {
     return this.tools.has(name);
   }
 
+  /** handler 是否已注册（不受 hideFromLlm 移除 LLM 可见性的影响）。 */
+  hasHandler(name: string): boolean {
+    return this.handlers.has(name);
+  }
+
   validateUnchanged(expectedHash: string): void {
     const current = this.computeHash();
     if (current !== expectedHash) {

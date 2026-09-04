@@ -1386,7 +1386,7 @@ fn git_op_json(action: &str, result: crate::snapshot::types::GitOperationResult)
 }
 
 fn allow_apps_for(mode: &str, access: Option<&AppAccess>) -> bool {
-    mode == "app" || access.map(|a| a.allow_codepapr_apps.unwrap_or(true)).unwrap_or(false)
+    mode == "app" || access.and_then(|a| a.allow_codepapr_apps).unwrap_or(false)
 }
 
 fn allow_codepapr_apps(ctx: &RuntimeToolContext, req: &ToolRequest) -> bool {
@@ -2084,6 +2084,25 @@ mod tests {
         assert!(ensure_codepapr_access(".CodePapr/browser/shot.png", "read", "agent", false).is_err());
         assert!(ensure_shell_codepapr("node server.js", Some(".CodePapr/apps/x"), "agent", true).is_ok());
         assert!(ensure_shell_codepapr("node server.js", Some(".CodePapr/apps/x"), "agent", false).is_err());
+    }
+
+    #[test]
+    fn allow_apps_requires_explicit_true_outside_app_mode() {
+        let access = |allow: Option<bool>| AppAccess {
+            network: Some(false),
+            workspace_write: Some(true),
+            allow_codepapr_apps: allow,
+        };
+        assert!(allow_apps_for("app", None));
+        assert!(allow_apps_for("agent", Some(&access(Some(true)))));
+        // 缺省/显式 false 的 appAccess 不再默认放行 .CodePapr/apps
+        assert!(!allow_apps_for("agent", Some(&access(None))));
+        assert!(!allow_apps_for("agent", Some(&access(Some(false)))));
+        assert!(!allow_apps_for("agent", None));
+        let denied = sandbox_from_access("agent", Some(&access(Some(false))));
+        assert!(!denied.allow_codepapr_apps);
+        assert!(!denied.network);
+        assert!(denied.workspace_write);
     }
 
     #[test]

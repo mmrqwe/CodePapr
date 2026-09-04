@@ -155,7 +155,9 @@ App access is declared by two orthogonal axes in the manifest:
 | `local` | `read` | + read project files (Agent read tools: read/grep/list/lsp/diagnostics, etc.) |
 | `local` | `write` | + modify project files and execute commands (Agent write/edit/patch/bash, writing project files directly) |
 | `network` | `true` | + access the public internet (papr.http + Agent websearch/webfetch + MCP) |
-| `network` | `false` | fully offline (enforced by iframe CSP + backend sandbox; JS cannot bypass) |
+| `network` | `false` | fully offline (enforced by iframe CSP + backend sandbox; JS cannot bypass — **process-level bash/backend isolation is macOS-only**, see below) |
+
+> **Platform limit (C-5)**: the `sandbox-exec` process sandbox is currently enforced on **macOS only**. On Windows / Linux, an app declaring `network: false` / `local ≤ read` still has its **bash tool and backend processes** outside those two axes (iframe-side CSP/storage isolation still applies); a warning is pushed to the debug log when such an app launches or its agent runs. A cross-platform process sandbox is a separate work item.
 
 - `papr.db` / `papr.fs` are app-owned sandbox and always available — no permission needed
 - Backend services (`command`) require `local` to be at least `read`
@@ -466,6 +468,8 @@ The desktop app requires explicit authorization for reading/listing absolute pat
 - Write, edit, and command execution are still restricted to the workspace regardless
 
 ## macOS Command Sandbox
+
+> **macOS only**: on Windows / Linux there is currently **no** equivalent process-level sandbox — a narrowed app profile (`network: false` / `local ≤ read`) does not actually constrain its bash/backend processes (iframe-side CSP isolation is unaffected). The UI debug log pushes a warning when a narrowed profile is detected; a cross-platform sandbox is a separate work item.
 
 On macOS the `bash` tool, shell sessions, and app backend processes run inside a `sandbox-exec` sandbox:
 

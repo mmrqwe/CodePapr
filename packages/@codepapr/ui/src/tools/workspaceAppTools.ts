@@ -16,8 +16,11 @@ import {
   type PaprAccess,
   type PaprLocalAccess,
 } from '../papr/levelGrants';
+import { normalizeWorkspaceId } from '../papr/projectRecordScope';
 import { isPluginApp, parsePaprKind, parsePluginSurfaceArg, pluginIsEnabled, readAppManifest, resolvePaprEntryFile, shouldRevealOnPublish } from '../papr/pluginSurface';
 import { postAppEvent } from '../papr/appChannelHub';
+import { pushDebugLog } from '../store/debugLogStore';
+import { platformSandboxWarning } from '../utils/platformSandbox';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 
 /** app_render 禁止携带的写文件/清单字段：这些必须用 write/edit/patch 落盘。 */
@@ -669,15 +672,24 @@ export async function launchAppBackend(
   workspacePath: string,
 ): Promise<{ pid: number; url: string }> {
   // 后端沙箱按生效档（manifest ∩ 用户设置）构建：设置收窄后新启动的进程必须跟着收窄。
-  const appAccess = await resolveLaunchAccess(app.appId, app.manifestJson);
+  const appAccess = await resolveLaunchAccess(app.appId, app.manifestJson, workspacePath);
   if (appAccess.local !== 'read' && appAccess.local !== 'write') {
     throw new Error(`应用 '${app.appId}' 的 local 访问为 ${appAccess.local}，不允许启动后端服务`);
   }
+  // C-5：非 macOS 平台两轴沙箱不生效，收窄档只是纸面承诺——向 UI 推告警。
+  const sandboxWarning = platformSandboxWarning({
+    network: appAccess.network,
+    local: appAccess.local,
+  });
+  if (sandboxWarning) pushDebugLog('app', `[${app.appId}] ${sandboxWarning}`);
 
   try {
+    // 离线档（network:false）禁止 npm 拉包：Rust 侧 node_modules 缺失时直接报错，
+    // 已装则跳过——声明完全离线的本地后端 app 不再被静默放行联网。
     await invoke<string>('install_app_npm_deps', {
       workspacePath,
       appId: app.appId,
+      allowNetwork: appAccess.network,
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -875,10 +887,12 @@ function accessFromManifestJson(manifestJson: string | null | undefined): PaprMa
   }
 }
 
-/** 启动后端用的生效访问：manifest 声明 ∩ 用户设置覆盖（覆盖只能收窄）。 */
+/** 启动后端用的生效访问：manifest 声明 ∩ 用户设置覆盖（覆盖只能收窄）。
+ *  override 按当前工作区命名空间查找（C-2）。 */
 async function resolveLaunchAccess(
   appId: string,
   manifestJson: string | null | undefined,
+  workspacePath: string,
 ): Promise<PaprAccess> {
   const manifest = accessFromManifestJson(manifestJson);
   let settings: PaprAppSettings | null = usePaprPermissionStore.getState().appSettings;
@@ -893,7 +907,7 @@ async function resolveLaunchAccess(
       settings = null;
     }
   }
-  return resolveEffectiveAccess(manifest, settings, appId);
+  return resolveEffectiveAccess(manifest, settings, appId, normalizeWorkspaceId(workspacePath));
 }
 
 /** 设置变更后：对生效档（local/network）发生变化的运行中后端停掉再拉起，
@@ -915,8 +929,9 @@ export async function syncRunningBackendsToAccess(
     const command = app.command;
     const port = app.port;
     const manifest = accessFromManifestJson(app.manifestJson);
-    const before = resolveEffectiveAccess(manifest, prev, app.appId);
-    const after = resolveEffectiveAccess(manifest, next, app.appId);
+    const workspaceKey = normalizeWorkspaceId(workspacePath);
+    const before = resolveEffectiveAccess(manifest, prev, app.appId, workspaceKey);
+    const after = resolveEffectiveAccess(manifest, next, app.appId, workspaceKey);
     if (before.local === after.local && before.network === after.network) continue;
 
     try {

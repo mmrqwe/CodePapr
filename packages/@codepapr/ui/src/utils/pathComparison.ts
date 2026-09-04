@@ -11,7 +11,7 @@
  *  （构建产物中 `process.platform` 不会被 polyfill），裸用会抛 ReferenceError。
  *  因此优先用 `process.platform`（Node/测试环境可用），否则回退到 userAgent 判断。
  */
-function detectPlatform(): 'darwin' | 'win32' | 'linux' {
+export function detectPlatform(): 'darwin' | 'win32' | 'linux' {
   if (typeof process !== 'undefined' && typeof process.platform === 'string') {
     return process.platform === 'darwin' || process.platform === 'win32'
       ? process.platform

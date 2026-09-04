@@ -59,14 +59,40 @@ export function manifestAccess(
   };
 }
 
-/** 生效访问 = manifest 声明 ∩ 用户逐 app 覆盖（覆盖只能收窄）。 */
+/** C-2：逐 app 覆盖按工作区命名空间化：`<workspaceId>::<appId>`。
+ *  workspaceId = normalizeWorkspaceId(workspacePath)（无工作区 = 空串）。
+ *  与 Rust papr_runtime/permission.rs 的 override_key 对齐，否则跨项目同名
+ *  app 互相收窄/放大权限。 */
+export function appOverrideKey(workspaceId: string, appId: string): string {
+  return `${workspaceId}::${appId}`;
+}
+
+/** 查找生效 override：先按命名空间键，未命中回落裸 appId（旧数据，
+ *  与 Rust 读时一次性迁移的兼容窗口对齐）。 */
+export function findAccessOverride(
+  settings: PaprAppSettings | null,
+  appId: string,
+  workspaceId?: string,
+): PaprAccess | undefined {
+  const overrides = settings?.appOverrides;
+  if (!overrides) return undefined;
+  if (workspaceId !== undefined) {
+    const scoped = overrides[appOverrideKey(workspaceId, appId)];
+    if (scoped) return scoped;
+  }
+  return overrides[appId];
+}
+
+/** 生效访问 = manifest 声明 ∩ 用户逐 app 覆盖（覆盖只能收窄）。
+ *  workspaceId 省略时按旧全局键读取（仅供无工作区上下文的调用/测试）。 */
 export function resolveEffectiveAccess(
   manifest: PaprManifest | null,
   settings: PaprAppSettings | null,
   appId: string,
+  workspaceId?: string,
 ): PaprAccess {
   const declared = manifestAccess(manifest, settings);
-  const override = settings?.appOverrides?.[appId];
+  const override = findAccessOverride(settings, appId, workspaceId);
   return override ? intersectAccess(override, declared) : declared;
 }
 

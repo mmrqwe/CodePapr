@@ -177,11 +177,56 @@ pub fn manifest_access(manifest: &PaprManifest) -> PaprAccess {
     }
 }
 
+/// C-2：逐 app 覆盖按「所在工作区」命名空间化：`<scope>::<appId>`。
+/// scope 为归一化后的工作区路径（无工作区 / global 挂载 = 空串），与 TS
+/// levelGrants.appOverrideKey / projectRecordScope.normalizeWorkspaceId 对齐。
+/// 否则项目 A/B 的同名 app 会互相收窄/放大权限。
+pub fn override_key(scope: &str, app_id: &str) -> String {
+    format!("{scope}::{app_id}")
+}
+
+fn normalize_scope(path: &str) -> String {
+    path.trim().trim_end_matches(['/', '\\']).to_string()
+}
+
+/// app 当前挂载所在工作区（app_context 注册表）；未注册 → 空 scope。
+fn scope_for_app(app_id: &str) -> String {
+    crate::papr_runtime::app_context::get(app_id)
+        .map(|ctx| normalize_scope(&ctx.workspace_path))
+        .unwrap_or_default()
+}
+
+/// 一次性迁移旧格式：裸 appId 键 → 当前工作区的命名空间键（读时回写）。
+fn migrate_legacy_override(app_id: &str, scoped_key: &str) {
+    let mut settings = get_app_settings();
+    let Some(legacy) = settings.app_overrides.remove(app_id) else {
+        return;
+    };
+    if !settings.app_overrides.contains_key(scoped_key) {
+        settings
+            .app_overrides
+            .insert(scoped_key.to_string(), legacy);
+    }
+    set_app_settings(settings);
+}
+
 /// 生效的两轴访问：manifest 声明 ∩ 用户逐 app 覆盖（覆盖只能收窄）。
+/// 覆盖查找先按 `<scope>::<appId>`，未命中回落裸 appId（旧数据，命中即迁移回写）。
 pub fn resolve_effective_access(manifest: &PaprManifest, app_id: &str) -> PaprAccess {
-    let settings = get_app_settings();
     let manifest_access = manifest_access(manifest);
-    match settings.app_overrides.get(app_id).copied() {
+    let scoped_key = override_key(&scope_for_app(app_id), app_id);
+    {
+        let settings = get_app_settings();
+        if let Some(override_access) = settings.app_overrides.get(&scoped_key).copied() {
+            return intersect_access(override_access, manifest_access);
+        }
+        if !settings.app_overrides.contains_key(app_id) {
+            return manifest_access;
+        }
+    }
+    migrate_legacy_override(app_id, &scoped_key);
+    let settings = get_app_settings();
+    match settings.app_overrides.get(&scoped_key).copied() {
         Some(override_access) => intersect_access(override_access, manifest_access),
         None => manifest_access,
     }
@@ -294,8 +339,17 @@ mod tests {
         assert_eq!(kept, narrowed);
     }
 
+    /// APP_SETTINGS / app_context 是进程级全局：本模块凡读写生效档的测试
+    /// 必须串行，否则并行运行时互相覆盖（尤其带迁移回写的用例）。
+    static SETTINGS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn _settings_guard() -> std::sync::MutexGuard<'static, ()> {
+        SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn manifest_access_prefers_two_axis_over_legacy_level() {
+        let _guard = _settings_guard();
         reset_test_settings();
         let m = make_manifest(Some(PaprLocalAccess::Read), Some(true), Some(0));
         assert_eq!(
@@ -311,6 +365,7 @@ mod tests {
 
     #[test]
     fn check_storage_always_available() {
+        let _guard = _settings_guard();
         reset_test_settings();
         // papr.db / papr.fs 是 app 自有沙箱：local=none 也放行
         let none = make_manifest(Some(PaprLocalAccess::None), Some(false), None);
@@ -325,6 +380,7 @@ mod tests {
 
     #[test]
     fn check_http_requires_network() {
+        let _guard = _settings_guard();
         reset_test_settings();
         let off = make_manifest(Some(PaprLocalAccess::Read), Some(false), None);
         assert!(check_permission(&off, "test-app", "http:get").is_err());
@@ -334,6 +390,7 @@ mod tests {
 
     #[test]
     fn check_agent_requires_declared_agent() {
+        let _guard = _settings_guard();
         reset_test_settings();
         let m = make_manifest(Some(PaprLocalAccess::None), Some(false), None);
         assert!(check_permission(&m, "test-app", "agent:run:assistant").is_ok());
@@ -342,6 +399,7 @@ mod tests {
 
     #[test]
     fn user_override_narrows_manifest_access() {
+        let _guard = _settings_guard();
         reset_test_settings();
         // 用独立 app id：persist 的 override 是全局共享状态，若与其它测试
         // 共用 "test-app" 且不清理，并行运行时会把其它用例的断言收窄失败。
@@ -369,6 +427,67 @@ mod tests {
         assert!(access2.network);
 
         // 清理全局 settings，避免污染并行运行的其它用例
+        reset_test_settings();
+    }
+
+    #[test]
+    fn scoped_overrides_do_not_leak_across_workspaces() {
+        let _guard = _settings_guard();
+        reset_test_settings();
+        // 两个工作区各有一个同名 app "shared"：override 必须按 scope 隔离
+        let mut map = HashMap::new();
+        map.insert(
+            override_key("/tmp/proj-a", "shared"),
+            PaprAccess { local: PaprLocalAccess::None, network: false },
+        );
+        map.insert(
+            override_key("/tmp/proj-b", "shared"),
+            PaprAccess { local: PaprLocalAccess::Read, network: false },
+        );
+        set_app_settings(AppPermissionSettings {
+            default_local: PaprLocalAccess::Write,
+            default_network: true,
+            app_overrides: map,
+        });
+        let m = make_manifest(Some(PaprLocalAccess::Write), Some(true), None);
+        // 同名 app 在两个工作区分别命中各自的 override（尾部分隔符归一化）
+        crate::papr_runtime::app_context::register("shared", "/tmp/proj-a");
+        let a = resolve_effective_access(&m, "shared");
+        assert_eq!(a.local, PaprLocalAccess::None);
+        crate::papr_runtime::app_context::register("shared", "/tmp/proj-b/");
+        let b = resolve_effective_access(&m, "shared");
+        assert_eq!(b.local, PaprLocalAccess::Read);
+        assert!(!b.network);
+
+        crate::papr_runtime::app_context::unregister("shared");
+        reset_test_settings();
+    }
+
+    #[test]
+    fn legacy_bare_override_migrates_to_scoped_key_once() {
+        let _guard = _settings_guard();
+        reset_test_settings();
+        crate::papr_runtime::app_context::register("migrate-app", "/tmp/ws-mig");
+        let mut map = HashMap::new();
+        map.insert(
+            "migrate-app".to_string(),
+            PaprAccess { local: PaprLocalAccess::Read, network: false },
+        );
+        set_app_settings(AppPermissionSettings {
+            default_local: PaprLocalAccess::None,
+            default_network: false,
+            app_overrides: map,
+        });
+        let m = make_manifest(Some(PaprLocalAccess::Write), Some(true), None);
+        let access = resolve_effective_access(&m, "migrate-app");
+        assert_eq!(access.local, PaprLocalAccess::Read);
+        assert!(!access.network);
+        // 读时回写：裸键消失，命名空间键出现
+        let after = get_app_settings();
+        assert!(!after.app_overrides.contains_key("migrate-app"));
+        assert!(after.app_overrides.contains_key("/tmp/ws-mig::migrate-app"));
+
+        crate::papr_runtime::app_context::unregister("migrate-app");
         reset_test_settings();
     }
 

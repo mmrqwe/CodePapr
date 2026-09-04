@@ -24,6 +24,9 @@ pub struct BackgroundCommandResult {
     pub(crate) pid: Option<u32>,
     pub(crate) started: bool,
     pub(crate) preview_url: Option<String>,
+    /// C-5：收窄档沙箱在当前平台不被强制时的告警文案（None = 无需告警）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) warning: Option<String>,
 }
 
 #[derive(Serialize)]

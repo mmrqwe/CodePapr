@@ -184,7 +184,7 @@ function PluginOverlayCard({ app, lang, layout, zIndex, hidden, docked }: Plugin
     }
   }, []);
 
-  const { postThemeNow, postWindowBounds } = usePaprBridge({
+  const { postThemeNow, postWindowBounds, cancelAllRuns } = usePaprBridge({
     iframeRef,
     appId: app.appId,
     manifest,
@@ -195,6 +195,15 @@ function PluginOverlayCard({ app, lang, layout, zIndex, hidden, docked }: Plugin
       setError('');
     },
   });
+
+  // C-1：热重载换 iframe 文档（key 含 updatedAt）时宿主卡片不卸载，
+  // 订阅 cleanup 不触发 → 在纪元切换时显式取消旧文档的 agent run。
+  useEffect(
+    () => () => {
+      cancelAllRuns();
+    },
+    [app.appId, app.updatedAt, cancelAllRuns],
+  );
 
   useEffect(() => {
     loadedRef.current = false;

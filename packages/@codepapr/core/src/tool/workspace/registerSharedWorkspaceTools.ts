@@ -150,7 +150,7 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
     if (args.save === true) {
       // save 分支是写盘操作：ask 只读模式下 web_download_file 的 handler 未注册
       // （MUTATING_TOOL_NAMES 硬拦），这里给出明确报错而非 "tool not found"。
-      if (!registry.has('web_download_file')) {
+      if (!registry.hasHandler('web_download_file')) {
         throw new Error('当前为只读模式，webfetch 不能保存文件（save 不可用）。');
       }
       return await registry.execute('web_download_file', {
