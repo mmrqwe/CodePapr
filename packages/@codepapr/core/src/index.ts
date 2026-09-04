@@ -311,6 +311,7 @@ export {
   SKILLS_DIR,
   DEFAULT_SEARCH_SKILL_NAME,
   DEFAULT_SEARCH_SKILL_TEMPLATE,
+  getDefaultSearchSkillTemplate,
   parseSkillMarkdown,
   applySkillEnablement,
   isSkillAvailableToLoad,

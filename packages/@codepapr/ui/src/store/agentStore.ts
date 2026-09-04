@@ -58,6 +58,7 @@ import {
   loadAgentDefinitions,
   loadProjectRulesSection,
   ensureProjectAgentsFile,
+  ensureDefaultSearchSkill,
 } from '../utils/projectConfigLoader';
 
 import {
@@ -721,7 +722,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             }
           }
 
-          skillEnabledById = (meta.skill_enabled_by_id as Record<string, boolean>) ?? {};
+          skillEnabledById = normalizeSkillEnabledState(
+            meta.skill_enabled_by_id as Record<string, boolean> | undefined
+          );
           const rawStats = meta.conversation_stats as { primary?: unknown; fast?: unknown } | null;
           // cloneConversationStats fills in any tier missing from older persisted
           // data (e.g. the mentor tier added later), so loaded stats always have
@@ -944,6 +947,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           return;
         }
         await ensureProjectAgentsFile(invoke, path, get().settings.lang).catch(() => undefined);
+        await ensureDefaultSearchSkill(invoke, path, get().settings.lang).catch(() => undefined);
         const [rulesSection, skillDefinitions, agentDefinitions] = await Promise.all([
           loadProjectRulesSection(invoke, path, get().settings.lang).catch(() => ''),
           loadSkillDefinitions(invoke, path).catch(() => [] as SkillDefinition[]),

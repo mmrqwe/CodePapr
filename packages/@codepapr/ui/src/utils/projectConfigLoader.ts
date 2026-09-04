@@ -17,6 +17,8 @@ import {
   getDefaultAgentsTemplate,
   detectProjectVerifyCommands,
   fillAgentsVerifyCommands,
+  DEFAULT_SEARCH_SKILL_NAME,
+  getDefaultSearchSkillTemplate,
   type AgentDefinition,
   type CommandDefinition,
   type ProjectRuleFile,
@@ -338,6 +340,31 @@ export async function loadSkillDefinitions(
     });
   }
   return definitions;
+}
+
+/** 内置初始 Skill：仅当 `.CodePapr/skills` 目录不存在时写入默认 search Skill。
+ *  目录已存在（哪怕被清空）视为用户已接管，不再复活。返回是否创建了文件。 */
+export async function ensureDefaultSearchSkill(
+  invoke: InvokeFn,
+  workspacePath: string,
+  lang?: string
+): Promise<boolean> {
+  try {
+    await invoke('list_workspace_files', {
+      workspacePath,
+      relativePath: SKILLS_DIR,
+      maxDepth: 1,
+    });
+    return false;
+  } catch {
+    // 目录不存在 → 走初始引导
+  }
+  await invoke('write_text_file', {
+    workspacePath,
+    relativePath: `${SKILLS_DIR}/${DEFAULT_SEARCH_SKILL_NAME}/SKILL.md`,
+    content: getDefaultSearchSkillTemplate(lang),
+  });
+  return true;
 }
 
 /** 列出所有可用聊天命令定义（用于 /help）。 */

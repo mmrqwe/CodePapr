@@ -3,6 +3,7 @@ import {
   DEFAULT_SEARCH_SKILL_TEMPLATE,
   applySkillEnablement,
   buildSkillsSection,
+  getDefaultSearchSkillTemplate,
   isSkillAvailableToLoad,
   parseSkillMarkdown,
   resolveSkillCatalogName,
@@ -67,6 +68,31 @@ describe('skillConfig', () => {
     expect(isSkillAvailableToLoad('docs', skills)).toBe(true);
   });
 
+  it('refuses loading when any same-named catalog entry is disabled', () => {
+    const skills = applySkillEnablement(
+      [
+        { name: 'shared', description: 'a', prompt: 'p', id: 'alpha' },
+        { name: 'shared', description: 'b', prompt: 'p', id: 'beta' },
+      ],
+      { beta: false }
+    );
+
+    // 共享 name 的两条中一条停用：按共享名查询必须拒绝，不能只看先命中的启用项。
+    expect(isSkillAvailableToLoad('shared', skills)).toBe(false);
+    // 精确 id 只命中启用项，仍然放行。
+    expect(isSkillAvailableToLoad('alpha', skills)).toBe(true);
+  });
+
+  it('keeps indented key-like lines inside block scalars', () => {
+    const skill = parseSkillMarkdown(
+      'notes',
+      '---\ndescription: |\n  step one\n  key: still content\nname: notes\n---\n正文。'
+    );
+
+    expect(skill.description).toBe('step one\nkey: still content');
+    expect(skill.name).toBe('notes');
+  });
+
   it('ships a practical default search skill', () => {
     const skill = parseSkillMarkdown('search', DEFAULT_SEARCH_SKILL_TEMPLATE);
 
@@ -77,6 +103,21 @@ describe('skillConfig', () => {
     expect(skill.enabled).toBeUndefined();
     expect(DEFAULT_SEARCH_SKILL_TEMPLATE).toContain('name: search');
     expect(DEFAULT_SEARCH_SKILL_TEMPLATE).not.toContain('enabled:');
+  });
+
+  it('localizes the default search skill template', () => {
+    expect(getDefaultSearchSkillTemplate()).toBe(DEFAULT_SEARCH_SKILL_TEMPLATE);
+    expect(getDefaultSearchSkillTemplate('zh-CN')).toContain('官方文档');
+
+    const en = getDefaultSearchSkillTemplate('en');
+    expect(en).toContain('name: search');
+    expect(en).toContain('site:');
+    expect(en).not.toMatch(/[\u4e00-\u9fff]/);
+
+    const tw = getDefaultSearchSkillTemplate('zh-TW');
+    expect(tw).toContain('name: search');
+    expect(tw).toContain('搜尋');
+    expect(tw).not.toContain('搜索');
   });
 
   it('derives the skill root the same way as the Rust host', () => {

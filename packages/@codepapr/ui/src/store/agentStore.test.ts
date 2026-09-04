@@ -1067,6 +1067,8 @@ describe('useAgentStore.sendMessage', () => {
       active_session_id: null,
       skill_enabled_by_id: {
         search: false,
+        'junk-string': 'yes',
+        'junk-number': 1,
       },
       conversation_stats: createEmptyConversation(),
       session_conversation_stats: {},
@@ -1110,6 +1112,8 @@ describe('useAgentStore.sendMessage', () => {
       id: 'search',
       enabled: false,
     });
+    // DB 里的脏数据（非布尔值）在加载时即被过滤，只保留合法条目。
+    expect(useAgentStore.getState().skillEnabledById).toEqual({ search: false });
   });
 
   it('does not run startup diagnostics just because a workspace was opened', async () => {

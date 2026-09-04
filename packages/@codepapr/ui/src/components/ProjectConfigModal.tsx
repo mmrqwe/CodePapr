@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   getDefaultAgentsTemplate,
   DEFAULT_SEARCH_SKILL_NAME,
-  DEFAULT_SEARCH_SKILL_TEMPLATE,
+  getDefaultSearchSkillTemplate,
   DEFAULT_CHECK_COMMAND_NAME,
   getDefaultCheckCommandTemplate,
   parseSkillMarkdown,
@@ -120,9 +120,9 @@ function createCommandTemplate(name: string, lang?: string): string {
   ].join('\n');
 }
 
-function createSkillTemplate(name: string): string {
+function createSkillTemplate(name: string, lang?: string): string {
   if (name === DEFAULT_SEARCH_SKILL_NAME) {
-    return DEFAULT_SEARCH_SKILL_TEMPLATE;
+    return getDefaultSearchSkillTemplate(lang);
   }
   return [
     '---',
@@ -709,13 +709,14 @@ export function ProjectConfigModal({
       await invoke('write_text_file', {
         workspacePath,
         relativePath,
-        content: createSkillTemplate(name),
+        content: createSkillTemplate(name, lang ?? settings.lang),
       });
       await persistSkillEnabled(name, true);
       await afterProjectConfigChanged([relativePath]);
       await loadSkillNames();
       setSelectedSkillName(name);
-      setNewSkillName('docs');
+      // 回填下一个未占用的草稿名，避免硬编码 'docs' 与已有 Skill 撞名。
+      setNewSkillName(unusedSkillDraftName([...skillEntries.map((entry) => entry.id), name]));
       setStatus(t.projectConfigSkillCreated);
     } catch (err) {
       setError(errorMessage(err));

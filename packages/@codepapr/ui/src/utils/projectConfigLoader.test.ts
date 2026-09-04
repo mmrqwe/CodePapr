@@ -7,6 +7,7 @@ import {
   loadCommandDefinition,
   loadProjectRulesSection,
   ensureProjectAgentsFile,
+  ensureDefaultSearchSkill,
   loadSkillDefinitions,
   loadSkillsSection,
   resolveSkillFilePath,
@@ -340,5 +341,67 @@ describe('projectConfigLoader', () => {
       relativePath: 'src/a.ts',
       content: 'export const a = 1;',
     });
+  });
+});
+
+/**
+ * 模拟 Rust 端语义：list 不存在的目录会抛错（createInvoke 的宽松版本不会），
+ * 用于验证“skills 目录缺失才引导初始 Skill”的判定。
+ */
+function createStrictFsInvoke(files: Record<string, string>, existingDirs: string[]) {
+  const dirs = new Set(existingDirs);
+  const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+  const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+    calls.push({ command, args });
+    if (command === 'list_workspace_files') {
+      const dir = String(args?.relativePath ?? '');
+      if (dir && !dirs.has(dir)) {
+        throw new Error(`路径不存在: ${dir}`);
+      }
+      const prefix = dir ? `${dir}/` : '';
+      const entries = Object.keys(files)
+        .filter((path) => path.startsWith(prefix))
+        .map((path) => ({ path, name: path.split('/').pop() ?? path, kind: 'file' as const }));
+      return { root: dir, entries, truncated: false };
+    }
+    if (command === 'write_text_file') {
+      const relativePath = String(args?.relativePath ?? '');
+      files[relativePath] = String(args?.content ?? '');
+      dirs.add(relativePath.split('/').slice(0, -1).join('/'));
+      return true;
+    }
+    throw new Error(`unexpected command: ${command}`);
+  }) as unknown as InvokeFn;
+  return { invoke, calls };
+}
+
+describe('ensureDefaultSearchSkill', () => {
+  it('skills 目录不存在时写入内置 search Skill', async () => {
+    const { invoke, calls } = createStrictFsInvoke({}, []);
+
+    expect(await ensureDefaultSearchSkill(invoke, '/ws')).toBe(true);
+
+    const write = calls.find((call) => call.command === 'write_text_file');
+    expect(write?.args?.relativePath).toBe('.CodePapr/skills/search/SKILL.md');
+    expect(String(write?.args?.content)).toContain('name: search');
+  });
+
+  it('按语言选择内置模板', async () => {
+    const { invoke, calls } = createStrictFsInvoke({}, []);
+
+    await ensureDefaultSearchSkill(invoke, '/ws', 'en');
+
+    const write = calls.find((call) => call.command === 'write_text_file');
+    expect(String(write?.args?.content)).toContain('Verifiable research');
+  });
+
+  it('目录已存在（含空目录）时不复活、不写盘', async () => {
+    const emptyDir = createStrictFsInvoke({}, ['.CodePapr/skills']);
+    expect(await ensureDefaultSearchSkill(emptyDir.invoke, '/ws')).toBe(false);
+    expect(emptyDir.calls.some((call) => call.command === 'write_text_file')).toBe(false);
+
+    const withSkill = createStrictFsInvoke({ '.CodePapr/skills/notes/SKILL.md': '# n' }, ['.CodePapr/skills']);
+    expect(await ensureDefaultSearchSkill(withSkill.invoke, '/ws')).toBe(false);
+    expect(withSkill.calls.some((call) => call.command === 'write_text_file')).toBe(false);
   });
 });

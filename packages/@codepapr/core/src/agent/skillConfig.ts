@@ -93,7 +93,9 @@ function parseFrontmatter(raw: string): Frontmatter {
         const nextLine = lines[j]!;
         if (nextLine.trim() === '') { j++; continue; }
         const indent = nextLine.match(/^(\s*)/)?.[1]?.length ?? 0;
-        if (indent > 0 && !nextLine.match(/^[A-Za-z][\w-]*\s*:\s/)) {
+        // 块标量内容只看缩进：缩进行即使形如 `key: value` 也属于块值，
+        // 只有顶格（下一层键或块结束）才终止收集。
+        if (indent > 0) {
           blockLines.push(nextLine.trim());
           j++;
         } else {
@@ -174,7 +176,7 @@ export function isSkillAvailableToLoad(
     return false;
   }
 
-  const matched = skills.find((skill) => {
+  const matched = skills.filter((skill) => {
     const catalog = resolveSkillCatalogName(skill);
     const leaf = resolveSkillLeafName(skill);
     return (
@@ -187,10 +189,12 @@ export function isSkillAvailableToLoad(
     );
   });
 
-  if (!matched) {
+  if (matched.length === 0) {
     return true;
   }
-  return matched.enabled !== false;
+  // 多个 Skill 共享 name/leaf 时，任一匹配项被停用即拒绝：
+  // 不能因为先匹配到同名且启用的条目，就把停用的那份读出来。
+  return matched.every((skill) => skill.enabled !== false);
 }
 
 /**
@@ -242,7 +246,7 @@ export function buildSkillsSection(
   return [title, intro, '', ...lines].join('\n');
 }
 
-export const DEFAULT_SEARCH_SKILL_TEMPLATE = `---
+const SEARCH_SKILL_TEMPLATE_ZH_CN = `---
 name: search
 description: 使用公开网页、官方文档和社区资料进行可验证搜索
 ---
@@ -262,3 +266,57 @@ description: 使用公开网页、官方文档和社区资料进行可验证搜�
 - 优先核对官方文档和仓库 README，再参考 issue 或社区答案。
 - 对时效性问题至少核对两个来源，并在回答中说明来源的可信度。
 `;
+
+const SEARCH_SKILL_TEMPLATE_ZH_TW = `---
+name: search
+description: 使用公開網頁、官方文件與社群資料進行可驗證搜尋
+---
+# 搜尋 Skill
+
+當任務需要公開資料、當前事實、第三方 API 用法或報錯排查時，按以下順序搜尋和驗證：
+
+## 優先資料源
+- 官方文件：Microsoft Learn、OpenAI Docs、MDN、Node.js、npm、PyPI、Rust、Tauri、Vite、React。
+- 程式碼與問題：GitHub repositories、GitHub issues、GitHub pull requests。
+- 社群資料：Stack Overflow、套件管理器頁面、維護者部落格。
+
+## 常用搜尋方法
+- 精確報錯使用雙引號，例如 "Cannot find module"。
+- 限定網站使用 site:，例如 site:learn.microsoft.com Azure OpenAI quota。
+- 同時帶上套件名、版本號、執行環境和關鍵錯誤碼。
+- 優先核對官方文件和倉庫 README，再參考 issue 或社群答案。
+- 對時效性問題至少核對兩個來源，並在回答中說明來源的可信度。
+`;
+
+const SEARCH_SKILL_TEMPLATE_EN = `---
+name: search
+description: Verifiable research across public web pages, official docs, and community sources
+---
+# Search Skill
+
+When the task needs public references, current facts, third-party API usage, or error triage, search and verify in this order:
+
+## Preferred sources
+- Official docs: Microsoft Learn, OpenAI Docs, MDN, Node.js, npm, PyPI, Rust, Tauri, Vite, React.
+- Code and issues: GitHub repositories, GitHub issues, GitHub pull requests.
+- Community: Stack Overflow, package registry pages, maintainer blogs.
+
+## Common techniques
+- Quote exact errors, for example "Cannot find module".
+- Scope a site with site:, for example site:learn.microsoft.com Azure OpenAI quota.
+- Include the library name, version, runtime environment, and the key error code together.
+- Check official docs and repo READMEs first, then issues or community answers.
+- For time-sensitive questions, verify at least two sources and state their reliability.
+`;
+
+export function getDefaultSearchSkillTemplate(lang?: string): string {
+  if (lang === 'en') {
+    return SEARCH_SKILL_TEMPLATE_EN;
+  }
+  if (lang === 'zh-TW') {
+    return SEARCH_SKILL_TEMPLATE_ZH_TW;
+  }
+  return SEARCH_SKILL_TEMPLATE_ZH_CN;
+}
+
+export const DEFAULT_SEARCH_SKILL_TEMPLATE = getDefaultSearchSkillTemplate('zh-CN');

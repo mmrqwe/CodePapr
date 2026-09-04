@@ -1326,18 +1326,20 @@ fn skill_available_to_load(needle: &str, catalog: &[RuntimeSkillEntry]) -> bool 
     if needle.is_empty() {
         return false;
     }
-    let matched = catalog.iter().find(|skill| {
-        skill_catalog_name(skill) == needle
-            || skill_leaf_name(skill) == needle
-            || skill.id == needle
-            || skill.display_name == needle
-            || skill.name == needle
-            || skill.source_path == needle
-    });
-    match matched {
-        Some(skill) => skill.enabled,
-        None => true,
-    }
+    let matched: Vec<&RuntimeSkillEntry> = catalog
+        .iter()
+        .filter(|skill| {
+            skill_catalog_name(skill) == needle
+                || skill_leaf_name(skill) == needle
+                || skill.id == needle
+                || skill.display_name == needle
+                || skill.name == needle
+                || skill.source_path == needle
+        })
+        .collect();
+    // 多个 Skill 共享 name/leaf 时，任一匹配项被停用即拒绝：
+    // 不能因为先匹配到同名且启用的条目，就把停用的那份读出来。
+    matched.is_empty() || matched.iter().all(|skill| skill.enabled)
 }
 
 fn skill_catalog_name(skill: &RuntimeSkillEntry) -> String {
@@ -1999,6 +2001,30 @@ mod tests {
             Err(error) => error,
         };
         assert!(err.contains("已停用"), "{err}");
+    }
+
+    #[test]
+    fn skill_available_to_load_rejects_when_any_name_match_disabled() {
+        let catalog = vec![
+            RuntimeSkillEntry {
+                name: "shared".to_string(),
+                id: "alpha".to_string(),
+                ..Default::default()
+            },
+            RuntimeSkillEntry {
+                name: "shared".to_string(),
+                id: "beta".to_string(),
+                enabled: false,
+                ..Default::default()
+            },
+        ];
+        // 同名两条、其中一条停用：按共享名查询必须被拒绝（不能只看先命中的启用项）。
+        assert!(!skill_available_to_load("shared", &catalog));
+        // 精确 id 只命中启用项：仍然允许。
+        assert!(skill_available_to_load("alpha", &catalog));
+        // 目录外的名字维持“不存在即放行”的既有语义。
+        assert!(skill_available_to_load("gamma", &catalog));
+        assert!(!skill_available_to_load("  ", &catalog));
     }
 
     #[test]
