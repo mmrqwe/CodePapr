@@ -885,7 +885,7 @@ describe('app_start 后端启动工作目录', () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'install_app_npm_deps') return 'skipped';
       if (command === 'allocate_app_port') return typeof args?.preferred === 'number' ? args.preferred : 3456;
-      if (command === 'start_workspace_background_command') {
+      if (command === 'start_app_background_command') {
         return { pid: 4242, started: true, previewUrl: args?.previewUrl ?? null };
       }
       if (command === 'check_port_available_structured') return { v4: true, v6: false };
@@ -900,16 +900,19 @@ describe('app_start 后端启动工作目录', () => {
     ).resolves.toMatchObject({ appId: 'demo-app', pid: 4242, started: true });
 
     const spawnCall = invokeMock.mock.calls.find(
-      ([command]) => command === 'start_workspace_background_command',
+      ([command]) => command === 'start_app_background_command',
     );
-    // 旧实现不带 workdir，Rust 侧 cwd=工作区根，`node server.js` 找不到模块秒退
+    // 旧实现不带 workdir，Rust 侧 cwd=工作区根，`node server.js` 找不到模块秒退。
+    // 新实现改走 start_app_background_command：cwd 由服务端按 appId resolve_app_dir
+    // 解析（workspace/global 都对），前端不再传 workdir 字符串。
     expect(spawnCall?.[1]).toMatchObject({
       command: 'node',
       args: ['server.js'],
-      workdir: '.CodePapr/apps/demo-app',
+      appId: 'demo-app',
       sandbox: { network: true, workspaceWrite: false, allowBind: true },
       env: { PORT: '3456', HOST: '127.0.0.1' },
     });
+    expect(spawnCall?.[1]).not.toHaveProperty('workdir');
   });
 
   it('后端沙箱使用设置覆盖后的生效档（覆盖只能收窄）', async () => {
@@ -938,7 +941,7 @@ describe('app_start 后端启动工作目录', () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'install_app_npm_deps') return 'skipped';
       if (command === 'allocate_app_port') return typeof args?.preferred === 'number' ? args.preferred : 3456;
-      if (command === 'start_workspace_background_command') {
+      if (command === 'start_app_background_command') {
         return { pid: 4242, started: true, previewUrl: args?.previewUrl ?? null };
       }
       if (command === 'check_port_available_structured') return { v4: true, v6: false };
@@ -952,7 +955,7 @@ describe('app_start 后端启动工作目录', () => {
     ).resolves.toMatchObject({ appId: 'demo-app', pid: 4242, started: true });
 
     const spawnCall = invokeMock.mock.calls.find(
-      ([command]) => command === 'start_workspace_background_command',
+      ([command]) => command === 'start_app_background_command',
     );
     expect(spawnCall?.[1]).toMatchObject({
       sandbox: { network: false, workspaceWrite: false, allowBind: true },
@@ -983,7 +986,7 @@ describe('app_start 后端启动工作目录', () => {
       if (command === 'stop_background_process') return { stopped: true };
       if (command === 'install_app_npm_deps') return 'skipped';
       if (command === 'allocate_app_port') return typeof args?.preferred === 'number' ? args.preferred : 3456;
-      if (command === 'start_workspace_background_command') {
+      if (command === 'start_app_background_command') {
         return { pid: 222, started: true, previewUrl: args?.previewUrl ?? null };
       }
       if (command === 'check_port_available_structured') return { v4: true, v6: false };
@@ -1008,7 +1011,7 @@ describe('app_start 后端启动工作目录', () => {
       ),
     ).toBe(true);
     const spawnCall = invokeMock.mock.calls.find(
-      ([command]) => command === 'start_workspace_background_command',
+      ([command]) => command === 'start_app_background_command',
     );
     expect(spawnCall?.[1]).toMatchObject({
       sandbox: { network: false, workspaceWrite: false, allowBind: true },
@@ -1063,7 +1066,7 @@ describe('app_start 后端启动工作目录', () => {
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'install_app_npm_deps') return 'skipped';
       if (command === 'allocate_app_port') return typeof args?.preferred === 'number' ? args.preferred : 3456;
-      if (command === 'start_workspace_background_command') {
+      if (command === 'start_app_background_command') {
         return { pid: 4242, started: true, previewUrl: args?.previewUrl ?? null };
       }
       // math-mentor 场景：进程秒退，端口始终无人监听（v4/v6 都 refused）

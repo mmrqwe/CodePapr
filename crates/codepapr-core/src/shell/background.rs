@@ -793,7 +793,86 @@ pub fn start_workspace_background_command(
 
     let workspace = canonical_workspace(&workspace_path)?;
 
-    if let Some(constraint) = scan_script_for_version_constraint(&workspace, &command) {
+    // 后端 app 的 cwd 是它的 app 目录（workdir 由 app_start 传入
+    // .CodePapr/apps/<appId>）：manifest args 里的相对脚本（"server.js"）
+    // 相对该目录解析——用工作区根当 cwd 会「Cannot find module」秒退。
+    // 沙箱的 app 目录写放行也按同一 cwd 推导，两侧永不漂移。
+    let cwd = resolve_shell_workdir(&workspace, workdir)?;
+    start_background_common(
+        &workspace,
+        workspace.to_string_lossy().to_string(),
+        command,
+        args.unwrap_or_default(),
+        cwd,
+        preview_url,
+        sandbox,
+        env,
+    )
+}
+
+/// papr 后端 app 专用启动：cwd 由服务端 `resolve_app_dir` 解析（workspace
+/// 优先 → global 兜底），不接受客户端传路径。global 应用（~/.codepapr/apps/
+/// <id>）在工作区之外，走通用 workdir 会被「受保护隐藏目录」外部路径闸门
+/// 拒绝，这里以 app 目录自身为沙箱根放行，同时进程仍登记在工作区键下，
+/// list/stop/对账逻辑与 workspace 应用一致。
+pub fn start_app_background_command(
+    workspace_path: String,
+    app_id: String,
+    command: String,
+    args: Option<Vec<String>>,
+    preview_url: Option<String>,
+    sandbox: Option<SandboxAccessArgs>,
+    env: Option<HashMap<String, String>>,
+) -> Result<BackgroundCommandResult, String> {
+    if !command_allowed(&command) {
+        return Err(format!(
+            "命令 `{command}` 被安全策略阻止。已阻止的入口: {}",
+            BLOCKED_COMMANDS.join(", ")
+        ));
+    }
+    if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[])) {
+        return Err(format!(
+            "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
+        ));
+    }
+
+    let app_dir = crate::db::resolve_app_dir(&workspace_path, &app_id)?;
+    let cwd = fs::canonicalize(&app_dir)
+        .map_err(|_| format!("应用目录不存在: {}", app_dir.display()))?;
+    if !cwd.is_dir() {
+        return Err(format!("应用目录不是目录: {}", app_dir.display()));
+    }
+    let (sandbox_root, register_key) = match canonical_workspace(&workspace_path) {
+        Ok(ws) if cwd.starts_with(&ws) => (ws.clone(), ws.to_string_lossy().into_owned()),
+        Ok(ws) => (cwd.clone(), ws.to_string_lossy().into_owned()),
+        Err(_) => (cwd.clone(), "__global__".to_string()),
+    };
+    start_background_common(
+        &sandbox_root,
+        register_key,
+        command,
+        args.unwrap_or_default(),
+        cwd,
+        preview_url,
+        sandbox,
+        env,
+    )
+}
+
+/// 两个启动入口共用的执行体：脚本约束扫描 → 受限命令校验 → 命令路径闸门 →
+/// sandboxed spawn → 注册后台进程表。workspace 参数是沙箱根（外部路径闸门
+/// 以它为界），register_workspace 是进程注册表里的工作区键（list/stop 匹配）。
+fn start_background_common(
+    workspace: &Path,
+    register_workspace: String,
+    command: String,
+    args: Vec<String>,
+    cwd: PathBuf,
+    preview_url: Option<String>,
+    sandbox: Option<SandboxAccessArgs>,
+    env: Option<HashMap<String, String>>,
+) -> Result<BackgroundCommandResult, String> {
+    if let Some(constraint) = scan_script_for_version_constraint(workspace, &command) {
         return Err(format!(
             "脚本 `{command}` 包含未加引号的版本约束 `{constraint}`，\
             shell 会将其中的 > 或 = 解析为重定向操作符并生成空文件。\
@@ -801,25 +880,19 @@ pub fn start_workspace_background_command(
         ));
     }
 
-    let args = args.unwrap_or_default();
-    validate_restricted_command(&command, &args, &workspace)?;
-    super::path_guard::ensure_command_paths_accessible(&workspace, &command, &args)?;
-    // 后端 app 的 cwd 是它的 app 目录（workdir 由 app_start 传入
-    // .CodePapr/apps/<appId>）：manifest args 里的相对脚本（"server.js"）
-    // 相对该目录解析——用工作区根当 cwd 会「Cannot find module」秒退。
-    // 沙箱的 app 目录写放行也按同一 cwd 推导，两侧永不漂移。
-    let cwd = resolve_shell_workdir(&workspace, workdir)?;
+    validate_restricted_command(&command, &args, workspace)?;
+    super::path_guard::ensure_command_paths_accessible(workspace, &command, &args)?;
     let preview_url = preview_url
         .map(|raw_url| parse_browser_url(&raw_url))
         .transpose()?;
-    let workspace_path = workspace.to_string_lossy().to_string();
+    let workspace_path = register_workspace;
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW_BG: u32 = 0x08000000;
     // sandboxed_command 内部已把 args 追加到 Command（macOS: sandbox-exec -p <profile>
     // <program> <args...>；其他平台: <program> <args...>），此处不得再次 .args(&args)，
     // 否则所有后台命令都会以重复的 argv 启动（如 `node server.js server.js`）。
-    let mut bg_cmd = sandboxed_command(&command, &args, &workspace, sandbox.map(Into::into), &cwd)?;
+    let mut bg_cmd = sandboxed_command(&command, &args, workspace, sandbox.map(Into::into), &cwd)?;
     bg_cmd
         // GUI 壳进程的 PATH 只有系统目录（无 /opt/homebrew/bin 等），不注入则
         // sandbox-exec 里 exec "node"/"python" 直接失败，后端进程秒退且无任何日志。

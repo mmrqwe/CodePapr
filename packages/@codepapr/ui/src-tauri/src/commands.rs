@@ -786,6 +786,28 @@ pub async fn start_workspace_shell_background_command(
 }
 
 #[tauri::command]
+pub async fn start_app_background_command(
+    app: AppHandle,
+    workspace_path: String,
+    app_id: String,
+    command: String,
+    args: Option<Vec<String>>,
+    preview_url: Option<String>,
+    sandbox: Option<Value>,
+    env: Option<std::collections::HashMap<String, String>>,
+) -> Result<Value, String> {
+    rpc(&app, "shell/startAppBackground", json!({
+        "workspacePath": workspace_path,
+        "appId": app_id,
+        "command": command,
+        "args": args,
+        "previewUrl": preview_url,
+        "sandbox": sandbox,
+        "env": env,
+    })).await
+}
+
+#[tauri::command]
 pub async fn list_background_processes(app: AppHandle, workspace_path: Option<String>) -> Result<Value, String> {
     rpc(&app, "shell/listBackground", json!({ "workspacePath": workspace_path })).await
 }

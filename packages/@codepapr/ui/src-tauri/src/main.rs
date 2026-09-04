@@ -240,6 +240,7 @@ fn main() {
             commands::poll_workspace_task,
             commands::start_workspace_background_command,
             commands::start_workspace_shell_background_command,
+            commands::start_app_background_command,
             commands::list_background_processes,
             commands::log_ui_event,
             commands::background_process_alive,

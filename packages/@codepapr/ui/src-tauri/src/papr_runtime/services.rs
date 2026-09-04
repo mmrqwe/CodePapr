@@ -726,7 +726,7 @@ pub fn papr_delete_app(app_id: String) -> Result<(), String> {
     Ok(())
 }
 
-fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, String> {
+pub(crate) fn stop_app_backend_processes(workspace_path: &str, port: u16) -> Result<usize, String> {
     let target_url = format!("http://localhost:{}/", port);
     let target_url_no_slash = format!("http://localhost:{}", port);
 

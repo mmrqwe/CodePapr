@@ -32,6 +32,14 @@ fn runtime_backend_port(app_id: &str, fallback: Option<u16>) -> Option<u16> {
         .or(fallback)
 }
 
+/// 运行时注册的 app 后端端口（可能与 manifest 声明不同）。供市场卸载按端口兜底停进程。
+pub(crate) fn registered_backend_port(app_id: &str) -> Option<u16> {
+    app_backend_ports()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(app_id).copied())
+}
+
 /// Build a plain HTTP response with the given status and body. Status codes
 /// and the CORS header are static constants, so response construction
 /// cannot fail.
@@ -151,10 +159,12 @@ pub fn app_frontend_mtime(workspace_path: String, app_id: String) -> Result<u64,
     if !is_valid_app_id(&app_id) {
         return Err("invalid app id".to_string());
     }
-    let app_dir = std::path::PathBuf::from(&workspace_path)
-        .join(".CodePapr")
-        .join("apps")
-        .join(&app_id);
+    // 走 resolve_app_dir：global 应用（~/.codepapr/apps/<id>）也要能算出 mtime，
+    // 否则热重载轮询对 global 应用恒为 0、永不触发。
+    let app_dir = match codepapr_core::db::resolve_app_dir(&workspace_path, &app_id) {
+        Ok(dir) => dir,
+        Err(_) => return Ok(0),
+    };
     let mut latest: u64 = 0;
     collect_frontend_mtime(&app_dir, &mut latest);
     Ok(latest)
@@ -189,10 +199,9 @@ fn app_dir_path(workspace_path: &str, app_id: &str) -> Result<std::path::PathBuf
     if !is_valid_app_id(app_id) {
         return Err("invalid app id".to_string());
     }
-    Ok(std::path::PathBuf::from(workspace_path)
-        .join(".CodePapr")
-        .join("apps")
-        .join(app_id))
+    // 与协议/存储同一解析（workspace manifest 优先 → global → 回退 workspace），
+    // 快照/导出/依赖安装不再对 global 应用错位成 <ws>/.CodePapr/apps/<id>。
+    codepapr_core::db::resolve_app_dir(workspace_path, app_id)
 }
 
 fn skip_app_export_entry(name: &str) -> bool {
@@ -221,7 +230,15 @@ pub fn install_app_npm_deps(workspace_path: String, app_id: String) -> Result<St
         return Ok("skipped: node_modules exists".to_string());
     }
 
-    let workspace = codepapr_core::shared::canonical_workspace(&workspace_path)?;
+    // 沙箱根：workspace 应用用工作区；global 应用（~/.codepapr/apps/<id>）在
+    // 工作区之外，非 macOS 的 sandboxed_command 要求 cwd 位于沙箱根内，
+    // 因此退化为以 app 目录自身为根（npm install 的写权限本就只应在 app 目录，
+    // 也不能取 apps 父目录——那会放行所有其它 global 应用目录）。
+    let workspace = match codepapr_core::shared::canonical_workspace(&workspace_path) {
+        Ok(ws) if app_dir.starts_with(&ws) => ws,
+        _ => app_dir.clone(),
+    };
+    let workspace = std::fs::canonicalize(&workspace).unwrap_or(workspace);
     let access = SandboxAccess {
         network: true,
         workspace_write: false,

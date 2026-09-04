@@ -19,6 +19,7 @@ import {
   uninstallMarketApp,
 } from './marketAppInstall';
 import type { PaprAppListing } from '../utils/marketAppTypes';
+import { useAppRuntimeStore } from '../store/appRuntimeStore';
 
 const mockListing: PaprAppListing = {
   id: 'weather-hud',
@@ -321,5 +322,53 @@ describe('marketAppInstall supply-chain guards', () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/local|网络/);
     expect(invokeMock).not.toHaveBeenCalledWith('papr_install_app_files', expect.anything());
+  });
+});
+
+describe('uninstallMarketApp stops the backend process (B3)', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue('');
+  });
+
+  it('stops the running backend by pid before removing files', async () => {
+    useAppRuntimeStore.setState((state) => ({
+      ...state,
+      apps: [
+        {
+          appId: 'weather-hud',
+          title: 'Weather HUD',
+          html: '',
+          filePath: '.CodePapr/apps/weather-hud/index.html',
+          command: 'node',
+          args: ['server.js'],
+          port: 3456,
+          pid: 9001,
+          url: 'http://127.0.0.1:3456/',
+          updatedAt: 0,
+          mountSignal: 0,
+          scope: 'workspace',
+        } as unknown as (typeof state.apps)[number],
+      ],
+    }));
+
+    const res = await uninstallMarketApp({
+      appId: 'weather-hud',
+      scope: 'workspace',
+      workspacePath: '/tmp/ws',
+      purgeData: true,
+    });
+    expect(res.ok).toBe(true);
+
+    const stopIdx = invokeMock.mock.calls.findIndex(
+      ([command, args]) => command === 'stop_background_process' && args?.pid === 9001,
+    );
+    const uninstallIdx = invokeMock.mock.calls.findIndex(
+      ([command]) => command === 'papr_uninstall_app',
+    );
+    expect(stopIdx).toBeGreaterThanOrEqual(0);
+    expect(uninstallIdx).toBeGreaterThanOrEqual(0);
+    // 必须先停进程再删文件，否则孤儿进程继续从已删除目录服务旧代码。
+    expect(stopIdx).toBeLessThan(uninstallIdx);
   });
 });

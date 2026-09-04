@@ -163,8 +163,12 @@ export default function App() {
     // 扫描 .CodePapr/apps/ 目录，恢复之前创建的应用。
     // 应用文件持久化在磁盘上，但注册信息（内存 map + store）在进程重启后丢失，
     // 因此需要在 workspace 打开时重新注册。
+    // 无工作区时也要恢复 global 应用（空串 = scan 只扫 ~/.codepapr/apps）：
+    // 否则市场装到全局的应用在冷启动无工作区时不可见、协议未注册。
     if (workspacePath) {
       void restoreWorkspaceApps(workspacePath, mountApp);
+    } else {
+      void restoreWorkspaceApps('', mountApp);
     }
   }, [workspacePath, clearApps, mountApp]);
 

@@ -2,11 +2,26 @@ import { invoke } from '@tauri-apps/api/core';
 import type { AppInstallScope, PaprAppListing } from '../utils/marketAppTypes';
 import { OFFICIAL_APPS_RAW_BASE } from './marketAppApi';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
+import { usePermissionStore } from '../papr/permissionStore';
 import { isPluginApp, pluginIsEnabled, pluginShouldAutostartOverlay } from '../papr/pluginSurface';
 import { legacyLevelToAccess, LOCAL_ORDER, type PaprLocalAccess } from '../papr/levelGrants';
 
 const GITHUB_TREE_API =
   'https://api.github.com/repos/mmrqwe/codepapr-apps/git/trees/main?recursive=1';
+
+/** 单次下载超时：无 AbortSignal 的裸 fetch 遇到挂死的连接会让安装按钮永久
+ *  置灰（promise 永不 settle）。与 marketSkillInstall 同一模式。 */
+const FETCH_TIMEOUT_MS = 30_000;
+
+async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 interface GithubTreeItem {
   path: string;
@@ -141,7 +156,7 @@ export async function fetchAppTreeFileList(appDirectory: string): Promise<string
     return null;
   }
   try {
-    const res = await fetch(GITHUB_TREE_API, {
+    const res = await fetchWithTimeout(GITHUB_TREE_API, {
       headers: { Accept: 'application/json' },
     });
     if (res.ok) {
@@ -166,10 +181,14 @@ export async function fetchAppTreeFileList(appDirectory: string): Promise<string
 
 export async function downloadAppFiles(
   listing: PaprAppListing,
+  warnings?: string[],
 ): Promise<AppInstallFile[]> {
   const normDir = safeNormDirectory(listing.directory);
   const entryFile = sanitizeRelativePath(listing.entry || 'index.html') || 'index.html';
   const expectedHashes = listing.sha256;
+  const noteOptionalFailure = (rel: string, reason: string) => {
+    warnings?.push(`${rel}: ${reason}`);
+  };
 
   if (Array.isArray(listing.files) && listing.files.length > 0) {
     const explicitFiles = Array.from(
@@ -182,11 +201,12 @@ export async function downloadAppFiles(
     const downloaded: AppInstallFile[] = [];
     for (const rel of explicitFiles) {
       const url = officialRawUrl(normDir, rel);
-      const res = await fetch(url, { headers: { Accept: 'text/plain' } });
+      const res = await fetchWithTimeout(url, { headers: { Accept: 'text/plain' } });
       if (!res.ok) {
         if (rel === 'manifest.json' || rel === entryFile) {
           throw new Error(`下载必要文件失败 (${rel}): HTTP ${res.status}`);
         }
+        noteOptionalFailure(rel, `HTTP ${res.status}`);
         continue;
       }
       const content = await res.text();
@@ -201,11 +221,12 @@ export async function downloadAppFiles(
     const downloaded: AppInstallFile[] = [];
     for (const rel of treeFiles) {
       const url = officialRawUrl(normDir, rel);
-      const res = await fetch(url, { headers: { Accept: 'text/plain' } });
+      const res = await fetchWithTimeout(url, { headers: { Accept: 'text/plain' } });
       if (!res.ok) {
         if (rel === 'manifest.json' || rel === entryFile) {
           throw new Error(`下载必要文件失败 (${rel}): HTTP ${res.status}`);
         }
+        noteOptionalFailure(rel, `HTTP ${res.status}`);
         continue;
       }
       const content = await res.text();
@@ -222,7 +243,7 @@ export async function downloadAppFiles(
     if (downloadedMap.has(rel)) continue;
     const url = officialRawUrl(normDir, rel);
     try {
-      const res = await fetch(url, { headers: { Accept: 'text/plain' } });
+      const res = await fetchWithTimeout(url, { headers: { Accept: 'text/plain' } });
       if (!res.ok) {
         if (rel === 'manifest.json' || rel === entryFile) {
           throw new Error(`下载必要文件失败 (${rel}): HTTP ${res.status}`);
@@ -291,7 +312,7 @@ export async function installMarketApp(options: {
   listing: PaprAppListing;
   scope: AppInstallScope;
   workspacePath?: string | null;
-}): Promise<{ ok: boolean; error?: string; targetDir?: string }> {
+}): Promise<{ ok: boolean; error?: string; targetDir?: string; warnings?: string[] }> {
   const { listing, scope, workspacePath } = options;
 
   if (scope === 'workspace' && !workspacePath) {
@@ -299,7 +320,8 @@ export async function installMarketApp(options: {
   }
 
   try {
-    const files = await downloadAppFiles(listing);
+    const warnings: string[] = [];
+    const files = await downloadAppFiles(listing, warnings);
 
     // 落盘前反欺骗：manifest 自声明权限 ⊆ 市场条目展示权限。
     const manifestFileForCheck = files.find((f) => f.relativePath === 'manifest.json');
@@ -317,35 +339,37 @@ export async function installMarketApp(options: {
       files: files.map((f) => ({ relative_path: f.relativePath, content: f.content })),
     });
 
-    if (workspacePath) {
-      try {
-        const discovered = await invoke<
-          Array<{
-            app_id: string;
-            title: string;
-            html: string;
-            manifest_json: string | null;
-            command: string | null;
-            args: string[] | null;
-            port: number | null;
-            icon: string | null;
-            scope?: 'workspace' | 'global';
-          }>
-        >('scan_workspace_apps', { workspacePath });
+    // 始终 scan+register（global 安装无工作区时用空串：scan_workspace_apps
+    // 空路径只扫 global，resolve_app_dir('') 正确回落 global 目录）。
+    // 旧实现 workspacePath 为空时跳过，global 应用成为"幽灵安装"：
+    // 落盘成功但未注册，协议 404、市场卡片立即回显"未安装"。
+    try {
+      const discovered = await invoke<
+        Array<{
+          app_id: string;
+          title: string;
+          html: string;
+          manifest_json: string | null;
+          command: string | null;
+          args: string[] | null;
+          port: number | null;
+          icon: string | null;
+          scope?: 'workspace' | 'global';
+        }>
+      >('scan_workspace_apps', { workspacePath: workspacePath || '' });
 
-        for (const app of discovered) {
-          if (app.app_id === listing.id) {
-            await invoke('register_app_workspace', {
-              appId: app.app_id,
-              workspacePath,
-              manifestJson: app.manifest_json ?? undefined,
-            });
-            break;
-          }
+      for (const app of discovered) {
+        if (app.app_id === listing.id) {
+          await invoke('register_app_workspace', {
+            appId: app.app_id,
+            workspacePath: workspacePath || '',
+            manifestJson: app.manifest_json ?? undefined,
+          });
+          break;
         }
-      } catch {
-        // non-blocking
       }
+    } catch {
+      // non-blocking
     }
 
     try {
@@ -368,7 +392,7 @@ export async function installMarketApp(options: {
       // ignore
     }
 
-    return { ok: true, targetDir };
+    return { ok: true, targetDir, warnings: warnings.length > 0 ? warnings : undefined };
   } catch (err) {
     return {
       ok: false,
@@ -386,6 +410,19 @@ export async function uninstallMarketApp(options: {
   const { appId, scope, workspacePath, purgeData } = options;
 
   try {
+    // 先停后端（与 app_delete 同口径）：store 的 pid 是权威运行进程；
+    // papr_uninstall_app 内另有按端口兜底。漏停会让进程从已删除目录继续
+    // 服务旧代码并占用端口（math-mentor 同类事故）。
+    const store = useAppRuntimeStore.getState();
+    const running = store.apps.find((a) => a.appId === appId);
+    if (running?.pid) {
+      try {
+        await invoke('stop_background_process', { pid: running.pid, source: 'market-uninstall' });
+      } catch {
+        // best-effort：Rust 侧按端口兜底
+      }
+    }
+
     await invoke('papr_uninstall_app', {
       workspacePath: workspacePath || null,
       scope,
@@ -394,7 +431,7 @@ export async function uninstallMarketApp(options: {
     });
 
     try {
-      const store = useAppRuntimeStore.getState();
+      usePermissionStore.getState().clearManifest(appId);
       store.unpinPlugin?.(appId);
       store.closeApp?.(appId);
     } catch {

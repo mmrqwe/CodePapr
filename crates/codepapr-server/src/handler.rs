@@ -240,6 +240,17 @@ pub async fn handle_request(ctx: &Arc<ServerContext>, method: &str, params: Valu
             opt_sandbox(&params),
             parse_env_map(&params),
         )?),
+        // papr 后端 app 专用：cwd 由服务端 resolve_app_dir 按 appId 解析，
+        // global 应用无需工作区也能启动（workspacePath 可为空）。
+        "shell/startAppBackground" => json_ok(codepapr_core::shell::background::start_app_background_command(
+            opt_string(&params, "workspacePath").unwrap_or_default(),
+            require_string(&params, "appId")?,
+            require_string(&params, "command")?,
+            parse_string_vec(&params, "args"),
+            opt_string(&params, "previewUrl"),
+            opt_sandbox(&params),
+            parse_env_map(&params),
+        )?),
         "shell/startShellBackground" => json_ok(codepapr_core::shell::background::start_workspace_shell_background_command(
             require_workspace(ctx, &params)?,
             require_string(&params, "command")?,

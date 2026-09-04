@@ -205,7 +205,7 @@ describe('AppDockPanel', () => {
     invokeMock.mockImplementation(async (command?: string, args?: Record<string, unknown>) => {
       if (command === 'install_app_npm_deps') return 'skipped';
       if (command === 'allocate_app_port') return args?.preferred ?? 3000;
-      if (command === 'start_workspace_background_command') return { pid: 42 };
+      if (command === 'start_app_background_command') return { pid: 42 };
       if (command === 'check_port_available_structured') return { v4: true, v6: false };
       if (command === 'check_port_owned_by') return true;
       if (command === 'check_port_bind_address') return ['127.0.0.1'];
@@ -235,7 +235,7 @@ describe('AppDockPanel', () => {
     });
 
     expect(invokeMock).toHaveBeenCalledWith(
-      'start_workspace_background_command',
+      'start_app_background_command',
       expect.objectContaining({ command: 'npm' }),
     );
     expect(useAppRuntimeStore.getState().openedAppId).toBe('app-1');

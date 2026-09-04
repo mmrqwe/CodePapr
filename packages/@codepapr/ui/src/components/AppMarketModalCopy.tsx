@@ -42,6 +42,8 @@ export function copy(lang: Lang | undefined) {
       pinPlugin: 'Show / Pin',
       appInstalledSuccess: (title: string, scope: string) =>
         `${title} installed successfully (${scope === 'global' ? 'Global' : 'Project'})`,
+      partialInstallWarning: (count: number) =>
+        `Installed, but ${count} optional file(s) failed to download; the app may be missing resources.`,
       uninstallSuccess: (title: string) => `${title} uninstalled`,
       uninstallConfirm: (title: string, isPlugin?: boolean) =>
         isPlugin ? `Uninstall plugin "${title}"?` : `Uninstall "${title}"?`,
@@ -98,6 +100,8 @@ export function copy(lang: Lang | undefined) {
       pinPlugin: '顯示 / 置頂',
       appInstalledSuccess: (title: string, scope: string) =>
         `${title} 安裝成功 (${scope === 'global' ? '全域' : '專案'})`,
+      partialInstallWarning: (count: number) =>
+        `安裝完成，但有 ${count} 個可選檔案下載失敗，應用可能缺少部分資源。`,
       uninstallSuccess: (title: string) => `已卸載 ${title}`,
       uninstallConfirm: (title: string, isPlugin?: boolean) =>
         isPlugin ? `確定卸載外掛「${title}」？` : `確定卸載「${title}」？`,
@@ -153,6 +157,8 @@ export function copy(lang: Lang | undefined) {
     pinPlugin: '显示 / 置顶',
     appInstalledSuccess: (title: string, scope: string) =>
       `${title} 安装成功 (${scope === 'global' ? '全局' : '项目'})`,
+    partialInstallWarning: (count: number) =>
+      `安装完成，但有 ${count} 个可选文件下载失败，应用可能缺少部分资源。`,
     uninstallSuccess: (title: string) => `已卸载 ${title}`,
     uninstallConfirm: (title: string, isPlugin?: boolean) =>
       isPlugin ? `确定卸载插件「${title}」？` : `确定卸载「${title}」？`,

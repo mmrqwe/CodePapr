@@ -697,11 +697,13 @@ export async function launchAppBackend(
   // cwd 必须是 app 目录：manifest args 里的相对脚本（如 "server.js"）相对
   // 该目录解析。用工作区根当 cwd 时 node 会「Cannot find module」秒退，
   // 表现为端口轮询全 refused 的启动失败（math-mentor 事故）。
-  const result = await invoke<{ pid: number }>('start_workspace_background_command', {
+  // 走 start_app_background_command：由服务端 resolve_app_dir 按 appId 解析目录，
+  // global 应用（~/.codepapr/apps/<id>）不再被硬编码成 <ws>/.CodePapr/apps 而启动失败。
+  const result = await invoke<{ pid: number }>('start_app_background_command', {
     workspacePath,
+    appId: app.appId,
     command: app.command,
     args: app.args,
-    workdir: `.CodePapr/apps/${app.appId}`,
     previewUrl: url,
     sandbox: {
       network: appAccess.network,

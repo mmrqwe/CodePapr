@@ -129,12 +129,15 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
         }
 
         showToast(c.appInstalledSuccess(listingTitle(listing, settings.lang), scope));
-        if (workspacePath) {
-          try {
-            await remountDiscoveredApps(workspacePath, listing.id);
-          } catch {
-            // ignore
-          }
+        if (res.warnings && res.warnings.length > 0) {
+          showToast(c.partialInstallWarning(res.warnings.length));
+        }
+        // 无工作区也要重挂（空串 = 只扫 global）：否则 global 安装后卡片
+        // 立即回显"未安装"（幽灵安装）。
+        try {
+          await remountDiscoveredApps(workspacePath || '', listing.id);
+        } catch {
+          // ignore
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
