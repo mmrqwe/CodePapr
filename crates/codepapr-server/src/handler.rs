@@ -104,6 +104,8 @@ pub async fn handle_request(ctx: &Arc<ServerContext>, method: &str, params: Valu
             opt_usize(&params, "maxBytesPerFile"),
             opt_bool(&params, "includeCodepaprApps"),
             opt_bool(&params, "includeIgnoredDirs"),
+            parse_string_vec(&params, "includeGlobs"),
+            parse_string_vec(&params, "excludeGlobs"),
         ).await?),
         "fs/searchPaths" => json_ok(codepapr_core::workspace_fs::search::search_workspace_paths(
             require_workspace(ctx, &params)?,
@@ -113,6 +115,8 @@ pub async fn handle_request(ctx: &Arc<ServerContext>, method: &str, params: Valu
             opt_usize(&params, "maxResults"),
             opt_bool(&params, "includeCodepaprApps"),
             opt_bool(&params, "includeIgnoredDirs"),
+            parse_string_vec(&params, "includeGlobs"),
+            parse_string_vec(&params, "excludeGlobs"),
         ).await?),
         "fs/checkExternalPath" => json_ok(codepapr_core::workspace_fs::access::check_external_path(
             require_workspace(ctx, &params)?,
@@ -505,6 +509,7 @@ pub async fn handle_request(ctx: &Arc<ServerContext>, method: &str, params: Valu
             opt_string(&params, "searxngEngines"),
         ).await?),
         "web/fetchUrl" => json_ok(codepapr_core::web::fetch::fetch_web_url(require_string(&params, "url")?, opt_usize(&params, "maxBytes")).await?),
+        "web/testSearxng" => json_ok(codepapr_core::web::search::probe_searxng(require_string(&params, "baseUrl")?).await),
         "web/downloadFile" => json_ok(codepapr_core::web::fetch::download_web_file(require_workspace(ctx, &params)?, require_string(&params, "url")?, opt_string(&params, "relativePath")).await?),
 
         // ── Task queue ────────────────────────────────────────────────────

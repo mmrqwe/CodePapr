@@ -41,7 +41,9 @@ pub(crate) const MAX_PATH_SEARCH_RESULTS: usize = 120;
 pub(crate) const MAX_SEARCH_RESULTS: usize = 80;
 pub(crate) const DEFAULT_SEARCH_MAX_FILE_BYTES: usize = 500_000;
 pub(crate) const MAX_SEARCH_MAX_FILE_BYTES: usize = 1_000_000;
-pub(crate) const DEFAULT_SEARCH_CONTEXT_LINES: usize = 0;
+// 默认带 1 行上下文：0 行时 Agent 常拿匹配行猜语义，多 1 行显著减少误读
+// （R2）；再大会线性放大 token 消耗，保持 1。
+pub(crate) const DEFAULT_SEARCH_CONTEXT_LINES: usize = 1;
 pub(crate) const MAX_SEARCH_CONTEXT_LINES: usize = 8;
 pub(crate) const DEFAULT_SEARCH_MAX_MATCHES_PER_FILE: usize = 5;
 pub(crate) const MAX_SEARCH_MAX_MATCHES_PER_FILE: usize = 20;

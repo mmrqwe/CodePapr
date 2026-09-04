@@ -82,7 +82,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 5. grep ────
   {
     name: 'grep',
-    description: '按正则表达式搜索项目文件内容，返回匹配位置与上下文。正则无效时自动降级为字面量搜索并在 note 中说明。支持 UTF-8/UTF-16/GB18030 等编码。semantic:true 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。',
+    description: '按正则表达式搜索项目文件内容，返回匹配位置与上下文。正则无效时自动降级为字面量搜索并在 note 中说明。支持 UTF-8/UTF-16/GB18030 等编码。semantic:true 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。结果 note 会解释被截断(truncated)与跳过文件(skippedFiles：超大/二进制/读取失败)的原因。',
     parameters: {
       type: 'object',
       properties: {
@@ -90,9 +90,11 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
         semantic: { type: 'boolean', description: '设为 true 则使用 LSP workspace symbol 语义检索；无 LSP 时降级正则搜索。' },
         relativePath: { type: 'string', description: '语义模式下的锚点文件路径，用于确定语言服务器。' },
         caseSensitive: { type: 'boolean', description: '区分大小写；默认 smart-case。' },
-        contextLines: { type: 'number', description: '匹配前后额外返回多少行上下文，默认 0，最大 8。' },
+        contextLines: { type: 'number', description: '匹配前后额外返回多少行上下文，默认 1，最大 8。' },
         maxResults: { type: 'number', description: '最多返回多少条匹配，默认 80。' },
         maxMatchesPerFile: { type: 'number', description: '单个文件最多返回多少条匹配，默认 5，最大 20。' },
+        includeGlobs: { type: 'array', items: { type: 'string' }, description: '仅搜索匹配这些 glob 的文件，如 ["src/**/*.ts"]；无斜杠模式按文件名匹配任意层级（如 "*.rs"）。' },
+        excludeGlobs: { type: 'array', items: { type: 'string' }, description: '排除匹配这些 glob 的文件，如 ["**/*.lock"]。' },
       },
       required: ['query'],
     },

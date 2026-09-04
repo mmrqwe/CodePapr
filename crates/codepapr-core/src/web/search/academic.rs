@@ -8,7 +8,6 @@ use crate::web::text::normalize_search_text;
 
 use super::{
     push_unique_search_result, WebSearchEntry, ARXIV_API_ENDPOINT, OPENALEX_API_ENDPOINT,
-    WIKIPEDIA_API_ENDPOINT,
 };
 
 #[derive(Deserialize)]
@@ -44,12 +43,17 @@ pub(crate) struct OpenAlexWork {
     pub(crate) doi: Option<String>,
 }
 
+/// 按语言版本检索 Wikipedia（W3）：中文查询走 zh.wikipedia.org，避免英文百科噪声。
+/// `language` 取 "zh" / "en"（其余值按 en 处理）。
 pub(crate) fn collect_wikipedia_results(
     client: &reqwest::blocking::Client,
     query: &str,
     max_results: usize,
+    language: &str,
 ) -> Result<Vec<WebSearchEntry>, String> {
-    let mut search_url = reqwest::Url::parse(WIKIPEDIA_API_ENDPOINT)
+    let subdomain = if language.starts_with("zh") { "zh" } else { "en" };
+    let api_endpoint = format!("https://{subdomain}.wikipedia.org/w/api.php");
+    let mut search_url = reqwest::Url::parse(&api_endpoint)
         .map_err(|err| format!("Wikipedia URL 构造失败: {err}"))?;
     {
         let mut pairs = search_url.query_pairs_mut();
@@ -90,7 +94,7 @@ pub(crate) fn collect_wikipedia_results(
         if let Some(items) = query_container.search {
             for item in items.into_iter().take(max_results) {
                 let url = format!(
-                    "https://en.wikipedia.org/wiki/{}",
+                    "https://{subdomain}.wikipedia.org/wiki/{}",
                     item.title.replace(' ', "_")
                 );
                 push_unique_search_result(

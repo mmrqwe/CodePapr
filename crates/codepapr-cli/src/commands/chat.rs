@@ -620,13 +620,15 @@ fn get_default_cli_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "grep",
-            "description": "Search text patterns in workspace files.",
+            "description": "Search text patterns in workspace files. Results include truncated/skippedFiles flags and a note explaining skips (oversize/binary/unreadable).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Text pattern" },
                     "caseSensitive": { "type": "boolean" },
                     "isRegexp": { "type": "boolean" },
+                    "includeGlobs": { "type": "array", "items": { "type": "string" }, "description": "Only search files matching these globs, e.g. [\"src/**/*.ts\"]; slash-less patterns match file names at any depth" },
+                    "excludeGlobs": { "type": "array", "items": { "type": "string" }, "description": "Skip files matching these globs, e.g. [\"**/*.lock\"]" },
                 },
                 "required": ["query"]
             }

@@ -4,6 +4,7 @@ import {
   asOptionalString,
   asOptionalNumber,
   asOptionalBoolean,
+  asOptionalStringArray,
   asSafeSkillName,
   boundedNumber,
   isSkillAvailableToLoad,
@@ -50,6 +51,8 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       maxMatchesPerFile: asOptionalNumber(args.maxMatchesPerFile),
       maxBytesPerFile: asOptionalNumber(args.maxBytesPerFile),
       includeIgnoredDirs: asOptionalBoolean(args.includeIgnoredDirs, 'includeIgnoredDirs'),
+      includeGlobs: asOptionalStringArray(args.includeGlobs),
+      excludeGlobs: asOptionalStringArray(args.excludeGlobs),
     };
     return await invoke<SearchResult>('search_workspace_text', {
       workspacePath: workspace(),
@@ -62,6 +65,8 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       maxBytesPerFile: parsed.maxBytesPerFile,
       includeCodePaprApps: includeCodePaprAppsFor(context?.appAccess),
       includeIgnoredDirs: parsed.includeIgnoredDirs,
+      includeGlobs: parsed.includeGlobs,
+      excludeGlobs: parsed.excludeGlobs,
     });
   });
 
@@ -72,6 +77,8 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       isRegexp: asOptionalBoolean(args.isRegexp, 'isRegexp'),
       maxResults: asOptionalNumber(args.maxResults),
       includeIgnoredDirs: asOptionalBoolean(args.includeIgnoredDirs, 'includeIgnoredDirs'),
+      includeGlobs: asOptionalStringArray(args.includeGlobs),
+      excludeGlobs: asOptionalStringArray(args.excludeGlobs),
     };
     return await invoke<PathSearchResult>('search_workspace_paths', {
       workspacePath: workspace(),
@@ -81,6 +88,8 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
       maxResults: parsed.maxResults,
       includeCodePaprApps: includeCodePaprAppsFor(context?.appAccess),
       includeIgnoredDirs: parsed.includeIgnoredDirs,
+      includeGlobs: parsed.includeGlobs,
+      excludeGlobs: parsed.excludeGlobs,
     });
   });
 
@@ -121,14 +130,17 @@ export function registerWorkspaceSearchWebTools(ctx: WorkspaceToolContext): void
         searxngSafeSearch: asOptionalNumber(args.searxngSafeSearch),
       };
 
+      // 设置里的分类/时间/语言只在 SearXNG 启用时作为默认值注入；
+      // Agent 显式传参照常下发（未启用时由后端在 note 中说明参数被忽略）。
+      const searxngOn = storeSettings.searxngEnabled || false;
       const category =
-        parsed.searxngCategory || storeSettings.searxngCategories || '';
+        parsed.searxngCategory || (searxngOn ? storeSettings.searxngCategories || '' : '');
       const timeRange =
-        parsed.searxngTimeRange || (storeSettings.searxngTimeRange || undefined);
+        parsed.searxngTimeRange || (searxngOn ? storeSettings.searxngTimeRange || undefined : undefined);
       const language =
-        parsed.searxngLanguage || (storeSettings.searxngLanguage || undefined);
+        parsed.searxngLanguage || (searxngOn ? storeSettings.searxngLanguage || undefined : undefined);
       const safeSearch =
-        parsed.searxngSafeSearch ?? storeSettings.searxngSafeSearch ?? 1;
+        parsed.searxngSafeSearch ?? (searxngOn ? storeSettings.searxngSafeSearch ?? 1 : 1);
 
       return await invoke<WebSearchResponse>('search_web', {
         query: parsed.query,

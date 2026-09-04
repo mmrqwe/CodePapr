@@ -125,6 +125,11 @@ pub struct PreparedTextSearch {
     pub(crate) max_results: usize,
     pub(crate) max_matches_per_file: usize,
     pub(crate) max_bytes_per_file: usize,
+    /// 仅对纯 ASCII 字面量 query 构建：字节级 memchr 预过滤，
+    /// 未命中的文件直接跳过解码（行为与逐行正则一致）
+    pub(crate) prefilter: Option<regex::bytes::Regex>,
+    pub(crate) include_globs: Option<globset::GlobSet>,
+    pub(crate) exclude_globs: Option<globset::GlobSet>,
 }
 
 pub struct PreparedPathSearch {
@@ -132,4 +137,6 @@ pub struct PreparedPathSearch {
     pub(crate) matcher: Regex,
     pub(crate) regex_degraded: bool,
     pub(crate) max_results: usize,
+    pub(crate) include_globs: Option<globset::GlobSet>,
+    pub(crate) exclude_globs: Option<globset::GlobSet>,
 }

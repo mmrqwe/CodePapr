@@ -1122,6 +1122,8 @@ fn search_workspace_text_include_ignored_dirs_reaches_ignored_folders() {
         None,
         None,
         Some(true),
+        None,
+        None,
     )
     .expect("include-ignored search should succeed");
     let full_paths: Vec<String> = full.matches.iter().map(|m| m.path.clone()).collect();
@@ -1173,6 +1175,8 @@ fn search_workspace_paths_include_ignored_dirs_reaches_ignored_folders() {
         Some(50),
         None,
         Some(true),
+        None,
+        None,
     )
     .expect("include-ignored path search should succeed");
     let full_paths: Vec<String> = full.matches.iter().map(|m| m.path.clone()).collect();
@@ -1357,4 +1361,222 @@ fn path_touches_codepapr_content_allowlists_visible_subtrees() {
     assert!(!path_touches_codepapr_content(Path::new(".CodePapr/memory.md")));
     assert!(!path_touches_codepapr_content(Path::new(".CodePapr/downloads/a.zip")));
     assert!(!path_touches_codepapr_content(Path::new("src/main.rs")));
+}
+
+// ── R1: includeGlobs / excludeGlobs ─────────────────────────────────
+
+fn glob_fixture() -> TestWorkspace {
+    let workspace = TestWorkspace::new("search-globs");
+    for (rel, content) in [
+        ("src/app.ts", "needle in ts\n"),
+        ("src/nested/deep.ts", "needle deep ts\n"),
+        ("src/asset.lock", "needle in lock\n"),
+        ("docs/readme.md", "needle in md\n"),
+    ] {
+        fs::create_dir_all(workspace.file_path(rel).parent().unwrap()).ok();
+        fs::write(workspace.file_path(rel), content).expect("fixture");
+    }
+    workspace
+}
+
+fn match_paths(result: &super::types::SearchResult) -> Vec<String> {
+    result.matches.iter().map(|m| m.path.clone()).collect()
+}
+
+#[test]
+fn text_search_include_globs_restricts_to_matching_paths() {
+    let workspace = glob_fixture();
+    let result = search::search_workspace_text_impl_full(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None, None, None, None, None, None, None, None,
+        Some(vec!["**/*.ts".to_string()]),
+        None,
+    )
+    .expect("include glob search should succeed");
+    let mut paths = match_paths(&result);
+    paths.sort();
+    assert_eq!(paths, vec!["src/app.ts".to_string(), "src/nested/deep.ts".to_string()]);
+}
+
+#[test]
+fn text_search_include_glob_with_directory_prefix() {
+    let workspace = glob_fixture();
+    let result = search::search_workspace_text_impl_full(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None, None, None, None, None, None, None, None,
+        Some(vec!["src/**/*.ts".to_string()]),
+        Some(vec!["**/deep.ts".to_string()]),
+    )
+    .expect("glob search should succeed");
+    assert_eq!(match_paths(&result), vec!["src/app.ts".to_string()]);
+}
+
+#[test]
+fn text_search_invalid_glob_returns_error() {
+    let workspace = glob_fixture();
+    let result = search::search_workspace_text_impl_full(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None, None, None, None, None, None, None, None,
+        Some(vec!["src/**[invalid".to_string()]),
+        None,
+    );
+    match result {
+        Ok(_) => panic!("invalid glob should fail"),
+        Err(err) => assert!(err.contains("glob"), "error should mention glob: {err}"),
+    }
+}
+
+#[test]
+fn path_search_respects_globs() {
+    let workspace = glob_fixture();
+    let result = search::search_workspace_paths_impl_full(
+        workspace.workspace_arg(),
+        "needle-noise-does-not-matter".to_string(),
+        None,
+        Some(false),
+        Some(50),
+        None,
+        None,
+        Some(vec!["**/*.ts".to_string()]),
+        Some(vec!["**/deep.ts".to_string()]),
+    )
+    .expect("path glob search should succeed");
+    // query 匹配文件名/路径本身；这里靠 glob 决定可见范围
+    let paths: Vec<String> = result.matches.iter().map(|m| m.path.clone()).collect();
+    assert!(
+        paths.iter().all(|p| p.ends_with(".ts")),
+        "exclude/include 过滤后只剩 .ts: {paths:?}"
+    );
+    assert!(!paths.iter().any(|p| p.contains("deep.ts")), "excludeGlobs 应剔除 deep.ts");
+}
+
+// ── R2: 可解释性（默认上下文 + 跳过原因 + 截断摘要） ─────────────────
+
+#[test]
+fn text_search_default_context_lines_is_one() {
+    let workspace = TestWorkspace::new("search-default-context");
+    fs::write(
+        workspace.file_path("a.txt"),
+        "first line\nneedle line\nlast line\n",
+    )
+    .expect("fixture");
+
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None, None, None, None, None, None, None,
+    )
+    .expect("search should succeed");
+    let m = &result.matches[0];
+    assert_eq!(m.context_before.as_deref(), Some(["first line".to_string()].as_slice()));
+    assert_eq!(m.context_after.as_deref(), Some(["last line".to_string()].as_slice()));
+}
+
+#[test]
+fn text_search_note_explains_skip_reasons() {
+    let workspace = TestWorkspace::new("search-skip-note");
+    fs::write(workspace.file_path("ok.txt"), "needle\n").expect("fixture");
+    fs::write(
+        workspace.file_path("blob.bin"),
+        [0u8, 1, 2, 3, 4, 5, 6, 7],
+    )
+    .expect("binary fixture");
+    fs::write(workspace.file_path("big.txt"), format!("needle {}", "x".repeat(2000)))
+        .expect("oversize fixture");
+
+    let result = search::search_workspace_text_impl_full(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None, None, None, None, None, Some(500), None, None,
+        None,
+        None,
+    )
+    .expect("search should succeed");
+    let note = result.note.expect("skip note should be present");
+    assert!(note.contains("个文件被跳过"), "note: {note}");
+    assert!(note.contains("二进制"), "note: {note}");
+    assert!(note.contains("超过大小上限"), "note: {note}");
+    assert_eq!(result.skipped_files, 2);
+}
+
+#[test]
+fn text_search_note_reports_truncation() {
+    let workspace = TestWorkspace::new("search-trunc-note");
+    fs::write(
+        workspace.file_path("a.txt"),
+        "needle 1\nneedle 2\nneedle 3\n",
+    )
+    .expect("fixture");
+
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        None,
+        None,
+        None,
+        Some(2),
+        Some(20),
+        None,
+        None,
+    )
+    .expect("search should succeed");
+    assert!(result.truncated);
+    let note = result.note.expect("truncation note should be present");
+    assert!(note.contains("截断"), "note: {note}");
+}
+
+// ── R3: 字节级预过滤与完整路径结果等价 ─────────────────────────────
+
+#[test]
+fn prefilter_finds_ascii_query_in_gb18030_and_utf16_files() {
+    let workspace = TestWorkspace::new("search-prefilter");
+    // GB18030：非 UTF-8 字节 + ASCII 关键词
+    let mut gb = vec![0xC4u8, 0xE3, 0xBA, 0xC3, b' ']; // 「你好」GB18030 编码
+    gb.extend_from_slice(b"needle gb ok\n");
+    fs::write(workspace.file_path("gb.txt"), &gb).expect("gb fixture");
+    // UTF-16LE with BOM
+    let text = "utf16 needle hit\n";
+    let mut u16: Vec<u8> = vec![0xFF, 0xFE];
+    for unit in text.encode_utf16() {
+        u16.extend_from_slice(&unit.to_le_bytes());
+    }
+    fs::write(workspace.file_path("u16.txt"), &u16).expect("u16 fixture");
+
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "needle".to_string(),
+        Some(true),
+        None, None, None, None, None, None,
+    )
+    .expect("ascii-literal search should succeed");
+    let paths = match_paths(&result);
+    assert!(paths.contains(&"gb.txt".to_string()), "GB18030 文件应命中: {paths:?}");
+    assert!(paths.contains(&"u16.txt".to_string()), "UTF-16 文件应命中: {paths:?}");
+}
+
+#[test]
+fn prefilter_non_ascii_query_falls_back_to_full_decode_path() {
+    let workspace = TestWorkspace::new("search-prefilter-cjk");
+    let mut gb = Vec::new();
+    gb.extend_from_slice(&[0xC4u8, 0xE3]); // 「你」的 GB18030/GBK 首两字节为 0xC4 0xE3
+    gb.extend_from_slice(&[0xBA, 0xC3, b'\n']); // 「好」
+    fs::write(workspace.file_path("gb.txt"), &gb).expect("fixture");
+    fs::write(workspace.file_path("utf.txt"), "你好世界\n").expect("fixture");
+
+    let result = search::search_workspace_text_impl(
+        workspace.workspace_arg(),
+        "你好".to_string(),
+        Some(true),
+        None, None, None, None, None, None,
+    )
+    .expect("cjk search should succeed");
+    let mut paths = match_paths(&result);
+    paths.sort();
+    // 非 ASCII query 不启用字节预过滤：UTF-8 文件必须命中；
+    // GB18030 文件解码后也应命中（慢路径行为，不允许预过滤造成漏报）
+    assert!(paths.contains(&"utf.txt".to_string()), "UTF-8 命中: {paths:?}");
+    assert!(paths.contains(&"gb.txt".to_string()), "GB18030 中文命中: {paths:?}");
 }

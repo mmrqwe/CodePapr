@@ -1,7 +1,7 @@
 use std::net::ToSocketAddrs;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::web::client::{retry_with_backoff, SCRAPER_USER_AGENT, SEARCH_RETRY_MAX};
 use crate::web::text::normalize_search_text;
@@ -194,4 +194,112 @@ pub(crate) fn collect_searxng_results(
     let abstract_url = String::new();
 
     Ok((results, abstract_text, abstract_url))
+}
+
+/// SearXNG 连通性探测结果（供设置页「测试连接」按钮使用）。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearxngProbeResult {
+    pub ok: bool,
+    pub latency_ms: u64,
+    /// 人类可读结论（含失败原因），UI 直接展示
+    pub message: String,
+    /// 探测返回的示例结果条数（ok 时）
+    pub sample_results: usize,
+}
+
+/// 探测 SearXNG 实例是否可用：先做与真实搜索相同的 SSRF/格式校验，
+/// 再发一次极小 JSON 查询，返回明确的成功/失败原因。
+pub async fn probe_searxng(base_url: String) -> SearxngProbeResult {
+    match tokio::task::spawn_blocking(move || probe_searxng_impl(&base_url)).await {
+        Ok(result) => result,
+        Err(err) => SearxngProbeResult {
+            ok: false,
+            latency_ms: 0,
+            message: format!("探测任务异常: {err}"),
+            sample_results: 0,
+        },
+    }
+}
+
+fn probe_searxng_impl(base_url: &str) -> SearxngProbeResult {
+    let fail = |message: String| SearxngProbeResult {
+        ok: false,
+        latency_ms: 0,
+        message,
+        sample_results: 0,
+    };
+    let trimmed = base_url.trim();
+    if trimmed.is_empty() {
+        return fail("请先填写 SearXNG 服务地址".to_string());
+    }
+    if let Err(err) = validate_searxng_base_url(trimmed) {
+        return fail(err);
+    }
+    let base = trimmed.trim_end_matches('/');
+    let mut search_url = match reqwest::Url::parse(&format!("{base}/search")) {
+        Ok(url) => url,
+        Err(err) => return fail(format!("地址无法解析: {err}")),
+    };
+    {
+        let mut pairs = search_url.query_pairs_mut();
+        pairs.append_pair("q", "ping");
+        pairs.append_pair("format", "json");
+    }
+    let client = match reqwest::blocking::Client::builder()
+        .user_agent(SCRAPER_USER_AGENT)
+        .redirect(reqwest::redirect::Policy::none())
+        // 探测用短超时，避免设置页卡住
+        .timeout(Duration::from_secs(8))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => return fail(format!("初始化 HTTP 客户端失败: {err}")),
+    };
+    let started = Instant::now();
+    let response = match client
+        .get(search_url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+    {
+        Ok(response) => response,
+        Err(err) => return fail(format!("无法连接服务: {err}")),
+    };
+    let latency_ms = started.elapsed().as_millis() as u64;
+    let status = response.status();
+    if status.is_redirection() {
+        return fail("服务返回重定向，出于安全限制未跟随；请确认地址指向实例根路径".to_string());
+    }
+    if !status.is_success() {
+        return fail(format!("服务响应异常: HTTP {status}"));
+    }
+    let text = match response.text() {
+        Ok(text) => text,
+        Err(err) => return fail(format!("读取响应失败: {err}")),
+    };
+    let payload: SearxngSearchResponse = match serde_json::from_str(&text) {
+        Ok(payload) => payload,
+        Err(_) => {
+            return fail("响应不是有效 JSON，请确认服务是 SearXNG 且已开启 JSON 输出格式".to_string())
+        }
+    };
+    let sample_results = payload.results.map(|items| items.len()).unwrap_or_default();
+    SearxngProbeResult {
+        ok: true,
+        latency_ms,
+        message: format!("连接成功（示例返回 {sample_results} 条，耗时 {latency_ms}ms）"),
+        sample_results,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::probe_searxng_impl;
+
+    #[test]
+    fn probe_rejects_empty_and_malformed_urls_without_network() {
+        assert!(!probe_searxng_impl("").ok);
+        assert!(!probe_searxng_impl("not-a-url").ok);
+        assert!(!probe_searxng_impl("file:///etc/passwd").ok);
+    }
 }

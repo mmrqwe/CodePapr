@@ -179,7 +179,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'workspace_search_text',
     description:
-      '在当前项目文件夹内搜索文本内容，返回文件路径、行号、列号、上下文和匹配预览。支持 smart-case、正则。默认跳过 node_modules/build/dist/.venv/__pycache__ 等忽略目录与 .gitignore 排除的文件；设置 includeIgnoredDirs=true 可搜索这些目录（耗时显著增加，结果仍受 maxResults 限制）。',
+      '在当前项目文件夹内搜索文本内容，返回文件路径、行号、列号、上下文和匹配预览。支持 smart-case、正则。默认跳过 node_modules/build/dist/.venv/__pycache__ 等忽略目录与 .gitignore 排除的文件；设置 includeIgnoredDirs=true 可搜索这些目录（耗时显著增加，结果仍受 maxResults 限制）。可用 includeGlobs/excludeGlobs 做路径过滤（见参数说明）。结果附带 truncated、skippedFiles 与 note，note 会解释跳过的文件数与原因（超大/二进制/读取失败）。',
     parameters: {
       type: 'object',
       properties: {
@@ -197,7 +197,7 @@ const tools: IToolDefinition[] = [
         },
         contextLines: {
           type: 'number',
-          description: '每个匹配前后额外返回多少行上下文，默认 0，最大 8。',
+          description: '每个匹配前后额外返回多少行上下文，默认 1，最大 8。传 0 可关闭上下文以节省 token。',
         },
         maxResults: {
           type: 'number',
@@ -216,6 +216,18 @@ const tools: IToolDefinition[] = [
           description:
             '是否搜索被忽略目录（node_modules/build/dist/.venv/__pycache__ 等）内部，默认 false；设为 true 会穿透 .gitignore 且显著增加耗时，仅在需要时开启。',
         },
+        includeGlobs: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            '仅搜索匹配这些 glob 路径的文件，如 ["src/**/*.ts"]。不含斜杠的模式按文件名匹配任意层级（如 "*.ts"）。仍受 .gitignore 约束。',
+        },
+        excludeGlobs: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            '排除匹配这些 glob 路径的文件，如 ["**/*.lock","**/dist/**"]。与 includeGlobs 同时提供时，先按 include 命中再按 exclude 剔除。',
+        },
       },
       required: ['query'],
     },
@@ -223,7 +235,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'workspace_search_files',
     description:
-      '按文件名或路径片段搜索当前项目内的文件和目录，返回匹配路径、名称、类型和字节数。支持 smart-case、正则。默认跳过 node_modules/build/dist/.venv/__pycache__ 等忽略目录与 .gitignore 排除的文件；设置 includeIgnoredDirs=true 可搜索这些目录（耗时显著增加）。',
+      '按文件名或路径片段搜索当前项目内的文件和目录，返回匹配路径、名称、类型和字节数。支持 smart-case、正则。默认跳过 node_modules/build/dist/.venv/__pycache__ 等忽略目录与 .gitignore 排除的文件；设置 includeIgnoredDirs=true 可搜索这些目录（耗时显著增加）。可用 includeGlobs/excludeGlobs 做路径过滤（如只看 .ts、排除 lock 文件）。',
     parameters: {
       type: 'object',
       properties: {
@@ -248,6 +260,16 @@ const tools: IToolDefinition[] = [
           description:
             '是否搜索被忽略目录（node_modules/build/dist/.venv/__pycache__ 等）内部，默认 false；设为 true 会穿透 .gitignore 且显著增加耗时，仅在需要时开启。',
         },
+        includeGlobs: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '仅返回匹配这些 glob 路径的结果，如 ["src/**/*.ts"]。不含斜杠的模式按文件名匹配任意层级。',
+        },
+        excludeGlobs: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '排除匹配这些 glob 路径的结果，如 ["**/*.lock"]。',
+        },
       },
       required: ['query'],
     },
@@ -270,7 +292,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'websearch',
     description:
-      '在线搜索公开网页，用于收集资料、查找文档或验证事实。聚合多源搜索结果；支持指定搜索分类（通用网页、图片、视频、新闻、科学论文等）、时间范围、语言过滤。',
+      '在线搜索公开网页，用于收集资料、查找文档或验证事实。默认使用内置多源聚合（仅通用网页，不支持分类/时间/语言/安全搜索过滤，这些参数会被忽略并在结果的 note 中说明）。仅当用户在设置中启用自建 SearXNG 时，才支持分类/时间范围/语言/安全搜索等细粒度过滤，此时应优先走 SearXNG 主路径以获得更高质量结果。',
     parameters: {
       type: 'object',
       properties: {
@@ -285,22 +307,22 @@ const tools: IToolDefinition[] = [
         searxngCategory: {
           type: 'string',
           description:
-            '搜索分类，留空则使用 SearXNG 默认分类（通常为通用网页）。可选：general(通用网页)、images(图片)、videos(视频)、' +
+            '【仅 SearXNG 启用时生效】搜索分类，留空则使用 SearXNG 默认分类（通常为通用网页）。可选：general(通用网页)、images(图片)、videos(视频)、' +
             'news(新闻)、science(科学论文)、map(地图)、it(IT技术)、music(音乐)、' +
             'files(文件)、social media(社交媒体)。用逗号组合，如 "news,images"。',
         },
         searxngTimeRange: {
           type: 'string',
           description:
-            '时间范围，默认不限。可选：day(一天内)、week(一周内)、month(一月内)、year(一年内)。需要最新信息时使用。',
+            '【仅 SearXNG 启用时生效】时间范围，默认不限。可选：day(一天内)、week(一周内)、month(一月内)、year(一年内)。需要最新信息时使用。',
         },
         searxngLanguage: {
           type: 'string',
-          description: '搜索语言，默认自动检测。可选：zh-CN(中文)、en(英文)、ja(日文)等。',
+          description: '【仅 SearXNG 启用时生效】搜索语言，默认自动检测。可选：zh-CN(中文)、en(英文)、ja(日文)等。',
         },
         searxngSafeSearch: {
           type: 'number',
-          description: '安全搜索等级，默认 1（与 SearXNG 内置默认一致）。0=关闭过滤，1=中等过滤，2=严格过滤。',
+          description: '【仅 SearXNG 启用时生效】安全搜索等级，默认 1（与 SearXNG 内置默认一致）。0=关闭过滤，1=中等过滤，2=严格过滤。',
         },
       },
       required: ['query'],
@@ -309,7 +331,7 @@ const tools: IToolDefinition[] = [
   {
     name: 'web_fetch_url',
     description:
-      '读取公开网页文本内容。适合在 web_search 找到链接后获取页面正文或文档片段。由本地后端请求，可绕过前端 CORS 限制；HTML 页面会尽量提取正文文本。支持 http 和 https URL。',
+      '读取公开网页文本内容。适合在 websearch 找到链接后获取页面正文或文档片段。由本地后端请求，可绕过前端 CORS 限制；HTML 页面会尽量提取正文文本。支持 http 和 https URL。',
     parameters: {
       type: 'object',
       properties: {

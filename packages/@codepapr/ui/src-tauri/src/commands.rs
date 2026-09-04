@@ -639,6 +639,7 @@ pub async fn load_chat_images(app: AppHandle, workspace_path: String, paths: Vec
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn search_workspace_text(
     app: AppHandle,
     workspace_path: String,
@@ -651,6 +652,8 @@ pub async fn search_workspace_text(
     max_bytes_per_file: Option<usize>,
     include_codepapr_apps: Option<bool>,
     include_ignored_dirs: Option<bool>,
+    include_globs: Option<Vec<String>>,
+    exclude_globs: Option<Vec<String>>,
 ) -> Result<Value, String> {
     rpc(&app, "fs/search", json!({
         "workspacePath": workspace_path,
@@ -663,6 +666,8 @@ pub async fn search_workspace_text(
         "maxBytesPerFile": max_bytes_per_file,
         "includeCodepaprApps": include_codepapr_apps,
         "includeIgnoredDirs": include_ignored_dirs,
+        "includeGlobs": include_globs,
+        "excludeGlobs": exclude_globs,
     })).await
 }
 
@@ -676,6 +681,8 @@ pub async fn search_workspace_paths(
     max_results: Option<usize>,
     include_codepapr_apps: Option<bool>,
     include_ignored_dirs: Option<bool>,
+    include_globs: Option<Vec<String>>,
+    exclude_globs: Option<Vec<String>>,
 ) -> Result<Value, String> {
     rpc(&app, "fs/searchPaths", json!({
         "workspacePath": workspace_path,
@@ -685,6 +692,8 @@ pub async fn search_workspace_paths(
         "maxResults": max_results,
         "includeCodepaprApps": include_codepapr_apps,
         "includeIgnoredDirs": include_ignored_dirs,
+        "includeGlobs": include_globs,
+        "excludeGlobs": exclude_globs,
     })).await
 }
 
@@ -1078,6 +1087,11 @@ pub async fn search_web(
 #[tauri::command]
 pub async fn fetch_web_url(app: AppHandle, url: String, max_bytes: Option<usize>) -> Result<Value, String> {
     rpc(&app, "web/fetchUrl", json!({ "url": url, "maxBytes": max_bytes })).await
+}
+
+#[tauri::command]
+pub async fn test_searxng_connection(app: AppHandle, base_url: String) -> Result<Value, String> {
+    rpc(&app, "web/testSearxng", json!({ "baseUrl": base_url })).await
 }
 
 #[tauri::command]

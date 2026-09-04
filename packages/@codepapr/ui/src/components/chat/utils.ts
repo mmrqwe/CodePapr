@@ -371,15 +371,17 @@ export function getToolInvocationSummary(tool: UIToolInvocation): string {
     if (action === 'screenshot') return '截取页面截图';
     return `浏览器${action ? ` · ${action}` : ''}`;
   }
-  if (name === 'web_search') {
+  // 实际注册名为 websearch/webfetch/web_fetch_url/web_download_file；
+  // web_search/web_fetch/web_download 为历史会话里的旧名，保留兼容渲染。
+  if (name === 'websearch' || name === 'web_search') {
     if (query) return `网页搜索: ${truncateText(query, 50)}`;
     return '网页搜索';
   }
-  if (name === 'web_fetch') {
+  if (name === 'webfetch' || name === 'web_fetch_url' || name === 'web_fetch') {
     if (url) return `抓取网页: ${truncateText(url, 50)}`;
     return '抓取网页';
   }
-  if (name === 'web_download') {
+  if (name === 'web_download_file' || name === 'web_download') {
     if (url) return `下载文件: ${truncateText(url, 50)}`;
     return '下载文件';
   }

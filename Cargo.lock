@@ -763,6 +763,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "git2",
+ "globset",
  "hex",
  "ignore",
  "libc",

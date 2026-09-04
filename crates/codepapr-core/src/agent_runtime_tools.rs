@@ -520,6 +520,8 @@ fn dispatch_tool_inner(
                 arg_usize(args, "maxBytesPerFile"),
                 Some(include_apps),
                 arg_bool(args, "includeIgnoredDirs"),
+                arg_string_vec(args, "includeGlobs"),
+                arg_string_vec(args, "excludeGlobs"),
             )?;
             let mut value = serde_json::to_value(result).unwrap_or(Value::Null);
             if args.get("semantic") == Some(&Value::Bool(true)) {
@@ -558,6 +560,8 @@ fn dispatch_tool_inner(
                 arg_usize(args, "maxResults"),
                 Some(include_apps),
                 arg_bool(args, "includeIgnoredDirs"),
+                arg_string_vec(args, "includeGlobs"),
+                arg_string_vec(args, "excludeGlobs"),
             )?;
             Ok(ok_result(result, Vec::new()))
         }
@@ -1090,12 +1094,24 @@ fn dispatch_webfetch(
 fn dispatch_websearch(ctx: &RuntimeToolContext, args: &Value) -> Result<HostedOutcome, String> {
     let query = arg_string_req(args, &["query"])?;
     let max_results = arg_usize(args, "maxResults").unwrap_or(5).clamp(1, 10);
+    // 设置里的分类/时间/语言只在 SearXNG 启用时作为默认值注入；
+    // 未启用时若还从 settings 兜底，会让每次内置搜索都误报「参数被忽略」。
+    let settings_default = |value: &str| {
+        if ctx.searxng.enabled {
+            value.to_string()
+        } else {
+            String::new()
+        }
+    };
     let categories = arg_string(args, &["searxngCategory", "searxngCategories"])
-        .unwrap_or_else(|| ctx.searxng.categories.clone());
+        .unwrap_or_else(|| settings_default(&ctx.searxng.categories));
     let time_range = arg_string(args, &["searxngTimeRange"])
-        .unwrap_or_else(|| ctx.searxng.time_range.clone());
-    let language = arg_string(args, &["searxngLanguage"]).unwrap_or_else(|| ctx.searxng.language.clone());
-    let safe_search = arg_u8(args, "searxngSafeSearch").unwrap_or(ctx.searxng.safe_search);
+        .unwrap_or_else(|| settings_default(&ctx.searxng.time_range));
+    let language = arg_string(args, &["searxngLanguage"])
+        .unwrap_or_else(|| settings_default(&ctx.searxng.language));
+    let safe_search = arg_u8(args, "searxngSafeSearch")
+        .or_else(|| ctx.searxng.enabled.then_some(ctx.searxng.safe_search))
+        .unwrap_or(1);
     let result = web_search::search_web_impl(
         query,
         Some(max_results),

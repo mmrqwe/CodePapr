@@ -253,6 +253,7 @@ fn main() {
             commands::stop_workspace_watcher,
             commands::search_web,
             commands::fetch_web_url,
+            commands::test_searxng_connection,
             commands::download_web_file,
             browser::page::open_browser_target,
             browser::page::open_browser_page,

@@ -1,6 +1,14 @@
 import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { FieldCard, FieldLabel, TextField } from '../forms';
 import type { SettingsTabProps } from './types';
+
+interface SearxngProbeResult {
+  ok: boolean;
+  latencyMs: number;
+  message: string;
+  sampleResults: number;
+}
 
 const SEARXNG_CATEGORIES = [
   { key: 'general', labelKey: 'searxngCategoryGeneral' as const },
@@ -17,6 +25,68 @@ const SEARXNG_CATEGORIES = [
 
 export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
   const [showSearxngAdvanced, setShowSearxngAdvanced] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [probeResult, setProbeResult] = useState<SearxngProbeResult | null>(null);
+
+  const runConnectionTest = async () => {
+    setTestingConnection(true);
+    setProbeResult(null);
+    try {
+      const result = await invoke<SearxngProbeResult>('test_searxng_connection', {
+        baseUrl: local.searxngBaseUrl,
+      });
+      setProbeResult(result);
+    } catch (err) {
+      setProbeResult({ ok: false, latencyMs: 0, message: String(err), sampleResults: 0 });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const baseUrlCard = (
+    <FieldCard padding="loose">
+      <TextField
+        label={t.searxngBaseUrlLabel}
+        labelTight
+        type="text"
+        value={local.searxngBaseUrl}
+        onChange={(e) => {
+          update({ searxngBaseUrl: e.target.value });
+          setProbeResult(null);
+        }}
+        placeholder="http://localhost:8080"
+        title={t.searxngBaseUrlLabel}
+      />
+      <p className="mt-2 text-xs text-fg-muted">{t.searxngBaseUrlHint}</p>
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={runConnectionTest}
+          disabled={testingConnection}
+          className="rounded-xl border border-line px-4 py-2 text-xs font-medium text-fg-soft transition-colors hover:border-accent-soft hover:text-fg disabled:opacity-50"
+        >
+          {testingConnection ? t.searxngTesting : t.searxngTestConnection}
+        </button>
+        {probeResult && (
+          <span className={`text-xs ${probeResult.ok ? 'text-ok' : 'text-danger'}`}>
+            {probeResult.message}
+          </span>
+        )}
+      </div>
+      {probeResult?.ok && !local.searxngEnabled && (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-accent-soft bg-accent-soft px-4 py-3">
+          <span className="text-xs text-accent-text">{t.searxngTestSuggestEnable}</span>
+          <button
+            type="button"
+            onClick={() => update({ searxngEnabled: true })}
+            className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-base transition-opacity hover:opacity-90"
+          >
+            {t.searxngTestEnableNow}
+          </button>
+        </div>
+      )}
+    </FieldCard>
+  );
 
   return (
     <div className="space-y-5">
@@ -35,19 +105,15 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
         </label>
       </FieldCard>
 
-      {local.searxngEnabled && (
+      {!local.searxngEnabled && (
+        <div className="rounded-2xl border border-line bg-base px-5 py-4 text-xs leading-relaxed text-fg-muted">
+          {t.searxngBuiltinModeNote}
+        </div>
+      )}
+
+      {local.searxngEnabled ? (
         <>
-          <FieldCard padding="loose">
-            <TextField
-              label={t.searxngBaseUrlLabel}
-              labelTight
-              type="text"
-              value={local.searxngBaseUrl}
-              onChange={(e) => update({ searxngBaseUrl: e.target.value })}
-              placeholder="http://localhost:8080"
-              title={t.searxngBaseUrlLabel}
-            />
-          </FieldCard>
+          {baseUrlCard}
 
           <div className="rounded-2xl border border-line bg-base">
             <button
@@ -147,6 +213,8 @@ export function SettingsSearchTab({ local, update, t }: SettingsTabProps) {
             {t.searxngNotice}
           </div>
         </>
+      ) : (
+        baseUrlCard
       )}
     </div>
   );

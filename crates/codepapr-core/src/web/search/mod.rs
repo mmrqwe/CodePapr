@@ -15,8 +15,9 @@ pub(crate) mod mojeek;
 pub(crate) mod qwant;
 pub(crate) mod searxng;
 
+pub use searxng::{probe_searxng, SearxngProbeResult};
+
 pub(crate) const BING_SEARCH_ENDPOINT: &str = "https://api.bing.microsoft.com/v7.0/search";
-pub(crate) const WIKIPEDIA_API_ENDPOINT: &str = "https://en.wikipedia.org/w/api.php";
 pub(crate) const ARXIV_API_ENDPOINT: &str = "http://export.arxiv.org/api/query";
 pub(crate) const OPENALEX_API_ENDPOINT: &str = "https://api.openalex.org/works";
 
@@ -36,7 +37,8 @@ pub struct WebSearchResponse {
     pub(crate) abstract_text: String,
     pub(crate) abstract_url: String,
     pub(crate) results: Vec<WebSearchEntry>,
-    /// SearXNG 不可用/返回空，已降级到内置多源聚合
+    /// 结果质量降级：SearXNG 不可用/返回空而改用内置聚合，或全部搜索源空手而归。
+    /// 恒与 note 同现（degraded=true ⇒ note=Some），note 附带核验建议。
     pub(crate) degraded: bool,
     /// 降级或源失败说明（供 LLM 判断结果可信度）
     pub(crate) note: Option<String>,
@@ -85,6 +87,190 @@ fn merge_source(
     }
     if contributed {
         sources.push(name.to_string());
+    }
+}
+
+// ── 相关性闸门（内置聚合专用） ──────────────────────────────────────────
+
+/// 把 query 切成打分 token：拉丁词（≥2 字符）+ CJK 连续段的二元组。
+/// 中文没有空格分词，二元组是对 CJK 查询最稳健的轻量近似。
+fn tokenize_query(query: &str) -> Vec<String> {
+    let lower = query.to_lowercase();
+    let mut tokens: Vec<String> = Vec::new();
+    let mut latin = String::new();
+    let mut cjk_run: Vec<char> = Vec::new();
+
+    let flush_latin = |latin: &mut String, tokens: &mut Vec<String>| {
+        if latin.chars().count() >= 2 {
+            tokens.push(std::mem::take(latin));
+        } else {
+            latin.clear();
+        }
+    };
+    let flush_cjk = |cjk_run: &mut Vec<char>, tokens: &mut Vec<String>| {
+        if cjk_run.len() == 1 {
+            tokens.push(cjk_run[0].to_string());
+        } else {
+            for pair in cjk_run.windows(2) {
+                tokens.push(pair.iter().collect());
+            }
+        }
+        cjk_run.clear();
+    };
+
+    for ch in lower.chars() {
+        if ('\u{4e00}'..='\u{9fff}').contains(&ch) {
+            flush_latin(&mut latin, &mut tokens);
+            cjk_run.push(ch);
+        } else if ch.is_ascii_alphanumeric() {
+            flush_cjk(&mut cjk_run, &mut tokens);
+            latin.push(ch);
+        } else {
+            flush_latin(&mut latin, &mut tokens);
+            flush_cjk(&mut cjk_run, &mut tokens);
+        }
+    }
+    flush_latin(&mut latin, &mut tokens);
+    flush_cjk(&mut cjk_run, &mut tokens);
+
+    tokens.sort();
+    tokens.dedup();
+    tokens
+}
+
+/// 轻量相关性分：标题命中 token 计 2 分，摘要命中计 1 分。
+fn entry_relevance(tokens: &[String], entry: &WebSearchEntry) -> usize {
+    if tokens.is_empty() {
+        return 1;
+    }
+    let title = entry.title.to_lowercase();
+    let snippet = entry.snippet.to_lowercase();
+    let mut score = 0usize;
+    for token in tokens {
+        if title.contains(token.as_str()) {
+            score += 2;
+        } else if snippet.contains(token.as_str()) {
+            score += 1;
+        }
+    }
+    score
+}
+
+/// URL 的粗略域名键（host 去 www 前缀）。取末两段近似主域，
+/// 不引 pubsuffix；对「同域刷屏」的抑制足够。
+fn domain_key(url: &str) -> Option<String> {
+    let after_scheme = url.split_once("://").map(|(_, rest)| rest)?;
+    let host = after_scheme
+        .split(['/', '?', '#'])
+        .next()?
+        .rsplit('@')
+        .next()?
+        .trim()
+        .to_lowercase();
+    if host.is_empty() {
+        return None;
+    }
+    let segments: Vec<&str> = host.split('.').filter(|s| !s.is_empty()).collect();
+    Some(if segments.len() <= 2 {
+        host
+    } else {
+        segments[segments.len() - 2..].join(".")
+    })
+}
+
+/// 内置聚合的通用网页源打分排序：分数降序、同分保持源优先级稳定序。
+/// 存在正分结果时，0 分（标题+摘要与 query 无任何 token 重叠）结果被丢弃，
+/// 让位给更可信的百科/学术源；正分不足时 0 分结果仍参与填充，避免空结果。
+fn rank_generic_entries(
+    tokens: &[String],
+    outcomes: Vec<(&'static str, Vec<WebSearchEntry>)>,
+) -> (Vec<(&'static str, WebSearchEntry)>, Vec<(&'static str, WebSearchEntry)>) {
+    let mut pool: Vec<(usize, usize, &'static str, WebSearchEntry)> = Vec::new();
+    let mut order = 0usize;
+    for (name, entries) in outcomes {
+        for entry in entries {
+            let score = entry_relevance(tokens, &entry);
+            pool.push((score, order, name, entry));
+            order += 1;
+        }
+    }
+    pool.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+
+    let has_strong = pool.first().is_some_and(|(score, ..)| *score > 0);
+    let mut strong: Vec<(&'static str, WebSearchEntry)> = Vec::new();
+    let mut weak: Vec<(&'static str, WebSearchEntry)> = Vec::new();
+    for (score, _, name, entry) in pool {
+        if has_strong && score == 0 {
+            continue;
+        }
+        if score == 0 {
+            weak.push((name, entry));
+        } else {
+            strong.push((name, entry));
+        }
+    }
+    (strong, weak)
+}
+
+/// 按排序后的候选池合并结果：去重 + 同域名上限 + max_results 截断。
+fn merge_ranked_pool(
+    results: &mut Vec<WebSearchEntry>,
+    sources: &mut Vec<String>,
+    pool: &[(&'static str, WebSearchEntry)],
+    domain_counts: &mut std::collections::HashMap<String, usize>,
+    max_results: usize,
+) {
+    const DOMAIN_CAP: usize = 2;
+    for (name, entry) in pool {
+        if results.len() >= max_results {
+            return;
+        }
+        let key = domain_key(&entry.url);
+        if let Some(key) = &key {
+            if domain_counts.get(key).copied().unwrap_or(0) >= DOMAIN_CAP {
+                continue;
+            }
+        }
+        let before = results.len();
+        push_unique_search_result(results, (*entry).clone());
+        if results.len() > before {
+            if let Some(key) = key {
+                *domain_counts.entry(key).or_insert(0) += 1;
+            }
+            if !sources.iter().any(|s| s == name) {
+                sources.push((*name).to_string());
+            }
+        }
+    }
+}
+
+fn query_has_cjk(query: &str) -> bool {
+    query
+        .chars()
+        .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch))
+}
+
+/// 内置路径的 Wikipedia 语言选择：显式语言偏好（zh*）优先，其次按查询脚本。
+fn pick_wikipedia_language(query: &str, preferred: Option<&str>) -> &'static str {
+    if preferred.is_some_and(|lang| lang.trim().to_lowercase().starts_with("zh")) {
+        return "zh";
+    }
+    if query_has_cjk(query) {
+        return "zh";
+    }
+    "en"
+}
+
+fn push_note(note: &mut Option<String>, msg: impl Into<String>) {
+    match note {
+        Some(existing) => {
+            let msg = msg.into();
+            if !existing.contains(&msg) {
+                existing.push('；');
+                existing.push_str(&msg);
+            }
+        }
+        None => *note = Some(msg.into()),
     }
 }
 
@@ -306,6 +492,14 @@ pub(crate) fn search_web_impl(
                 .unwrap_or(false);
         let max_results = max_results.unwrap_or(5).clamp(1, 10);
 
+        // W1：SearXNG 未启用时分类/时间/语言/安全搜索参数无效，必须显式告知，
+        // 否则 Agent 会误以为过滤生效。
+        let searxng_params_ignored = !searxng_active
+            && (searxng_categories.as_deref().is_some_and(|v| !v.trim().is_empty())
+                || searxng_time_range.as_deref().is_some_and(|v| !v.trim().is_empty())
+                || searxng_language.as_deref().is_some_and(|v| !v.trim().is_empty())
+                || searxng_safe_search.is_some_and(|v| v != 1));
+
         // 缓存 key 必须纳入所有影响结果的参数，且全部先归一化（clamp/trim/lowercase），
         // 否则用户改参数后 TTL 内仍会命中旧结果
         let mut cache_key = format!(
@@ -315,6 +509,9 @@ pub(crate) fn search_web_impl(
                     "searxng:{}",
                     searxng_base_url.as_deref().unwrap_or("").trim()
                 )
+            } else if searxng_params_ignored {
+                // 带「参数被忽略」note 的结果与纯净结果分开缓存，避免互相污染
+                "builtin+ignored".to_string()
             } else {
                 "builtin".to_string()
             },
@@ -339,6 +536,12 @@ pub(crate) fn search_web_impl(
 
         let mut degraded = false;
         let mut note: Option<String> = None;
+        if searxng_params_ignored {
+            push_note(
+                &mut note,
+                "SearXNG 未启用，本次已忽略分类/时间范围/语言/安全搜索等 SearXNG 专属参数，仅执行通用网页聚合搜索",
+            );
+        }
 
         if searxng_active {
             let base_url = searxng_base_url.as_deref().unwrap_or("").trim().to_string();
@@ -367,15 +570,15 @@ pub(crate) fn search_web_impl(
                 }
                 Ok(_) => {
                     degraded = true;
-                    let msg = "SearXNG 返回空结果，已降级到内置多源聚合".to_string();
+                    let msg = "SearXNG 返回空结果，已降级到内置多源聚合";
                     eprintln!("{msg}");
-                    note = Some(msg);
+                    push_note(&mut note, msg);
                 }
                 Err(err) => {
                     degraded = true;
                     let msg = format!("SearXNG 搜索失败，已降级到内置多源聚合: {err}");
                     eprintln!("{msg}");
-                    note = Some(msg);
+                    push_note(&mut note, msg);
                 }
             }
         }
@@ -468,12 +671,15 @@ pub(crate) fn search_web_impl(
                 .collect()
         });
 
-        // 按优先级合并：Bing → DuckDuckGo → Brave → Mojeek → Qwant
+        // 相关性闸门（W2）：通用网页源不再按源优先级 FIFO 占坑，
+        // 而是按 title+snippet 与 query 的 token 重叠打分排序，
+        // 并在同一域名上设上限，避免单站刷屏把弱相关结果顶进 maxResults。
+        let mut generic_outcomes: Vec<(&'static str, Vec<WebSearchEntry>)> = Vec::new();
         for (name, outcome) in outcomes {
             match outcome {
                 Ok(entries) if !entries.is_empty() => {
                     mark_source_ok(name);
-                    merge_source(&mut results, &mut sources, name, entries, max_results);
+                    generic_outcomes.push((name, entries));
                 }
                 Ok(_) => {
                     mark_source_failed(name);
@@ -486,7 +692,19 @@ pub(crate) fn search_web_impl(
             }
         }
 
-        if let Ok(wiki_results) = academic::collect_wikipedia_results(&client, query, max_results) {
+        let query_tokens = tokenize_query(query);
+        let (strong_entries, weak_entries) = rank_generic_entries(&query_tokens, generic_outcomes);
+        let mut domain_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        merge_ranked_pool(&mut results, &mut sources, &strong_entries, &mut domain_counts, max_results);
+        if results.len() < max_results {
+            merge_ranked_pool(&mut results, &mut sources, &weak_entries, &mut domain_counts, max_results);
+        }
+
+        let wiki_lang = pick_wikipedia_language(query, searxng_language.as_deref());
+        if let Ok(wiki_results) =
+            academic::collect_wikipedia_results(&client, query, max_results, wiki_lang)
+        {
             merge_source(&mut results, &mut sources, "wikipedia", wiki_results, max_results);
         }
 
@@ -546,8 +764,14 @@ pub(crate) fn search_web_impl(
         }
 
         results.truncate(max_results);
-        if results.is_empty() && note.is_none() {
-            note = Some("所有搜索源均未返回结果（可能被限流或查询无匹配）".to_string());
+        // degraded 不变式：结果为空（内置全挂）也视为降级；degraded 必须带 note，
+        // 并提示 Agent 用 web_fetch_url 核验，避免静默采信弱相关结果。
+        if results.is_empty() {
+            degraded = true;
+            push_note(&mut note, "所有搜索源均未返回结果（可能被限流或查询无匹配）");
+        }
+        if degraded {
+            push_note(&mut note, "搜索结果可能不完整或不准确，关键事实请用 web_fetch_url 抓取原文核验");
         }
         let response = WebSearchResponse {
             query: query.to_string(),
@@ -611,5 +835,110 @@ mod tests {
         );
         assert_eq!(results.len(), 2);
         assert_eq!(sources, vec!["bing".to_string()]);
+    }
+
+    fn entry_snippet(title: &str, url: &str, snippet: &str) -> WebSearchEntry {
+        WebSearchEntry {
+            title: title.to_string(),
+            url: url.to_string(),
+            snippet: snippet.to_string(),
+        }
+    }
+
+    #[test]
+    fn tokenize_splits_latin_words_and_cjk_bigrams() {
+        let latin = tokenize_query("Rust async runtime");
+        assert!(latin.contains(&"rust".to_string()));
+        assert!(latin.contains(&"async".to_string()));
+        assert!(latin.contains(&"runtime".to_string()));
+        // 单字符 token 被丢弃
+        assert!(!latin.contains(&"a".to_string()));
+
+        let cjk = tokenize_query("深度学习");
+        assert!(cjk.contains(&"深度".to_string()));
+        assert!(cjk.contains(&"度学".to_string()));
+        assert!(cjk.contains(&"学习".to_string()));
+    }
+
+    #[test]
+    fn entry_relevance_scores_title_and_snippet_overlap() {
+        let tokens = tokenize_query("rust borrow checker");
+        let strong = entry_snippet(
+            "The Rust Borrow Checker",
+            "https://x.com",
+            "borrow checking explained",
+        );
+        let weak = entry_snippet("Totally unrelated page", "https://y.com", "no match here");
+        assert!(entry_relevance(&tokens, &strong) > entry_relevance(&tokens, &weak));
+        assert_eq!(entry_relevance(&tokens, &weak), 0);
+    }
+
+    #[test]
+    fn domain_key_extracts_registrable_host() {
+        assert_eq!(domain_key("https://www.example.com/a/b").as_deref(), Some("example.com"));
+        assert_eq!(domain_key("https://sub.blog.co.uk/x").as_deref(), Some("co.uk"));
+        assert_eq!(domain_key("https://a.com").as_deref(), Some("a.com"));
+        assert_eq!(domain_key("not a url").as_deref(), None);
+    }
+
+    #[test]
+    fn rank_generic_entries_orders_by_score_and_keeps_source_priority() {
+        let tokens = tokenize_query("rust ownership");
+        // bing 先返回一个弱相关；brave 后返回一个强相关 → 强相关必须排前
+        let outcomes = vec![
+            (
+                "bing",
+                vec![entry_snippet("Random news", "https://news.com", "nothing relevant")],
+            ),
+            (
+                "brave",
+                vec![entry_snippet("Rust Ownership System", "https://rust-lang.org", "ownership and borrowing")],
+            ),
+        ];
+        let (strong, weak) = rank_generic_entries(&tokens, outcomes);
+        assert!(weak.is_empty(), "存在正分结果时 0 分结果应被丢弃");
+        assert_eq!(strong.len(), 1);
+        assert_eq!(strong[0].1.url, "https://rust-lang.org");
+    }
+
+    #[test]
+    fn rank_generic_entries_keeps_all_zero_scores_when_no_strong_match() {
+        let tokens = tokenize_query("quantum flutation");
+        let outcomes = vec![(
+            "bing",
+            vec![
+                entry_snippet("A", "https://a.com", "x"),
+                entry_snippet("B", "https://b.com", "y"),
+            ],
+        )];
+        let (strong, weak) = rank_generic_entries(&tokens, outcomes);
+        assert!(strong.is_empty());
+        assert_eq!(weak.len(), 2, "无正分结果时 0 分结果需保留用于填充");
+    }
+
+    #[test]
+    fn merge_ranked_pool_caps_same_domain() {
+        let tokens = tokenize_query("query");
+        let outcomes = vec![(
+            "bing",
+            (0..5)
+                .map(|i| entry_snippet(&format!("query page {i}"), &format!("https://same.com/p{i}"), "query"))
+                .collect::<Vec<_>>(),
+        )];
+        let (ranked, _) = rank_generic_entries(&tokens, outcomes);
+        let mut results = Vec::new();
+        let mut sources = Vec::new();
+        let mut counts = std::collections::HashMap::new();
+        merge_ranked_pool(&mut results, &mut sources, &ranked, &mut counts, 10);
+        assert_eq!(results.len(), 2, "同域名最多保留 2 条");
+        assert_eq!(sources, vec!["bing".to_string()]);
+    }
+
+    #[test]
+    fn pick_wikipedia_language_prefers_zh_for_cjk_and_explicit_zh() {
+        assert_eq!(pick_wikipedia_language("深度学习", None), "zh");
+        assert_eq!(pick_wikipedia_language("machine learning", Some("zh-CN")), "zh");
+        assert_eq!(pick_wikipedia_language("machine learning", None), "en");
+        assert_eq!(pick_wikipedia_language("machine learning", Some("en")), "en");
     }
 }

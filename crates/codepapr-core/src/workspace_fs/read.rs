@@ -549,20 +549,28 @@ pub(crate) fn decode_text_bytes(bytes: Vec<u8>) -> Result<String, String> {
     let Some(encoding) = detect_text_encoding(&bytes) else {
         return Err("文件包含二进制内容，拒绝作为文本读取".to_string());
     };
+    decode_text_bytes_with_encoding(&bytes, encoding)
+}
 
+/// 按已探测的编码解码。搜索路径先探测、做字节级预过滤，命中后才走到这里，
+/// 避免对同一 buffer 重复做编码探测。
+pub(crate) fn decode_text_bytes_with_encoding(
+    bytes: &[u8],
+    encoding: TextEncoding,
+) -> Result<String, String> {
     match encoding {
         TextEncoding::Utf8Bom => decode_utf8_body(&bytes[3..]),
         TextEncoding::Utf16LeBom => decode_utf16(&bytes[2..], encoding_rs::UTF_16LE),
         TextEncoding::Utf16BeBom => decode_utf16(&bytes[2..], encoding_rs::UTF_16BE),
-        TextEncoding::Utf16Le => decode_utf16(&bytes, encoding_rs::UTF_16LE),
-        TextEncoding::Utf16Be => decode_utf16(&bytes, encoding_rs::UTF_16BE),
-        TextEncoding::Utf8 => decode_utf8_body(&bytes),
+        TextEncoding::Utf16Le => decode_utf16(bytes, encoding_rs::UTF_16LE),
+        TextEncoding::Utf16Be => decode_utf16(bytes, encoding_rs::UTF_16BE),
+        TextEncoding::Utf8 => decode_utf8_body(bytes),
         TextEncoding::Gb18030 => {
-            let (decoded, _, had_errors) = encoding_rs::GB18030.decode(&bytes);
+            let (decoded, _, had_errors) = encoding_rs::GB18030.decode(bytes);
             if !had_errors {
                 return Ok(decoded.into_owned());
             }
-            Ok(String::from_utf8_lossy(&bytes).into_owned())
+            Ok(String::from_utf8_lossy(bytes).into_owned())
         }
     }
 }
