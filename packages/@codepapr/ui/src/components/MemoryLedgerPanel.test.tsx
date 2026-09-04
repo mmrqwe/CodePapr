@@ -7,16 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   loadMemoryEntriesMock,
   forgetMemoryEntryMock,
+  reviveMemoryEntryMock,
   ingestLegacyMemoryMdMock,
 } = vi.hoisted(() => ({
   loadMemoryEntriesMock: vi.fn(async (): Promise<unknown[]> => []),
   forgetMemoryEntryMock: vi.fn(async (): Promise<void> => undefined),
+  reviveMemoryEntryMock: vi.fn(async (): Promise<void> => undefined),
   ingestLegacyMemoryMdMock: vi.fn(async () => ({ ingested: 0, deletedFile: false })),
 }));
 
 vi.mock('../utils/projectStorage', () => ({
   loadMemoryEntries: loadMemoryEntriesMock,
   forgetMemoryEntry: forgetMemoryEntryMock,
+  reviveMemoryEntry: reviveMemoryEntryMock,
   ingestLegacyMemoryMd: ingestLegacyMemoryMdMock,
   updateMemoryEntryContent: vi.fn(async (): Promise<void> => undefined),
 }));
@@ -55,8 +58,11 @@ describe('MemoryLedgerPanel', () => {
   beforeEach(() => {
     loadMemoryEntriesMock.mockReset();
     forgetMemoryEntryMock.mockReset();
+    reviveMemoryEntryMock.mockReset();
     ingestLegacyMemoryMdMock.mockReset();
     loadMemoryEntriesMock.mockResolvedValue([]);
+    forgetMemoryEntryMock.mockResolvedValue(undefined);
+    reviveMemoryEntryMock.mockResolvedValue(undefined);
     ingestLegacyMemoryMdMock.mockResolvedValue({ ingested: 0, deletedFile: false });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -162,6 +168,39 @@ describe('MemoryLedgerPanel', () => {
     act(() => checkbox.click());
     await flush();
     expect(container.textContent).toContain('已遗忘的旧事实');
+  });
+
+  it('M7：forgotten 条目可在面板显式恢复', async () => {
+    loadMemoryEntriesMock.mockResolvedValue([
+      {
+        id: 'e2',
+        category: 'general',
+        content: '忘了又想记的事实',
+        contentHash: 'h2',
+        confidence: 'confirmed',
+        trust: 'workspace',
+        status: 'forgotten',
+        sourceSessionId: null,
+        sourceMessageIds: null,
+        evidence: null,
+        createdAt: 2,
+        verifiedAt: null,
+        supersededBy: null,
+      },
+    ]);
+
+    await act(async () => {
+      root.render(<MemoryLedgerPanel workspacePath="/tmp/ws" lang="zh-CN" />);
+    });
+    await flush();
+
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    act(() => checkbox.click());
+    await flush();
+
+    clickButton(container, '恢复');
+    await flush();
+    expect(reviveMemoryEntryMock).toHaveBeenCalledWith('/tmp/ws', 'e2');
   });
 
   it('forgetting an entry does not write memory.md', async () => {

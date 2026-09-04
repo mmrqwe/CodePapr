@@ -284,6 +284,13 @@ pub async fn forget_memory_entry(
 }
 
 #[tauri::command]
+pub async fn revive_memory_entry(app: AppHandle, workspace_path: String, entry_id: String) -> Result<(), String> {
+    rpc_ok(&app, "db/reviveMemoryEntry", json!({
+        "workspacePath": workspace_path, "entryId": entry_id,
+    })).await
+}
+
+#[tauri::command]
 pub async fn load_memory_entries(app: AppHandle, workspace_path: String, only_active: Option<bool>) -> Result<Value, String> {
     rpc(&app, "db/loadMemoryEntries", json!({ "workspacePath": workspace_path, "onlyActive": only_active })).await
 }

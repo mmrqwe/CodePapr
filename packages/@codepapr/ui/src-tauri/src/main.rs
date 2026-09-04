@@ -175,6 +175,7 @@ fn main() {
             commands::admit_memory_candidate,
             commands::reject_memory_candidate,
             commands::forget_memory_entry,
+            commands::revive_memory_entry,
             commands::load_memory_entries,
             commands::load_memory_candidates,
             commands::project_memory_file,

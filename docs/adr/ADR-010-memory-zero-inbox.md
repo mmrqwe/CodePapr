@@ -19,20 +19,28 @@ Claude Code MEMORY.md 都不一样：那些产品是系统自己记，人事后�
 
 ## 决策
 
-**废除作为产品的候选审核队列。** `memory_candidates` 只作内部去重与审计：写入后同一路径 `persist` 或 `drop`，事务内 admit。面板是目录（浏览 / 遗忘），没有准入按钮。Agent 不得要求用户去确认记忆。
+**废除作为产品的候选审核队列。** `memory_candidates` 只作内部去重与审计：写入后同一路径 `persist` 或 `drop`，事务内 admit。面板是目录（浏览 / 遗忘 / 恢复），没有准入按钮。Agent 不得要求用户去确认记忆。
 
 写入门是 `planMemoryWrite`（确定性，不信任 LLM 自报的效力）：
 
 | 输入 | 落点 | 进 Session Bootstrap？ |
 |---|---|---|
-| 用户说记住 / 必须 / 不要（短约束或显式「记住」） | preference / constraint | 是 |
+| 用户说「记住」或强模态完整指令（必须/禁止/不得…） | preference / constraint | 是（confirmed） |
 | 用户在记忆面板手写笔记 | user-note | 是（账本渲染进 Bootstrap） |
-| 工作区实证、冷启动摘要、测试/构建成功 | fact / convention / verification | 摘要进 managed zone |
+| 工作区实证（工具输出、测试/构建成功） | fact / convention / verification | 是（confirmed） |
+| 冷启动 LLM 摘要 | fact | 否——`[reported]`，只按需召回 |
+| Agent 经 `memory_write` 自报 | fact / decision / … | 否——`[reported]`，只按需召回 |
 | 同一错误踩两次 / `category: procedure` | procedure | 否，只 Recall |
 | web / MCP / `https` evidence / `category: citation` | citation | 否，永远不当指令 |
 | 注入、密钥、危险命令、裸 assistant 推理 | drop | 否 |
 
-Agent 经 `memory_write` 提出的 fact/preference 立刻 persist（`[reported]`）。用户可事后遗忘。网页内容即使被误标为 fact，只要 origin/evidence 是 URL 或 source 是 web/MCP，运行时改写成 citation。
+Bootstrap 信任硬规则：**只有 confirmed（user / tool-output / 面板手写）进固定前缀**；
+reported（Agent 自报、冷启动 LLM 生成）只进 Recall——模型臆测不得固化成
+「每次会话都看见的项目真理」。用户可事后遗忘。网页内容即使被误标为 fact，
+只要 origin/evidence 是 URL 或 source 是 web/MCP，运行时改写成 citation。
+准入前对同 category 做近义合并（bigram Jaccard / 编辑相似度），换说法重写
+同一事实不再堆叠占预算。遗忘条目的同 hash 再写默认拒绝（防自动复活），
+恢复唯一通道是记忆面板的显式「恢复」。
 
 自动 Recall **跳过 citation**（ADR-009 第 9 条：不可信内容不自动召回）。`memory_search` 仍可检索引用。
 

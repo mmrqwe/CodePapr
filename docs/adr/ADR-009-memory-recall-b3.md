@@ -26,8 +26,10 @@ turn 结束后不滞留。曾评估：
 6. Recall 不参与 round 计数、conversation search、checkpoint transcript、compaction source range。
 7. Recall 默认不参与 checkpoint merge；只有当前工作中独立验证的事实才能进入
    checkpoint / durable memory。
-8. v1 检索引擎 = LIKE/token 检索 + metadata 加权重排；不上 FTS5 / embedding
-   （rusqlite bundled 无 FTS5 编译开关，PR5 开工时再做 runtime probe）。
+8. v1 检索引擎 = LIKE/token 检索 + metadata 加权重排；不上 embedding。
+   FTS5 runtime probe 已落地（rusqlite bundled 实测含 FTS5）：trigram 索引做
+   候选预筛、短 token LIKE 补齐，确定性 scoring 语义不变；中文查询按
+   2 字 bigram 切分 token（整句无空格中文不能作单 token 匹配）。
 9. Untrusted web / MCP / 原始 artifact 内容默认不自动召回。
 10. Recall 有独立 token/item budget：`maxRecallItems=5 / maxRecallTokens=1200 /
     maxSingleRecallItemTokens=350`；紧张时

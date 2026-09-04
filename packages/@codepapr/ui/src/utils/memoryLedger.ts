@@ -27,6 +27,14 @@ const REMEMBER_PATTERN =
   /记住|请记住|记得|以后都|往后都|下次请|please remember|remember (that|this|to)|from now on|always use|never (use|do)/i;
 const CONSTRAINT_PATTERN =
   /必须|务必|不要|禁止|避免|只能|不得|must|should not|avoid|required|forbidden|never/i;
+/**
+ * M3：无「记住」标记时约束抽取的强门槛——只认强模态词（软性「不要/避免」
+ * 大概率是当下任务指令而非长期规则），且句子要有完整长度，防止闲聊
+ * 「不要改那个文件」被永久记成约束。
+ */
+const CONSTRAINT_STRONG_PATTERN =
+  /必须|务必|禁止|不得|只能|一律|任何情况下|\bmust\b|\bnever\b|forbidden/i;
+const BARE_CONSTRAINT_MIN_CHARS = 10;
 
 const BOOTSTRAP_EXCLUDED = new Set(['citation', 'procedure']);
 
@@ -97,6 +105,12 @@ export function collectUserUtteranceMemoryCandidates(
     const constrained = CONSTRAINT_PATTERN.test(content);
     if (!remembered && !constrained) continue;
     if (!remembered && content.length > 240) continue;
+    if (
+      !remembered &&
+      (!CONSTRAINT_STRONG_PATTERN.test(content) || content.length < BARE_CONSTRAINT_MIN_CHARS)
+    ) {
+      continue;
+    }
     const envelope = envelopeContent({
       source: 'user',
       trust: 'trusted',
@@ -139,7 +153,9 @@ export interface ProjectionEntry {
 
 /**
  * Session Bootstrap 渲染（token-budgeted）：每条目一行 `- [verified] content`。
- * 含 user-note 与指令/事实类；排除 citation / procedure。超预算按条数/token 截断。
+ * 含 user-note 与指令/事实类；排除 citation / procedure 与非 confirmed
+ * （M2：Agent 自报的 reported 内容只进 Recall，不冻结进前缀）。
+ * 超预算按条数/token 截断。
  */
 export function buildMemoryProjection(entries: readonly ProjectionEntry[]): string {
   const lines: string[] = [];
@@ -154,6 +170,7 @@ export function buildMemoryProjection(entries: readonly ProjectionEntry[]): stri
 
   for (const entry of ranked) {
     if (BOOTSTRAP_EXCLUDED.has(entry.category)) continue;
+    if (entry.confidence !== 'confirmed') continue;
     if (lines.length >= maxEntries) break;
     const content = redactSecrets(entry.content).replace(/\s+/g, ' ').trim();
     if (!content) continue;

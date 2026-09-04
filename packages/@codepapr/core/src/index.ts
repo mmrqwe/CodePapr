@@ -465,6 +465,7 @@ export {
   planMemoryWrite,
   normalizeMemoryKind,
   memoryProjectsToBootstrap,
+  memoryEntryProjectsToBootstrap,
   MEMORY_CONTENT_MAX_CHARS,
   MEMORY_CONTENT_MIN_CHARS,
   MEMORY_KINDS,

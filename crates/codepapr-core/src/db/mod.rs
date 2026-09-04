@@ -3140,6 +3140,68 @@ pub fn save_memory_candidate(
     Ok(true)
 }
 
+// ── M4 近义合并：归一化 + 字符 bigram Jaccard ─────────────────────────
+
+/// 字符 bigram Jaccard ≥ 该值 = 同一事实的改述（幂等返回既有条目）。
+/// 刻意保守：阈值过高会漏掉宽松改述，但误合并会丢不同事实（命令、颜色…），
+/// 冲突表述（「蓝色/红色」一字之改）Jaccard 自然在 0.5 以下不会被吞并。
+const NEAR_DUP_JACCARD: f64 = 0.8;
+/// bigram 集合过短时不判定（避免短句偶然高重叠）。
+const NEAR_DUP_MIN_BIGRAMS: usize = 4;
+
+fn normalize_fold(text: &str) -> Vec<char> {
+    text.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+fn char_bigram_set(text: &str) -> HashSet<(char, char)> {
+    let folded = normalize_fold(text);
+    match folded.len() {
+        0 => HashSet::new(),
+        1 => HashSet::from([(folded[0], '\u{0}')]),
+        _ => folded.windows(2).map(|w| (w[0], w[1])).collect(),
+    }
+}
+
+fn is_near_duplicate(new_content: &str, existing_content: &str) -> bool {
+    let a = char_bigram_set(new_content);
+    let b = char_bigram_set(existing_content);
+    if a.len() < NEAR_DUP_MIN_BIGRAMS || b.len() < NEAR_DUP_MIN_BIGRAMS {
+        return false;
+    }
+    let inter = a.intersection(&b).count() as f64;
+    let union = a.union(&b).count() as f64;
+    inter / union >= NEAR_DUP_JACCARD
+}
+
+fn find_near_duplicate_entry(
+    tx: &rusqlite::Transaction<'_>,
+    category: &str,
+    content: &str,
+) -> Result<Option<String>, String> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT id, content FROM memory_entries
+             WHERE status = 'active' AND category = ?1
+             ORDER BY verified_at DESC, created_at DESC
+             LIMIT 200",
+        )
+        .map_err(|err| format!("准备近义记忆检测失败: {err}"))?;
+    let rows = stmt
+        .query_map(params![category], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|err| format!("读取近义记忆检测失败: {err}"))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| format!("收集近义记忆检测失败: {err}"))?;
+    Ok(rows
+        .into_iter()
+        .find(|(_, existing)| is_near_duplicate(content, existing))
+        .map(|(id, _)| id))
+}
+
 /// 准入：候选 → entry（单事务），并 supersede 同内容哈希的旧 active entry。
 /// 幂等与遗忘保护：同 hash 已有 forgotten entry → 拒绝（候选标记 rejected）；
 /// 同 hash 已有 active entry → 不新建条目，仅标记候选 admitted 并返回既有 id。
@@ -3204,7 +3266,10 @@ pub fn admit_memory_candidate(
         .map_err(|err| format!("标记候选拒绝失败: {err}"))?;
         tx.commit()
             .map_err(|err| format!("提交候选拒绝失败: {err}"))?;
-        return Err("候选内容已被遗忘（memory_forget），不再准入".to_string());
+        return Err(
+            "候选内容已被遗忘（memory_forget），不再自动准入：请改写内容重新记忆，或由用户在记忆面板恢复该条目"
+                .to_string(),
+        );
     }
 
     // 同内容 active 条目已存在：幂等准入——不新建条目、不 supersede 抖动，
@@ -3227,8 +3292,23 @@ pub fn admit_memory_candidate(
         )
         .map_err(|err| format!("标记候选已准入失败: {err}"))?;
         tx.commit()
-            .map_err(|err| format!("提交准入事务失败: {err}"))?;
+            .map_err(|err| format!("提交候选幂等准入失败: {err}"))?;
         return Ok(existing_id);
+    }
+
+    // M4（近义合并）：同 category 的 active 条目做轻量相似检测——换个说法
+    // 重写同一事实不再堆叠占预算，幂等返回既有条目 id。
+    if let Some(similar_id) = find_near_duplicate_entry(&tx, &category, &content)? {
+        tx.execute(
+            "UPDATE memory_candidates
+             SET status = 'admitted', decided_at = ?1
+             WHERE id = ?2",
+            params![unix_millis()?, candidate_id],
+        )
+        .map_err(|err| format!("标记候选近义合并失败: {err}"))?;
+        tx.commit()
+            .map_err(|err| format!("提交候选近义合并失败: {err}"))?;
+        return Ok(similar_id);
     }
 
     let verified_at = unix_millis()?;
@@ -3313,6 +3393,45 @@ pub fn forget_memory_entry(
         .map_err(|err| format!("遗忘记忆条目失败: {err}"))?;
     if affected == 0 {
         return Err("记忆条目不存在或已遗忘".to_string());
+    }
+    Ok(())
+}
+
+/// M7：恢复（遗忘的逆操作，仅面板显式触发）：forgotten → active。
+/// 自动写入路径对同 hash 遗忘条目仍拒绝，防止「忘了又被机器记回来」。
+pub fn revive_memory_entry(workspace_path: String, entry_id: String) -> Result<(), String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let content_hash: Option<String> = conn
+        .query_row(
+            "SELECT content_hash FROM memory_entries WHERE id = ?1 AND status = 'forgotten'",
+            params![entry_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| format!("查询遗忘条目失败: {err}"))?;
+    let Some(hash) = content_hash else {
+        return Err("条目不存在或当前状态不是已遗忘".to_string());
+    };
+    let conflicting: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM memory_entries WHERE content_hash = ?1 AND status = 'active' AND id != ?2)",
+            params![hash, entry_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| format!("查询活跃记忆冲突失败: {err}"))?;
+    if conflicting {
+        return Err("已存在相同内容的活跃记忆，无需恢复".to_string());
+    }
+    let affected = conn
+        .execute(
+            "UPDATE memory_entries
+             SET status = 'active', forgotten_reason = NULL
+             WHERE id = ?1 AND status = 'forgotten'",
+            params![entry_id],
+        )
+        .map_err(|err| format!("恢复记忆条目失败: {err}"))?;
+    if affected == 0 {
+        return Err("恢复失败：条目状态已变化".to_string());
     }
     Ok(())
 }
@@ -3760,7 +3879,8 @@ pub fn update_memory_entry_content(
 // ── Memory Recall（PR5，ADR-009 B3）────────────────────────────────────
 //
 // turn-scoped Recall：主线程每用户回合检索一次（LIKE/token + 确定性加权重排，
-// v1 不上 FTS5/embedding），Recall Block 只存 memory_recalls 做审计，
+// FTS5 trigram 候选预筛已落地——runtime probe，见 ensure_memory_fts_schema；
+// embedding 未上），Recall Block 只存 memory_recalls 做审计，
 // 不进 messages/surface/log（request-only anchored insertion）。
 
 #[derive(Deserialize)]
@@ -3893,6 +4013,9 @@ pub struct RecallSearchItem {
     pub(crate) id: String,
     pub(crate) source: String,
     pub(crate) title: String,
+    /// M6：显式类别（stable-memory = entry.category；checkpoint = "checkpoint"）。
+    /// title 只用于展示，category 过滤/排除一律走这个字段。
+    pub(crate) category: String,
     pub(crate) content: String,
     pub(crate) confidence: String,
     pub(crate) trust: String,
@@ -4061,7 +4184,8 @@ pub fn search_memory_for_recall(
     let input: RecallSearchInput = serde_json::from_str(&query_json)
         .map_err(|err| format!("Recall 查询 JSON 不合法: {err}"))?;
     // 与 TS buildRecallQuery 对齐：保留 `_`/`-`（代码标识符如
-    // TEST_COMMAND_PATTERN / oauth-callback 否则永远匹配不到），上限同为 12。
+    // TEST_COMMAND_PATTERN / oauth-callback 否则永远匹配不到），上限同为 24
+    // （中文查询按 2 字 bigram 展开，12 会截掉后半句）。
     let tokens: Vec<String> = input
         .tokens
         .iter()
@@ -4077,7 +4201,7 @@ pub fn search_memory_for_recall(
                 Some(cleaned)
             }
         })
-        .take(12)
+        .take(24)
         .collect();
     let limit = input.limit.unwrap_or(8).clamp(1, 20);
 
@@ -4166,7 +4290,8 @@ pub fn search_memory_for_recall(
             items.push(RecallSearchItem {
                 id,
                 source: "stable-memory".to_string(),
-                title: category,
+                title: category.clone(),
+                category,
                 content,
                 confidence,
                 trust,
@@ -4229,6 +4354,7 @@ pub fn search_memory_for_recall(
                 id: format!("cp-{message_id}"),
                 source: "session-checkpoint".to_string(),
                 title: "历史会话结论".to_string(),
+                category: "checkpoint".to_string(),
                 content: summary.chars().take(400).collect(),
                 confidence: "reported".to_string(),
                 trust: "derived".to_string(),
@@ -5663,6 +5789,143 @@ mod tests {
         let admitted = load_memory_candidates(ws.clone(), Some("admitted".to_string()))
             .expect("load admitted");
         assert!(admitted.iter().any(|c| c.id == "c4"));
+    }
+
+    /// M4：同 category 近义改写不再堆叠——幂等返回既有条目 id。
+    #[test]
+    fn admit_memory_candidate_merges_near_duplicate() {
+        let workspace = TestWorkspace::new("memory-near-dup");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let candidate = |id: &str, hash: &str, content: &str| {
+            serde_json::json!({
+                "id": id,
+                "category": "convention",
+                "content": content,
+                "contentHash": hash,
+                "confidence": "confirmed",
+                "trust": "trusted",
+                "sourceSessionId": "s1",
+                "sourceMessageIds": "[]",
+                "evidence": null,
+                "riskFlags": null,
+                "createdAt": 1i64,
+            })
+        };
+
+        save_memory_candidate(
+            ws.clone(),
+            candidate("nd-1", "h-nd1", "本项目所有提交都必须先运行 pnpm lint 再推送到远端")
+                .to_string(),
+        )
+        .expect("save nd-1");
+        let id1 = admit_memory_candidate(ws.clone(), "nd-1".to_string(), "e-nd1".to_string())
+            .expect("admit nd-1");
+
+        // 近义改写（不同 hash、高 bigram 重叠）→ 合并到既有条目，不新建。
+        save_memory_candidate(
+            ws.clone(),
+            candidate("nd-2", "h-nd2", "本项目所有提交都必须先运行 pnpm lint 再推送到远端仓库")
+                .to_string(),
+        )
+        .expect("save nd-2");
+        let id2 = admit_memory_candidate(ws.clone(), "nd-2".to_string(), "e-nd2".to_string())
+            .expect("admit nd-2");
+        assert_eq!(id1, id2);
+
+        // 冲突表述（改一词翻转语义）不得被吞并。
+        save_memory_candidate(
+            ws.clone(),
+            candidate("nd-3", "h-nd3", "本项目所有提交都禁止先运行 pnpm lint 再推送到远端")
+                .to_string(),
+        )
+        .expect("save nd-3");
+        let id3 = admit_memory_candidate(ws.clone(), "nd-3".to_string(), "e-nd3".to_string())
+            .expect("admit nd-3");
+        assert_ne!(id1, id3);
+
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
+        assert_eq!(active.len(), 2);
+    }
+
+    /// M7：forgotten → active 仅经面板显式恢复；自动路径仍被遗忘守卫阻断。
+    #[test]
+    fn revive_memory_entry_restores_forgotten_entry() {
+        let workspace = TestWorkspace::new("memory-revive");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let candidate = serde_json::json!({
+            "id": "rv-1",
+            "category": "fact",
+            "content": "值得重新记住的旧事实",
+            "contentHash": "h-rv",
+            "confidence": "confirmed",
+            "trust": "workspace",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": null,
+            "riskFlags": null,
+            "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
+        admit_memory_candidate(ws.clone(), "rv-1".to_string(), "e-rv".to_string())
+            .expect("admit");
+        forget_memory_entry(ws.clone(), "e-rv".to_string(), None).expect("forget");
+
+        // 遗忘期间：同 hash 新候选在 save 层即被去重，不会重新入队。
+        let mut repost = candidate.clone();
+        repost["id"] = serde_json::json!("rv-2");
+        assert_eq!(
+            save_memory_candidate(ws.clone(), repost.to_string()).expect("save rv-2"),
+            false
+        );
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
+        assert!(!active.iter().any(|e| e.content_hash == "h-rv"));
+
+        // 面板恢复 → 重新 active。
+        revive_memory_entry(ws.clone(), "e-rv".to_string()).expect("revive");
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active 2");
+        assert!(active.iter().any(|e| e.id == "e-rv" && e.status == "active"));
+
+        // 非 forgotten 状态恢复必须失败。
+        let err = revive_memory_entry(ws.clone(), "e-rv".to_string())
+            .expect_err("active entry cannot revive");
+        assert!(err.contains("遗忘"), "got: {err}");
+    }
+
+    /// M1：中文查询切成 2 字 bigram 后（TS buildRecallQuery 产出），无空格
+    /// 中文短问必须命中已写入 fact（旧实现整句单 token 恒不中）。
+    #[test]
+    fn memory_recall_matches_cjk_bigram_tokens() {
+        let workspace = TestWorkspace::new("memory-recall-cjk-bigram");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let candidate = serde_json::json!({
+            "id": "cb-1",
+            "category": "fact",
+            "content": "本项目的测试框架是 vitest，端到端用 playwright",
+            "contentHash": "h-cb",
+            "confidence": "confirmed",
+            "trust": "workspace",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": null,
+            "riskFlags": null,
+            "createdAt": 1i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
+        admit_memory_candidate(ws.clone(), "cb-1".to_string(), "e-cb".to_string())
+            .expect("admit");
+
+        // 「测试框架是啥」→ bigram tokens（虚词「什么/怎么」类由 TS 侧过滤）。
+        let query = serde_json::json!({
+            "tokens": ["测试", "试框", "框架", "架是", "是啥"],
+            "limit": 8,
+        });
+        let items = search_memory_for_recall(ws, query.to_string()).expect("search");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "e-cb");
+        assert_eq!(items[0].category, "fact");
     }
 
     /// 回归：候选溯源字段（sourceMessageIds/evidence/riskFlags）按 Rust serde

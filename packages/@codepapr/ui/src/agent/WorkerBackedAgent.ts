@@ -249,7 +249,7 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
   // TodoList 工具：handler 改主线程的 store，由 Worker 通过 tool-request 桥回执行
   registerTodoListTools(registry, config.sessionId, '');
 
-  // Memory 工具（ADR-008 PR4）：memory_write/search/forget/review_candidates。
+  // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
   registerMemoryTools(registry, config.workspacePath, config.sessionId);
 
   registerMcpTools(registry, config.settings.mcp, config.runtime.mcpToolDefinitions ?? [], config.runtime.mcpToolMappings);

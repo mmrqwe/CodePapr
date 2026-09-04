@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { envelopeContent, memoryProjectsToBootstrap } from '@codepapr/core';
+import { envelopeContent, memoryEntryProjectsToBootstrap } from '@codepapr/core';
 import { getTranslation, type Lang } from '../utils/i18n';
 import {
   forgetMemoryEntry,
   ingestLegacyMemoryMd,
   loadMemoryEntries,
+  reviveMemoryEntry,
   updateMemoryEntryContent,
   type PersistedMemoryEntry,
 } from '../utils/projectStorage';
@@ -30,7 +31,7 @@ function trustBadge(
 
 function layerOf(entry: PersistedMemoryEntry): 'bootstrap' | 'recall' | 'citation' {
   if (entry.category === 'citation') return 'citation';
-  return memoryProjectsToBootstrap(entry.category) ? 'bootstrap' : 'recall';
+  return memoryEntryProjectsToBootstrap(entry.category, entry.confidence) ? 'bootstrap' : 'recall';
 }
 
 /**
@@ -138,7 +139,7 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
 
   const renderEntry = (entry: PersistedMemoryEntry) => {
     const badge = trustBadge(entry, t);
-    const bootstrap = memoryProjectsToBootstrap(entry.category);
+    const bootstrap = memoryEntryProjectsToBootstrap(entry.category, entry.confidence);
     const isNote = entry.category === 'user-note';
     const busy = busyIds.has(entry.id);
     const editing = editingId === entry.id;
@@ -188,6 +189,20 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
                 className="rounded-md border border-line px-2 py-0.5 text-[10px] font-medium text-fg-dim transition-colors hover:border-slate-500 hover:text-fg-soft disabled:opacity-40"
               >
                 {t.memoryLedgerForget}
+              </button>
+            ) : null}
+            {entry.status === 'forgotten' ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void withBusy(entry.id, async () => {
+                    await reviveMemoryEntry(workspacePath, entry.id);
+                  })
+                }
+                className="rounded-md border border-line px-2 py-0.5 text-[10px] font-medium text-fg-dim transition-colors hover:border-accent-soft hover:text-fg disabled:opacity-40"
+              >
+                {t.memoryLedgerRevive}
               </button>
             ) : null}
           </span>

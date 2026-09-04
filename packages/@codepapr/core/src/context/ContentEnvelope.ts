@@ -207,6 +207,18 @@ export function memoryProjectsToBootstrap(kind: string): boolean {
   return !BOOTSTRAP_EXCLUDED_MEMORY_KINDS.has(normalizeMemoryKind(kind));
 }
 
+/**
+ * M2（ADR-010 信任规则）：只有 confirmed（user / tool-output / 面板手写）
+ * 内容才允许进 Session Bootstrap 固定前缀；reported（Agent 自报、冷启动
+ * LLM 生成）只进 Recall，防模型臆测固化成「项目真理」。
+ */
+export function memoryEntryProjectsToBootstrap(
+  kind: string,
+  confidence: string
+): boolean {
+  return confidence === 'confirmed' && memoryProjectsToBootstrap(kind);
+}
+
 function looksLikeExternalOrigin(envelope: ContentEnvelope): boolean {
   if (envelope.source === 'web' || envelope.source === 'mcp') return true;
   return /^https?:\/\//i.test(envelope.origin);
@@ -217,7 +229,8 @@ function looksLikeExternalOrigin(envelope: ContentEnvelope): boolean {
  *
  * - 风险标记 / 尺寸 / 裸 assistant 推理 → drop
  * - web / MCP / 外部 URL origin → citation（可召回，不进 Bootstrap）
- * - 其余可证明或 Agent 经 memory_write 提出的内容 → 立刻 persist
+ * - 其余可证明或 Agent 经 memory_write 提出的内容 → 立刻 persist；
+ *   但 reported（未证实）不进 Bootstrap 前缀，只进按需召回（M2）
  */
 export function planMemoryWrite(input: {
   envelope: ContentEnvelope;
@@ -250,15 +263,17 @@ export function planMemoryWrite(input: {
   const attested =
     envelope.source === 'user' ||
     envelope.source === 'tool-output' ||
-    envelope.source === 'cold-start-bootstrap' ||
     envelope.trust === 'trusted' ||
     envelope.trust === 'workspace';
 
+  // M8：cold-start-bootstrap（LLM 生成）不再算 attested——幻觉不得以
+  // [verified] 姿态冻结进前缀；以 reported 身份只进 Recall。
+  const confidence = attested ? 'confirmed' : 'reported';
   return {
     action: 'persist',
     kind,
-    projectToBootstrap: memoryProjectsToBootstrap(kind),
-    confidence: attested ? 'confirmed' : 'reported',
+    projectToBootstrap: memoryEntryProjectsToBootstrap(kind, confidence),
+    confidence,
   };
 }
 

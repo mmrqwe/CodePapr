@@ -1215,7 +1215,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             : undefined;
           ensureNotStopped();
           // Cold-start: ledger 里还没有 Bootstrap 记忆，且有项目图摘要时，
-          // 后台生成初始事实。不阻塞当前会话，下次会话或压缩 epoch 进入前缀。
+          // 后台生成初始事实。不阻塞当前会话。M2/M8：LLM 生成内容以 reported
+          // 入账，不进前缀，只按需召回（防止幻觉固化成「项目真理」）。
           if (!memorySection && projectGraphBootstrapSummary && !memoryBootstrapInFlight) {
             memoryBootstrapInFlight = true;
             const bootstrapInput = {
@@ -1711,8 +1712,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // 同一 tool loop 复用同一 Recall Block（request-only 锚定插入，
           // 不进 log/surface/archive messages；审计记录存 memory_recalls）。
           // 检索失败静默：本回合不带 Recall，不阻塞发送。
+          // M5：Ask 模式同样只读 Recall（预算减半），写入门径由工具门控。
           let recallInsertions: RequestContextInsertion[] | undefined;
-          if (mode !== 'ask' && userMsg?.id && workspacePath) {
+          if (userMsg?.id && workspacePath) {
             try {
               const queryTokens = buildRecallQuery(effectiveDisplay ?? effectiveInput ?? '');
               // ADR-009 第10条：软预算紧张时 recallBudget = min(configured,
@@ -1746,7 +1748,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   const block = renderRecallBlock(items, {
                     lang: normalizedSettings.lang,
                     maxTokens: recallBudget.maxTokens,
-                    maxItems: recallBudget.maxItems,
+                    // Ask 只读模式预算收紧：条数减半，够回答「项目背景」类问题即可。
+                    maxItems: mode === 'ask' ? Math.min(recallBudget.maxItems, 3) : recallBudget.maxItems,
                   });
                   if (block) {
                     const recallId = createId();

@@ -415,7 +415,7 @@ export function buildAgentSessionParts(
   // TodoList 工具：主 Agent 的"短期工作记忆"，与 task 工具正交协作
   registerTodoListTools(toolRegistry, sessionId, '', settings.todoMaxRetries);
 
-  // Memory 工具（ADR-008 PR4）：memory_write/search/forget/review_candidates。
+  // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
   registerMemoryTools(toolRegistry, workspacePath, sessionId);
 
   registerMcpTools(toolRegistry, settings.mcp, runtime.mcpToolDefinitions ?? [], runtime.mcpToolMappings);

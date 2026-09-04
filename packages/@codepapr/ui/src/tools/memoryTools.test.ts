@@ -289,7 +289,7 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(false);
   });
 
-  it('memory_review_candidates lists persisted memories, not a pending queue', async () => {
+  it('memory_list lists persisted memories, not a pending queue', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'load_memory_entries') {
         return [
@@ -313,7 +313,7 @@ describe('memoryTools (ADR-008 PR4)', () => {
       return {};
     });
     const registry = buildRegistry();
-    const result = (await registry.execute('memory_review_candidates', {})) as {
+    const result = (await registry.execute('memory_list', {})) as {
       count: number;
       memories: string;
     };
@@ -322,16 +322,16 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(result.memories).toContain('pnpm');
   });
 
-  it('memory_review_candidates refuses admit and reject: no review queue', async () => {
+  it('memory_list refuses admit and reject: no review queue', async () => {
     const registry = buildRegistry();
     await expect(
-      registry.execute('memory_review_candidates', {
+      registry.execute('memory_list', {
         action: 'admit',
         candidateIds: ['c1'],
       })
     ).rejects.toThrow(/无需审核/);
     await expect(
-      registry.execute('memory_review_candidates', {
+      registry.execute('memory_list', {
         action: 'reject',
         candidateIds: ['c1'],
       })
@@ -342,7 +342,7 @@ describe('memoryTools (ADR-008 PR4)', () => {
 
   it('rejects unknown actions', async () => {
     const registry = buildRegistry();
-    await expect(registry.execute('memory_review_candidates', { action: 'nuke' })).rejects.toThrow(
+    await expect(registry.execute('memory_list', { action: 'nuke' })).rejects.toThrow(
       /未知 action/
     );
   });

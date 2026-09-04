@@ -942,6 +942,17 @@ export async function forgetMemoryEntry(
   });
 }
 
+/** M7：用户在面板显式恢复 forgotten 条目（唯一复活通道；自动路径仍被拒）。 */
+export async function reviveMemoryEntry(
+  workspacePath: string,
+  entryId: string
+): Promise<void> {
+  await invoke('revive_memory_entry', {
+    workspacePath: workspacePath.trim(),
+    entryId,
+  });
+}
+
 export interface PersistedMemoryEntry {
   id: string;
   category: string;
@@ -1043,6 +1054,8 @@ export interface RecallSearchItem {
   id: string;
   source: 'stable-memory' | 'session-checkpoint' | 'artifact' | 'archive';
   title: string;
+  /** M6：显式类别（checkpoint 条目为 'checkpoint'），过滤/排除只认这个字段。 */
+  category: string;
   content: string;
   confidence: string;
   trust: string;

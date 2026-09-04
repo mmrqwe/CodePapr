@@ -289,10 +289,9 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   // 向 .papr 应用/插件推送内容（写 app db）：ask 只读模式屏蔽。
   'app_publish',
   // 记忆变更类：ask 只读模式不得写稳定记忆/遗忘。
-  // memory_search 是只读检索，保留可用。
+  // memory_search / memory_list 是只读（检索/目录），保留可用。
   'memory_write',
   'memory_forget',
-  'memory_review_candidates',
 ]);
 
 /**

@@ -250,7 +250,7 @@ describe('planMemoryWrite', () => {
     expect(planMemoryAdmission(env).admitted).toBe(false);
   });
 
-  it('auto-persists agent-proposed facts without user review', () => {
+  it('auto-persists agent-proposed facts as reported, never in bootstrap prefix (M2)', () => {
     const env = envelopeContent({
       source: 'agent-proposed',
       trust: 'derived',
@@ -261,9 +261,24 @@ describe('planMemoryWrite', () => {
     expect(decision).toEqual({
       action: 'persist',
       kind: 'fact',
-      projectToBootstrap: true,
+      projectToBootstrap: false,
       confidence: 'reported',
     });
+  });
+
+  it('cold-start LLM summary is reported and stays out of the bootstrap prefix (M8)', () => {
+    const env = envelopeContent({
+      source: 'cold-start-bootstrap',
+      trust: 'derived',
+      origin: 'cold-start-bootstrap',
+      content: '项目使用 pnpm workspace，测试命令为 pnpm test',
+    });
+    const decision = planMemoryWrite({ envelope: env, kind: 'fact' });
+    expect(decision.action).toBe('persist');
+    if (decision.action === 'persist') {
+      expect(decision.confidence).toBe('reported');
+      expect(decision.projectToBootstrap).toBe(false);
+    }
   });
 
   it('stores procedure as recall-only', () => {

@@ -1141,7 +1141,7 @@ TTS Data Flow:
           <li><strong>Auto-write:</strong> You said remember / must / don’t, a test passed, cold start, Agent <code>memory_write</code>, or a panel note — kept or dropped immediately. No admit button.</li>
           <li><strong>Three panel groups:</strong> every session (notes / preferences / facts, 24 items / 1500 tokens), on-demand (procedures), search only (web citations).</li>
           <li><strong>When it reaches the model:</strong> this turn updates the ledger only; the current prefix stays; compact or a new session brings short instructions into the prefix; procedures wait for the next user turn to be recalled.</li>
-          <li><strong>How it is read:</strong> the ledger is not dumped. Short instructions already sit in session bootstrap; every user turn (except Ask) retrieves procedures from your message (~5 hits); if that is not enough the Agent calls <code>memory_search</code>. The catalog listing tool is <code>memory_review_candidates</code> (at most 40 previews). Web citations are search-only — never auto-recalled.</li>
+          <li><strong>How it is read:</strong> the ledger is not dumped. Short instructions already sit in session bootstrap; every user turn (Ask included, capped at 3 items there) retrieves relevant memories from your message (~5 hits); if that is not enough the Agent calls <code>memory_search</code>. The catalog listing tool is <code>memory_list</code> (at most 40 previews). Web citations are search-only — never auto-recalled.</li>
         </ul>
 
         <h3>/compact — Force Context Compression</h3>

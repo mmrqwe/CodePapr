@@ -382,6 +382,7 @@ pub async fn handle_request(ctx: &Arc<ServerContext>, method: &str, params: Valu
         "db/admitMemoryCandidate" => json_ok(codepapr_core::db::admit_memory_candidate(require_workspace(ctx, &params)?, require_string(&params, "candidateId")?, require_string(&params, "entryId")?)?),
         "db/rejectMemoryCandidate" => { codepapr_core::db::reject_memory_candidate(require_workspace(ctx, &params)?, require_string(&params, "candidateId")?, opt_string(&params, "reason"))?; Ok(json!({ "ok": true })) }
         "db/forgetMemoryEntry" => { codepapr_core::db::forget_memory_entry(require_workspace(ctx, &params)?, require_string(&params, "entryId")?, opt_string(&params, "reason"))?; Ok(json!({ "ok": true })) }
+        "db/reviveMemoryEntry" => { codepapr_core::db::revive_memory_entry(require_workspace(ctx, &params)?, require_string(&params, "entryId")?)?; Ok(json!({ "ok": true })) }
         "db/loadMemoryEntries" => json_ok(codepapr_core::db::load_memory_entries(require_workspace(ctx, &params)?, opt_bool(&params, "onlyActive"))?),
         "db/loadMemoryCandidates" => json_ok(codepapr_core::db::load_memory_candidates(require_workspace(ctx, &params)?, opt_string(&params, "status"))?),
         "db/projectMemoryFile" => { codepapr_core::db::project_memory_file(require_workspace(ctx, &params)?, require_string(&params, "managedZoneMarkdown")?)?; Ok(json!({ "ok": true })) }

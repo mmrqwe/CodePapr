@@ -1,8 +1,9 @@
 /**
  * Memory Recall（PR5，ADR-009 B3）：turn-scoped 检索块。
  *
- * 纯函数层：查询构造、Recall Block 渲染（trust 标记 + 预算）、锚定插入
- * 构造。检索与持久化编排在 store 层；v1 无 embedding、无 FTS5，无自动
+ * 纯函数层：查询构造（CJK 按 2 字 bigram 切分）、Recall Block 渲染（trust
+ * 标记 + 预算）、锚定插入构造。检索与持久化编排在 store 层；v1 无
+ * embedding（FTS5 trigram 候选预筛已落地，见 db runtime probe），无自动
  * re-recall（受控 re-recall 使用 order 递增，接口已就绪）。
  */
 
@@ -18,8 +19,11 @@ export const AUTO_RECALL_EXCLUDED_CATEGORIES = new Set(['citation']);
 export const RETRIEVAL_STRATEGY = 'like-token-v1';
 export const RETRIEVAL_VERSION = 1;
 
-export function filterAutoRecallItems<T extends { title: string }>(items: readonly T[]): T[] {
-  return items.filter((item) => !AUTO_RECALL_EXCLUDED_CATEGORIES.has(item.title));
+/** M6：自动 Recall 排除 citation——按显式 category 字段，不再依赖 title 约定。 */
+export function filterAutoRecallItems<T extends { category?: string }>(
+  items: readonly T[]
+): T[] {
+  return items.filter((item) => !AUTO_RECALL_EXCLUDED_CATEGORIES.has(item.category ?? ''));
 }
 
 /** Recall 预算下限：低于该值不值得注入，直接跳过本轮 Recall。 */
@@ -30,23 +34,68 @@ const STOP_WORDS = new Set([
   '这个', '那个', '一下', '怎么', '为什么', '什么', '可以', '如何', '帮', '我', '你',
 ]);
 
-/** 查询 token 化：小写、非字母数字切分、去停用词、去重、上限 12。 */
+/** 查询 token 上限：中文按 bigram 展开后 token 数天然变多，12 会截掉后半句。 */
+export const MAX_QUERY_TOKENS = 24;
+
+const HAN_RUN = /[\p{Script=Han}]+/u;
+const HAN_RUN_G = /[\p{Script=Han}]+/gu;
+const WORD_SPLIT = /[^\p{L}\p{N}_-]+/u;
+
+/** 纯虚词汉字（的/了/吗…仅当出现在 STOP_WORDS 里）——bigram 两字皆虚词才丢，
+ *  避免把「测试」这类实词因含常见字被误杀。 */
+const CJK_STOP_CHARS = new Set(
+  [...STOP_WORDS]
+    .filter((word) => HAN_RUN.test(word))
+    .flatMap((word) => [...word])
+);
+
+/** 汉字段 → 滑窗 bigram（无空格中文的分词兜底）；全虚词组合丢弃。 */
+function pushHanBigrams(run: string, tokens: Set<string>): boolean {
+  const chars = [...run];
+  for (let i = 0; i + 1 < chars.length; i += 1) {
+    const left = chars[i]!;
+    const right = chars[i + 1]!;
+    if (CJK_STOP_CHARS.has(left) && CJK_STOP_CHARS.has(right)) continue;
+    tokens.add(`${left}${right}`);
+    if (tokens.size >= MAX_QUERY_TOKENS) return false;
+  }
+  return true;
+}
+
+/**
+ * 查询 token 化：小写、非字母数字切分、去停用词、去重、上限 24。
+ * 连续汉字段（CJK）按 2 字滑窗切成 bigram——整句中文（无空格）不能作
+ * 单 token 走子串 contains 匹配，否则中文召回恒空（M1）。
+ */
 export function buildRecallQuery(
   userInput: string,
   extraHints: readonly string[] = []
 ): string[] {
   const tokens = new Set<string>();
-  const push = (value: string): void => {
-    for (const raw of value.split(/[^\p{L}\p{N}_-]+/u)) {
+  const pushWords = (value: string): boolean => {
+    for (const raw of value.split(WORD_SPLIT)) {
       const token = raw.toLowerCase();
       if (token.length < 2 || STOP_WORDS.has(token)) continue;
       tokens.add(token);
-      if (tokens.size >= 12) return;
+      if (tokens.size >= MAX_QUERY_TOKENS) return false;
     }
+    return true;
   };
-  push(userInput);
-  for (const hint of extraHints) push(hint);
-  return [...tokens].slice(0, 12);
+  const push = (value: string): boolean => {
+    let last = 0;
+    for (const match of value.matchAll(HAN_RUN_G)) {
+      const index = match.index ?? 0;
+      if (!pushWords(value.slice(last, index))) return false;
+      if (!pushHanBigrams(match[0], tokens)) return false;
+      last = index + match[0].length;
+    }
+    return pushWords(value.slice(last));
+  };
+  if (!push(userInput)) return [...tokens].slice(0, MAX_QUERY_TOKENS);
+  for (const hint of extraHints) {
+    if (!push(hint)) break;
+  }
+  return [...tokens].slice(0, MAX_QUERY_TOKENS);
 }
 
 interface RenderOptions {

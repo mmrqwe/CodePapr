@@ -148,6 +148,27 @@ describe('buildMemoryProjection', () => {
     expect(projection).toContain('fact');
   });
 
+  it('M2：reported 条目（Agent 自报/冷启动）不进 Bootstrap 前缀', () => {
+    const projection = buildMemoryProjection([
+      {
+        category: 'fact',
+        content: 'Agent 猜的假事实',
+        confidence: 'reported',
+        trust: 'derived',
+        verifiedAt: 1,
+      },
+      {
+        category: 'fact',
+        content: '用户确认的真事实',
+        confidence: 'confirmed',
+        trust: 'trusted',
+        verifiedAt: 2,
+      },
+    ]);
+    expect(projection).not.toContain('Agent 猜的假事实');
+    expect(projection).toContain('用户确认的真事实');
+  });
+
   it('renders a placeholder when empty', () => {
     expect(buildMemoryProjection([])).toContain('暂无');
   });
@@ -204,7 +225,7 @@ describe('buildMemoryProjection', () => {
 });
 
 describe('collectUserUtteranceMemoryCandidates', () => {
-  it('captures explicit remember / constraint utterances', () => {
+  it('captures explicit remember / strong constraint utterances', () => {
     const candidates = collectUserUtteranceMemoryCandidates([
       {
         id: 'u1',
@@ -225,8 +246,21 @@ describe('collectUserUtteranceMemoryCandidates', () => {
         timestamp: 3,
       },
     ]);
-    expect(candidates.map((item) => item.category).sort()).toEqual(['constraint', 'preference']);
+    // M3：u2 只有软模态「不要」且无「记住」标记 → 视为当下任务指令，不落库。
+    expect(candidates.map((item) => item.category)).toEqual(['preference']);
     expect(candidates.some((item) => item.envelope.content.includes('conventional'))).toBe(true);
+  });
+
+  it('M3：无「记住」但强模态 + 完整句子仍是 constraint', () => {
+    const candidates = collectUserUtteranceMemoryCandidates([
+      {
+        id: 'u1',
+        role: 'user',
+        content: '任何情况下都不得直接 push main 分支',
+        timestamp: 1,
+      },
+    ]);
+    expect(candidates.map((item) => item.category)).toEqual(['constraint']);
   });
 
   it('ignores long unconstrained task messages', () => {

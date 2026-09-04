@@ -1,10 +1,11 @@
 /**
- * 记忆工具：memory_write / memory_search / memory_forget / memory_review_candidates。
+ * 记忆工具：memory_write / memory_search / memory_forget / memory_list。
  *
  * - memory_write：按确定性策略立刻 persist 或 drop，不排队等用户审核；
  * - memory_search：检索稳定记忆 + checkpoint 事实；可触发受控 re-recall；
  * - memory_forget：active → forgotten（手写笔记只能在面板遗忘）；
- * - memory_review_candidates：列出已写入的记忆（目录，不是审核队列）。
+ * - memory_list：列出已写入的记忆目录（原名 memory_review_candidates，
+ *   零审核策略下它不是审核队列）。
  */
 
 import {
@@ -218,7 +219,7 @@ export function registerMemoryTools(
       items = [];
     }
     if (category && items.length > 0) {
-      items = items.filter((item) => item.title === category);
+      items = items.filter((item) => item.category === category);
     }
 
     const rendered = renderSearchResults(query, items);
@@ -298,7 +299,7 @@ export function registerMemoryTools(
     return { forgotten: id, note: '已遗忘（软删除）。下次会话前缀将不再包含该条目。' };
   });
 
-  registry.register(toolByName('memory_review_candidates'), async (args) => {
+  registry.register(toolByName('memory_list'), async (args) => {
     const action = (asOptionalString(args.action) ?? 'list').trim() || 'list';
 
     if (action === 'admit' || action === 'reject') {

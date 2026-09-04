@@ -1046,6 +1046,60 @@ describe('useAgentStore.sendMessage', () => {
     await vi.waitFor(() => expect(invokeCalls).toContain('archive_memory_recall'));
   });
 
+  it('M5：ask 模式同样跑只读 Recall（锚定插入 + 审计归档）', async () => {
+    const invokeCalls: string[] = [];
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      invokeCalls.push(command);
+      if (command === 'list_workspace_files') {
+        return { root: '', entries: [], truncated: false };
+      }
+      if (command === 'read_text_file') {
+        return { path: String(args?.relativePath), content: '', bytes: 0 };
+      }
+      if (command === 'search_memory_for_recall') {
+        return [
+          {
+            id: 'e1',
+            source: 'stable-memory',
+            title: 'fact',
+            category: 'fact',
+            content: '测试框架是 vitest',
+            confidence: 'confirmed',
+            trust: 'workspace',
+            score: 40,
+            sessionId: null,
+            messageIds: null,
+            verifiedAt: 1,
+          },
+        ];
+      }
+      return undefined;
+    });
+
+    const chatCalls: unknown[][] = [];
+    const chat = vi.fn(async (...args: unknown[]) => {
+      chatCalls.push(args);
+      return createAgentResponse('回复');
+    });
+    useAgentStore.setState((state) => ({
+      ...state,
+      _agent: createMockAgent({ chat: chat as never }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentSessionId: 'session-1',
+    }));
+
+    await useAgentStore.getState().sendMessage('测试框架是啥', '测试框架是啥', 'ask');
+
+    expect(invokeCalls).toContain('search_memory_for_recall');
+    const insertions = chatCalls[0]?.[4] as
+      | Array<{ source?: string; content?: string }>
+      | undefined;
+    expect(insertions?.[0]?.source).toBe('memory-recall');
+    expect(insertions?.[0]?.content).toContain('vitest');
+    expect(invokeCalls).toContain('save_memory_recall');
+    await vi.waitFor(() => expect(invokeCalls).toContain('archive_memory_recall'));
+  });
+
   it('persists the recent workspace path after opening a workspace', async () => {
     await useAgentStore.getState().openWorkspace('/tmp/restored-workspace');
 

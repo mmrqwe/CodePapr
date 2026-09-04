@@ -1141,7 +1141,7 @@ TTS 数据流：
           <li><strong>自动写入：</strong>你说「记住 / 必须 / 不要」、测试成功、冷启动、Agent <code>memory_write</code>、面板手写，立刻留下或丢掉。没有准入按钮。</li>
           <li><strong>面板三组：</strong>每次会话（手写 / 偏好 / 事实等，24 条 / 1500 tokens）、按需召回（踩坑）、仅搜索（网页引用）。</li>
           <li><strong>进模型的时机：</strong>本回合只更新账本；当前前缀不动；压缩或新会话才把短指令带进前缀；踩坑等下一用户回合召回。</li>
-          <li><strong>怎么读：</strong>不会整库倒进请求。短指令已经在会话引导里；每个用户回合（Ask 除外）系统用你这句话检索踩坑经验（约 5 条）；不够再调 <code>memory_search</code>。想看目录才调 <code>memory_review_candidates</code>（最多 40 条预览）。网页引用只能搜到，不会自动召回。</li>
+          <li><strong>怎么读：</strong>不会整库倒进请求。短指令已经在会话引导里；每个用户回合（含 Ask，Ask 下收紧至 3 条）系统用你这句话检索相关记忆（约 5 条）；不够再调 <code>memory_search</code>。想看目录才调 <code>memory_list</code>（最多 40 条预览）。网页引用只能搜到，不会自动召回。</li>
         </ul>
 
         <h3>/compact — 强制压缩上下文</h3>

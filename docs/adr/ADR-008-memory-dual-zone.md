@@ -64,7 +64,7 @@ memory.md 目前有四个写路径：
 memory_write(content, category, evidence?)   → 立刻 persist 或 drop，不排队
 memory_search(query, category?)
 memory_forget(id, reason?)
-memory_review_candidates()                   → 列出已写入目录（无 admit）
+memory_list()                                → 列出已写入目录（无 admit；原 memory_review_candidates）
 ```
 
 注意：新增工具会改变 tool schema → prefix hash → 全量一次性缓存失效（可接受，需提前声明）。

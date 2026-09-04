@@ -28,9 +28,27 @@ describe('buildRecallQuery', () => {
     expect(tokens.filter((t) => t === 'oauth')).toHaveLength(1);
   });
 
-  it('caps at 12 tokens', () => {
-    const tokens = buildRecallQuery('a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15');
-    expect(tokens.length).toBeLessThanOrEqual(12);
+  it('caps at 24 tokens', () => {
+    const tokens = buildRecallQuery('a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20 a21 a22 a23 a24 a25 a26 a27');
+    expect(tokens.length).toBeLessThanOrEqual(24);
+  });
+
+  it('M1：无空格中文切 2 字 bigram，不再整句成单 token', () => {
+    const tokens = buildRecallQuery('这个项目的测试框架是什么来着');
+    // 「这个」是虚词 bigram（全停用词），不应出现；实词窗口必须可召回。
+    expect(tokens).toContain('测试');
+    expect(tokens).toContain('框架');
+    expect(tokens).toContain('项目');
+    expect(tokens).not.toContain('这个项目的测试框架是什么来着');
+    expect(tokens).not.toContain('这个');
+    expect(tokens).not.toContain('什么');
+  });
+
+  it('M1：中英混排保留标识符、汉字段单独切窗', () => {
+    const tokens = buildRecallQuery('vitest跑不过怎么办');
+    expect(tokens).toContain('vitest');
+    expect(tokens).toContain('跑不');
+    expect(tokens).toContain('不过');
   });
 
   it('merges extra hints', () => {
@@ -183,10 +201,10 @@ describe('truncateToMaxTokens', () => {
 describe('filterAutoRecallItems', () => {
   it('drops citations from automatic recall but keeps facts and procedures', () => {
     const filtered = filterAutoRecallItems([
-      { title: 'fact', content: 'pnpm' },
-      { title: 'citation', content: 'blog' },
-      { title: 'procedure', content: 'E0597' },
+      { category: 'fact', content: 'pnpm' },
+      { category: 'citation', content: 'blog' },
+      { category: 'procedure', content: 'E0597' },
     ]);
-    expect(filtered.map((item) => item.title)).toEqual(['fact', 'procedure']);
+    expect(filtered.map((item) => item.category)).toEqual(['fact', 'procedure']);
   });
 });
