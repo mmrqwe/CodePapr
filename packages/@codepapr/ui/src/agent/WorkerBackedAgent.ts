@@ -768,10 +768,10 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       this.postToWorker({
         type: 'run-app-agent',
         requestId,
-        payload: {
-          ...payload,
-          mode: payload.mode ?? this.config.runtime.mode ?? 'app',
-        },
+        // D-10：旧实现在此填 payload.mode（'Sidecar 文件闸门用'），但
+        // handleRunAppAgent 恒以 mode:'agent' 构建系统提示、从不读取——空转
+        // 字段已删。若将来闸门要感知 app 上下文，重新设计字段语义再接线。
+        payload,
       } satisfies MainToAgentWorkerMessage);
     });
 

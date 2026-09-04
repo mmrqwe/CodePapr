@@ -358,8 +358,6 @@ export interface AppAgentPayload {
     projectMemory?: boolean;
     customPrompt?: boolean;
   };
-  /** Sidecar 文件闸门用：缺省由 Worker 填 `app`。 */
-  mode?: 'ask' | 'plan' | 'agent' | 'app';
 }
 
 export interface AppAgentResult {

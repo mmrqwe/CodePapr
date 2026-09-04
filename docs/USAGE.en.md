@@ -154,7 +154,7 @@ App access is declared by two orthogonal axes in the manifest:
 | `local` | `none` | Pure compute; only `papr.db` / `papr.fs` (app-owned sandbox, always available) |
 | `local` | `read` | + read project files (Agent read tools: read/grep/list/lsp/diagnostics, etc.) |
 | `local` | `write` | + modify project files and execute commands (Agent write/edit/patch/bash, writing project files directly) |
-| `network` | `true` | + access the public internet (papr.http + Agent websearch/webfetch + MCP) |
+| `network` | `true` | + access the public internet (papr.http + Agent websearch/webfetch + remote MCP servers; **stdio/local MCP servers count as a local capability and require `local ≥ read`**) |
 | `network` | `false` | fully offline (enforced by iframe CSP + backend sandbox; JS cannot bypass — **process-level bash/backend isolation is macOS-only**, see below) |
 
 > **Platform limit (C-5)**: the `sandbox-exec` process sandbox is currently enforced on **macOS only**. On Windows / Linux, an app declaring `network: false` / `local ≤ read` still has its **bash tool and backend processes** outside those two axes (iframe-side CSP/storage isolation still applies); a warning is pushed to the debug log when such an app launches or its agent runs. A cross-platform process sandbox is a separate work item.
@@ -164,7 +164,7 @@ App access is declared by two orthogonal axes in the manifest:
 - Recommended combos: calculator `{none, off}`, Todo/notes `{none, off}`, data dashboard `{read, on}`, refactoring tool `{write, off}`
 - The legacy `level` field (0-3) still works: 0→`{none,off}`, 1→`{read,off}`, 2→`{read,on}`, 3→`{write,on}`
 
-Agent tool whitelist (declare in `agents[].tools`, must fall within the access profile): `read`, `grep`, `list`, `lsp`, `diagnostics`, `read_image`, `skill_load`, `todo`, `local_time_now` (built-in), `websearch`, `webfetch` (require network), `write`, `edit`, `patch`, `bash` (require local=write).
+Agent tool whitelist (declare in `agents[].tools`, must fall within the access profile): `read`, `grep`, `list`, `lsp`, `diagnostics`, `read_image`, `skill_load`, `todo`, `local_time_now` (built-in), `websearch`, `webfetch` (require network), `write`, `edit`, `patch`, `bash` (require local=write). Note: `todo` is accepted by validation for backward compatibility but is no longer mounted for app agents at runtime (its host session is invisible to users — see audit D-12); stdio MCP servers count on the local axis and cannot be called with `local: none` (see D-11).
 
 Settings → **App Tab** sets the **default when undeclared** (local × network) and per-app overrides (overrides can only narrow a declared profile). Apps that already declare `local`/`network` in their manifest are **not** capped or granted by this fallback.
 

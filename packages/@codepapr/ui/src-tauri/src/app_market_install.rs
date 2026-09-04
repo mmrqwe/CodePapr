@@ -23,10 +23,6 @@ fn global_apps_dir() -> Result<PathBuf, String> {
     codepapr_core::db::global_apps_dir()
 }
 
-fn workspace_plugin_data_dir(workspace: &Path, app_id: &str) -> PathBuf {
-    workspace.join(".CodePapr").join("plugin-data").join(app_id)
-}
-
 #[derive(Debug, Deserialize)]
 pub struct AppInstallFileItem {
     pub relative_path: String,
@@ -40,8 +36,12 @@ pub fn papr_install_app_files(
     app_id: String,
     files: Vec<AppInstallFileItem>,
 ) -> Result<String, String> {
-    if !is_valid_app_id(&app_id) {
-        return Err("invalid app id".to_string());
+    // D-1：安装入口收紧 kebab-case（与 TS app_render/app_publish 同一正则）。
+    // appId 是 URL host：大写会被引擎小写化（装完即 404），空格/点生成畸形 origin。
+    if !crate::app_runtime::is_valid_app_id_strict(&app_id) {
+        return Err(format!(
+            "非法的应用 id '{app_id}'：必须是 kebab-case（小写字母/数字/连字符，以字母或数字开头，最长 63 字符）"
+        ));
     }
 
     let target_dir = if scope == "global" {
@@ -220,17 +220,6 @@ pub fn papr_uninstall_app(
         }
     }
 
-    if remove_data {
-        if let Some(ws) = workspace_path.as_deref().filter(|w| !w.is_empty()) {
-            if let Ok(workspace) = codepapr_core::shared::canonical_workspace(ws) {
-                let data_dir = workspace_plugin_data_dir(&workspace, &app_id);
-                if data_dir.exists() && data_dir != target_dir {
-                    let _ = fs::remove_dir_all(&data_dir);
-                }
-            }
-        }
-    }
-
     // 清 APP_WORKSPACES 映射 + manifest 缓存 + app_context：旧实现只清后两者，
     // 映射泄漏导致同名重装前协议仍按旧工作区解析目录。
     let _ = crate::app_runtime::unregister_app_workspace(app_id.clone());
@@ -254,6 +243,34 @@ mod tests {
             relative_path: rel.into(),
             content: content.into(),
         }
+    }
+
+    #[test]
+    fn d1_install_rejects_non_kebab_ids_and_legacy_uninstall_still_works() {
+        let ws = temp_ws("kebab");
+        let wss = ws.to_string_lossy().into_owned();
+        for bad in ["My App", "MyApp", "my.app", "-lead", &"a".repeat(64)] {
+            let err = papr_install_app_files(
+                Some(wss.clone()),
+                "workspace".into(),
+                bad.into(),
+                vec![item("manifest.json", r#"{"spec":"papr/0.1","name":"x"}"#)],
+            )
+            .expect_err("非 kebab-case id 必须拒绝");
+            assert!(err.contains("kebab-case"), "unexpected: {err}");
+        }
+        // 存量非规范目录仍可卸载（宽校验保留给 uninstall/scan）
+        let legacy = ws.join(".CodePapr/apps/My Legacy");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(
+            legacy.join("manifest.json"),
+            r#"{"spec":"papr/0.1","name":"x"}"#,
+        )
+        .unwrap();
+        papr_uninstall_app(Some(wss), "workspace".into(), "My Legacy".into(), true)
+            .expect("legacy 目录必须可卸载");
+        assert!(!legacy.exists());
+        fs::remove_dir_all(&ws).ok();
     }
 
     #[test]

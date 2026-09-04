@@ -127,9 +127,12 @@ export function accessAllows(access: PaprAccess, capability: string, manifest: P
   return false;
 }
 
-/** app agent 内置工具（papr.agent.run）按两轴推导的可用工具集。 */
+/** app agent 内置工具（papr.agent.run）按两轴推导的可用工具集。
+ *  D-12：不含 `todo`——app agent 的宿主会话可能是 ensureAgentForApp 悄悄
+ *  新建的隐藏会话，挂载 todo 会让其清单输出出现在用户不知情的会话 UI 里。
+ *  manifest 里声明 'todo' 仍通过校验（向后兼容），运行时按本集合过滤掉。 */
 export function agentToolsFor(local: PaprLocalAccess, network: boolean): Set<string> {
-  const tools = new Set<string>(['todo', 'local_time_now']);
+  const tools = new Set<string>(['local_time_now']);
   if (localRank(local) >= 1) {
     for (const t of ['read', 'grep', 'list', 'lsp', 'diagnostics', 'read_image', 'skill_load']) {
       tools.add(t);

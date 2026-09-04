@@ -214,6 +214,99 @@ mod tests {
         // split_once('/') → ("my-app", "")
     }
 
+    fn unique_tmp(label: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("papr-{label}-{}-{unique}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn d2_protocol_serves_without_wildcard_cors() {
+        // 错误路径（resp() 构造）
+        let unregistered = serve_app_uri("codepapr-app://d2-app/index.html");
+        assert_eq!(unregistered.status(), StatusCode::NOT_FOUND);
+        assert!(unregistered
+            .headers()
+            .get("Access-Control-Allow-Origin")
+            .is_none());
+        let traversal = serve_app_uri("codepapr-app://d2-app/sub/../../x.html");
+        assert_eq!(traversal.status(), StatusCode::FORBIDDEN);
+        assert!(traversal
+            .headers()
+            .get("Access-Control-Allow-Origin")
+            .is_none());
+
+        // 200 成功路径：同源 iframe 自己加载资源不需要 ACAO
+        let tmp = unique_tmp("d2-cors");
+        let app_dir = tmp.join(".CodePapr").join("apps").join("d2-app");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(
+            app_dir.join("manifest.json"),
+            r#"{"spec":"papr/0.1","name":"D2","local":"none","network":false}"#,
+        )
+        .unwrap();
+        fs::write(app_dir.join("index.html"), "<html>ok</html>").unwrap();
+        register_app_workspace(
+            "d2-app".into(),
+            tmp.to_string_lossy().to_string(),
+            Some(r#"{"spec":"papr/0.1","name":"D2","local":"none","network":false}"#.into()),
+        )
+        .expect("register");
+        let ok = serve_app_uri("codepapr-app://d2-app/index.html");
+        assert_eq!(ok.status(), StatusCode::OK);
+        assert!(ok.headers().get("Access-Control-Allow-Origin").is_none());
+        // app 的私有 db.sqlite 依旧不可 serve（防线不变）
+        fs::write(app_dir.join("db.sqlite"), b"x").unwrap();
+        assert_eq!(
+            serve_app_uri("codepapr-app://d2-app/db.sqlite").status(),
+            StatusCode::NOT_FOUND
+        );
+        unregister_app_workspace("d2-app".into());
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn app_id_kebab_gate_d1() {
+        assert!(is_valid_app_id_strict("my-app1"));
+        assert!(is_valid_app_id_strict(&"a".repeat(63)));
+        // 大写会被 URL host 引擎小写化；空格/点/前导连字符产生畸形 origin
+        assert!(!is_valid_app_id_strict("MyApp"));
+        assert!(!is_valid_app_id_strict("my app"));
+        assert!(!is_valid_app_id_strict("my.app"));
+        assert!(!is_valid_app_id_strict("-lead"));
+        assert!(!is_valid_app_id_strict(""));
+        assert!(!is_valid_app_id_strict(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn register_rejects_new_non_kebab_allows_legacy_dir_d1() {
+        let tmp = unique_tmp("reg-kebab");
+        let ws = tmp.to_string_lossy().to_string();
+
+        // 新装非 kebab id：拒绝
+        let err = register_app_workspace("My App".into(), ws.clone(), None).unwrap_err();
+        assert!(err.contains("kebab-case"), "unexpected: {err}");
+
+        // 存量豁免：盘上已有 manifest 的非规范 id 可恢复注册（老用户不失效）
+        let legacy_dir = tmp.join(".CodePapr").join("apps").join("MyLegacy");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        fs::write(
+            legacy_dir.join("manifest.json"),
+            r#"{"spec":"papr/0.1","name":"My Legacy"}"#,
+        )
+        .unwrap();
+        register_app_workspace("MyLegacy".into(), ws.clone(), None)
+            .expect("legacy non-kebab dir must stay registrable");
+        unregister_app_workspace("MyLegacy".into());
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
     #[test]
     fn register_with_manifest_json_populates_cache() {
         let tmp = std::env::temp_dir().join(format!("papr-regmanifest-{}", std::process::id()));

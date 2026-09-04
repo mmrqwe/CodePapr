@@ -23,6 +23,7 @@ export function GoalBanner() {
       setLiveMs(Date.now() - goalState.startedAt);
     }, 1000);
     return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [goalState?.status, goalState?.startedAt]);
 
   if (!isGoalActive || !goalState) return null;

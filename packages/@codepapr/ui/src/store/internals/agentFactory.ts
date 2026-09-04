@@ -607,7 +607,9 @@ export function createAgent(
     console.warn('[Agent] Isolated runtime init failed, falling back to main-thread agent:', e);
   }
 
-  return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime);
+  // D-8：主线程兜底必须透传 pruneOptions——否则同一会话在 worker/sidecar 路径
+  // 带 ADR-006 渲染参数冻结、兜底路径不带，两条运行时的上下文裁剪行为不一致。
+  return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime, pruneOptions);
 }
 
 export function getAgentMessagesSince(

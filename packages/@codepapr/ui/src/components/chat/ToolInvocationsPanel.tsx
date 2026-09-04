@@ -16,6 +16,7 @@ export function ToolInvocationsPanel({
 }) {
   const t = getTranslation(lang);
   const bordered = useAgentStore((state) => state.settings.chatBordersEnabled);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   const toolInvocations = msg.toolInvocations ?? [];
   const turnStillRunning = Boolean(msg.isStreaming);
   const anyRunning = turnStillRunning || toolInvocations.some((tool) => tool.status === 'running');

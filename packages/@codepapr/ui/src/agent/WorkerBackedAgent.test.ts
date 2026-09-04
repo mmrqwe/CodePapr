@@ -229,7 +229,7 @@ describe('WorkerBackedAgent', () => {
     expect(initMessage.payload.toolDefinitions.length).toBeGreaterThan(0);
   });
 
-  it('forwards runtime.mode on init, chat, and run-app-agent', async () => {
+  it('forwards runtime.mode on init and chat; run-app-agent payload carries no dead mode (D-10)', async () => {
     const agent = createAgent([], { mode: 'app' });
     const worker = MockWorker.instances[0];
     const initMessage = worker?.messages[0];
@@ -260,7 +260,9 @@ describe('WorkerBackedAgent', () => {
       (m): m is Extract<MainToAgentWorkerMessage, { type: 'run-app-agent' }> =>
         m.type === 'run-app-agent' && m.requestId === 'run-mode',
     );
-    expect(appMessage?.payload.mode).toBe('app');
+    // D-10：mode 空转字段已删——handleRunAppAgent 恒以 mode:'agent' 构建，
+    // 转发 payload 里不应再出现 mode。
+    expect((appMessage?.payload as Record<string, unknown> | undefined)?.mode).toBeUndefined();
     worker?.emit({ type: 'app-agent-result', requestId: 'run-mode', content: 'done' });
     await runPromise;
   });

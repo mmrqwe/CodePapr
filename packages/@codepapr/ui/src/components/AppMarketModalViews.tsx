@@ -2,9 +2,44 @@ import type { Lang } from '../utils/i18n';
 import type { PaprAppListing, AppInstallScope } from '../utils/marketAppTypes';
 import { listingTitle, listingDescription, type MarketCopy } from './AppMarketModalCopy';
 
+/** D-14：同名双装（global + workspace）时市场卡片须如实呈现两个副本，
+ *  而不是只显示生效作用域的单一角标。 */
+export interface MarketInstalledScopes {
+  global: boolean;
+  workspace: boolean;
+}
+
+function ScopeBadges({
+  scopes,
+  hasUpdate,
+  c,
+}: {
+  scopes: MarketInstalledScopes | null | undefined;
+  hasUpdate?: boolean;
+  c: MarketCopy;
+}) {
+  const both = !!scopes && scopes.global && scopes.workspace;
+  const badgeClass =
+    'flex-shrink-0 rounded-full border border-info-bg bg-info-bg px-2 py-0.5 text-[9px] font-medium text-info';
+  if (hasUpdate) {
+    return <span className={badgeClass}>{c.updateAvailable}</span>;
+  }
+  if (both) {
+    return (
+      <span className="flex flex-shrink-0 items-center gap-1">
+        <span className={badgeClass}>📁 {c.installedWorkspace}</span>
+        <span className={badgeClass}>🌐 {c.installedGlobal}</span>
+      </span>
+    );
+  }
+  if (scopes?.global) return <span className={badgeClass}>🌐 {c.installedGlobal}</span>;
+  return <span className={badgeClass}>{c.installedWorkspace}</span>;
+}
+
 export function AppListingCard({
   listing,
   installedScope,
+  installedScopes,
   hasUpdate,
   isInstalling,
   isUninstalling,
@@ -19,6 +54,7 @@ export function AppListingCard({
 }: {
   listing: PaprAppListing;
   installedScope?: 'global' | 'workspace' | null;
+  installedScopes?: MarketInstalledScopes | null;
   hasUpdate?: boolean;
   isInstalling: boolean;
   isUninstalling: boolean;
@@ -52,11 +88,7 @@ export function AppListingCard({
           </div>
           <p className="mt-0.5 truncate text-[11px] text-fg-muted">v{listing.version} · {listing.author || 'Official'}</p>
         </div>
-        {installedScope && (
-          <span className="flex-shrink-0 rounded-full border border-info-bg bg-info-bg px-2 py-0.5 text-[9px] font-medium text-info">
-            {hasUpdate ? c.updateAvailable : installedScope === 'global' ? c.installedGlobal : c.installedWorkspace}
-          </span>
-        )}
+        {installedScope && <ScopeBadges scopes={installedScopes} hasUpdate={hasUpdate} c={c} />}
       </div>
 
       <p className="line-clamp-2 text-xs leading-relaxed text-fg-dim">{description}</p>
@@ -183,6 +215,7 @@ export function AppListingCard({
 export function AppDetail({
   listing,
   installedScope,
+  installedScopes,
   hasUpdate,
   isInstalling,
   isUninstalling,
@@ -196,6 +229,7 @@ export function AppDetail({
 }: {
   listing: PaprAppListing;
   installedScope?: 'global' | 'workspace' | null;
+  installedScopes?: MarketInstalledScopes | null;
   hasUpdate?: boolean;
   isInstalling: boolean;
   isUninstalling: boolean;
@@ -241,6 +275,11 @@ export function AppDetail({
               </span>
             </div>
             <p className="text-xs text-fg-muted">v{listing.version} · {listing.author || 'Official'}</p>
+            {installedScope && (
+              <div className="mt-1">
+                <ScopeBadges scopes={installedScopes} hasUpdate={hasUpdate} c={c} />
+              </div>
+            )}
           </div>
         </div>
 

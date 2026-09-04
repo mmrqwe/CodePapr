@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkMode } from '../../utils/agentPrompts';
+import { getTranslation } from '../../utils/i18n';
 import type { Lang } from './utils';
 
 interface ModeSelectorProps {
@@ -11,20 +12,21 @@ interface ModeSelectorProps {
 }
 
 export function ModeSelector({ mode, setMode, isLoading, lang, sessionLock }: ModeSelectorProps) {
+  const t = getTranslation(lang);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const allModes: { id: WorkMode; label: string }[] = [
-    { id: 'ask', label: lang === 'en' ? 'Ask' : lang === 'zh-TW' ? 'Ask' : 'Ask' },
-    { id: 'plan', label: lang === 'en' ? 'Plan' : lang === 'zh-TW' ? 'Plan' : 'Plan' },
-    { id: 'agent', label: lang === 'en' ? 'Agent' : lang === 'zh-TW' ? 'Agent' : 'Agent' },
-    { id: 'app', label: lang === 'en' ? 'App' : lang === 'zh-TW' ? 'App' : 'App' },
-  ];
+  const allModes: { id: WorkMode; label: string }[] = useMemo(() => [
+    { id: 'ask', label: t.askMode },
+    { id: 'plan', label: t.planMode },
+    { id: 'agent', label: t.agentMode },
+    { id: 'app', label: t.appMode },
+  ], [t]);
 
   const modes = useMemo(() => {
     if (sessionLock === 'app') return allModes.filter((m) => m.id === 'app');
     if (sessionLock === 'coding') return allModes.filter((m) => m.id !== 'app');
     return allModes;
-  }, [sessionLock]);
+  }, [allModes, sessionLock]);
   const active = modes.find((m) => m.id === mode) ?? modes[0];
   const isLocked = sessionLock === 'app';
 
@@ -43,10 +45,10 @@ export function ModeSelector({ mode, setMode, isLoading, lang, sessionLock }: Mo
         disabled={isLoading}
         title={
           sessionLock === 'app'
-            ? (lang === 'en' ? 'App session - mode locked' : lang === 'zh-TW' ? 'App 會話 - 模式已鎖定' : 'App 会话 - 模式已锁定')
+            ? t.appModeLockedHint
             : sessionLock === 'coding'
-              ? (lang === 'en' ? 'Coding session - App mode unavailable' : lang === 'zh-TW' ? '編碼會話 - App 模式不可用' : '编码会话 - App 模式不可用')
-              : undefined
+              ? t.codingModeLockedHint
+              : `${t.currentMode}: ${active.label}`
         }
         className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-fg-muted hover:text-fg hover:bg-slate-700/50 transition-colors disabled:opacity-50"
       >

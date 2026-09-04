@@ -157,6 +157,7 @@ export const ConversationSearch = memo(function ConversationSearch({ onNavigateT
     // N14：切换会话后 messages 换源——结果必须随 activeSessionId 失效重算。
     // 旧实现只依赖 query/scope，切换会话后残留旧会话结果，点击跳转到当前
     // 会话不存在的消息（DOM 找不到 + jump 请求落空）→ 无反应。
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [deferredQuery, msgScope, activeSessionId]);
 
   // file search only when files tab + 300ms debounce

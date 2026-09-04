@@ -636,6 +636,7 @@ export function CodePreviewPanel({
         column: location.column,
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
     [handleNavigateToPreviewLocation]
   );
 

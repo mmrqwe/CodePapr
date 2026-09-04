@@ -19,6 +19,7 @@ import {
 import { normalizeWorkspaceId } from '../papr/projectRecordScope';
 import { isPluginApp, parsePaprKind, parsePluginSurfaceArg, pluginIsEnabled, readAppManifest, resolvePaprEntryFile, shouldRevealOnPublish } from '../papr/pluginSurface';
 import { postAppEvent } from '../papr/appChannelHub';
+import { findPreviewProcessForPort, processPreviewUrl } from '../utils/loopbackPreview';
 import { pushDebugLog } from '../store/debugLogStore';
 import { platformSandboxWarning } from '../utils/platformSandbox';
 import { type WorkspaceToolContext } from './workspaceToolContext';
@@ -464,19 +465,23 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     } catch { /* best-effort */ }
 
     // Ground truth for running backends: the Rust process registry (survives
-    // webview reloads). Keyed by preview URL so we can match an app by its port.
-    const runningByUrl = new Map<string, number>();
+    // webview reloads). D-13: match via loopbackPreview (localhost/127.0.0.1/::1
+    // 与大小写容错)——旧实现用 `http://localhost:<port>/` 字符串相等比对，
+    // 后端登记的 preview_url 常是 127.0.0.1，app_list 因此漏判 running。
+    interface PreviewProc { pid: number; previewUrl?: string; preview_url?: string }
+    let procs: PreviewProc[] = [];
     try {
-      const procs = await invoke<Array<{ pid: number; preview_url?: string }>>('list_background_processes', { workspacePath: workspace() });
-      for (const proc of procs) {
-        if (proc.preview_url) runningByUrl.set(proc.preview_url, proc.pid);
-      }
+      procs = await invoke<PreviewProc[]>('list_background_processes', { workspacePath: workspace() });
     } catch { /* best-effort */ }
     const urlForPort = (port?: number | null): string | null => (port ? `http://localhost:${port}/` : null);
+    const liveUrlForPort = (port?: number | null): string | null => {
+      const proc = findPreviewProcessForPort(procs, port ?? null);
+      return proc ? processPreviewUrl(proc) ?? urlForPort(port) : null;
+    };
 
     const fromStore = storeApps.map((app) => {
-      const regUrl = urlForPort(app.port);
-      const regRunning = regUrl !== null && runningByUrl.has(regUrl);
+      const regUrl = liveUrlForPort(app.port);
+      const regRunning = regUrl !== null;
       const plugin = isPluginApp(app);
       const chrome = useAppRuntimeStore.getState().pluginChrome[app.appId];
       return {
@@ -493,8 +498,8 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       };
     });
     const fromDisk = diskApps.map((d) => {
-      const regUrl = urlForPort(d.port);
-      const regRunning = regUrl !== null && runningByUrl.has(regUrl);
+      const regUrl = liveUrlForPort(d.port);
+      const regRunning = regUrl !== null;
       const diskManifest = readAppManifest({ manifestJson: d.manifest_json ?? undefined });
       const plugin = diskManifest?.kind === 'plugin';
       return {
@@ -534,13 +539,29 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
     const store = useAppRuntimeStore.getState();
     const app = store.apps.find((a) => a.appId === appId);
     if (!app) throw new Error(`应用 '${appId}' 不存在`);
-    if (!app.pid) throw new Error(`应用 '${appId}' 后端未在运行`);
+
+    // D-13：与 app_list 同一判定——webview reload 后 store 丢了 pid 但后端
+    // 进程仍在 Rust 注册表里活着时，按 manifest.port 找回 pid 再停，
+    // 不再误报「未在运行」。
+    let pid = app.pid ?? null;
+    if (!pid && app.port) {
+      try {
+        interface PreviewProc { pid: number; previewUrl?: string; preview_url?: string }
+        const procs = await invoke<PreviewProc[]>('list_background_processes', {
+          workspacePath: workspace(),
+        });
+        pid = findPreviewProcessForPort(procs, app.port)?.pid ?? null;
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (!pid) throw new Error(`应用 '${appId}' 后端未在运行`);
 
     let killFailed = false;
-    try { await invoke('stop_background_process', { pid: app.pid, source: 'app_stop-tool' }); } catch { killFailed = true; }
+    try { await invoke('stop_background_process', { pid, source: 'app_stop-tool' }); } catch { killFailed = true; }
     try { await invoke('unregister_app_backend_port', { appId }); } catch { /* best-effort */ }
     useAppRuntimeStore.getState().setAppStopped(appId);
-    return { appId, stopped: true, ...(killFailed ? { warning: '进程停止命令失败，后端进程可能仍在运行并占用端口。' } : {}) };
+    return { appId, stopped: true, pid, ...(killFailed ? { warning: '进程停止命令失败，后端进程可能仍在运行并占用端口。' } : {}) };
   });
 
   registry.register(toolByName('app_delete'), async (args: Record<string, unknown>) => {

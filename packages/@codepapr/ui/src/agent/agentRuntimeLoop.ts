@@ -46,6 +46,7 @@ import {
   type WorkerApiFormat,
   type AppAgentPayload,
 } from './agentWorkerProtocol';
+import { parseMcpToolName, sanitizeMcpToolPart } from '../utils/mcpTypes';
 import { buildPruneOptions, createContextCompactionHandler } from './compactionHandler';
 import {
   CONTEXT_SURFACE_RENDER_VERSION,
@@ -1117,6 +1118,20 @@ function buildToolContextConfig(s: WorkerAgentSettings): ToolContextConfig {
   };
 }
 
+/** D-11：app agent 的 MCP 工具闸——local:none 时禁止命中 stdio/本地命令类
+ *  server（它们是本机进程，等同本地能力）；read/write 档或远程 transport
+ *  不受此限。network 轴由调用方先行把关。纯函数便于单测。 */
+export function appAgentAllowsMcpTool(
+  toolName: string,
+  local: 'none' | 'read' | 'write',
+  localStdioServerIds: ReadonlySet<string>,
+): boolean {
+  if (local !== 'none') return true;
+  const parsed = parseMcpToolName(toolName);
+  if (!parsed) return true;
+  return !localStdioServerIds.has(parsed.serverId);
+}
+
 async function handleRunAppAgent(
   payload: AppAgentPayload,
   requestId: string
@@ -1151,10 +1166,19 @@ async function handleRunAppAgent(
   let toolActivity: (() => void) | null = null;
 
   const registry = new ToolRegistry();
+  // D-11：stdio MCP server 是用户本机拉起的进程（可持文件/命令权限），不是
+  // 纯网络能力——计入 local 轴：local:none 的 app 不得调用；远程 transport
+  // （sse/streamable-http）维持 network 轴口径不变。
+  const localMcpServerIds = new Set(
+    (cachedSettings.mcp.servers ?? [])
+      .filter((s) => s.enabled && s.transport === 'stdio')
+      .map((s) => sanitizeMcpToolPart(s.id)),
+  );
   for (const tool of cachedToolDefinitions) {
     if (BLOCKED.has(tool.name)) continue;
     if (tool.name.startsWith('mcp__')) {
       if (!access.network) continue;
+      if (!appAgentAllowsMcpTool(tool.name, access.local, localMcpServerIds)) continue;
       if (requestedTools.length > 0 && !requestedTools.includes(tool.name)) continue;
     } else {
       if (!allowedTools.has(tool.name)) continue;

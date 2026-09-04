@@ -107,7 +107,17 @@ import type { RequestContextInsertion } from '@codepapr/types';
 import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
 import { runVerifierSubagent } from '../../utils/verifierRunner';
 import { useGoalStore } from '../goalStore';
-import type { CommandResult } from '../../tools/streamingWorkspaceCommand';
+
+/** D-7：streamingWorkspaceCommand 死代码已删；此形状是 run_workspace_command
+ *  （shell execute RPC）的响应契约，就地保留。 */
+interface CommandResult {
+  command: string;
+  args: string[];
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
 
 import { normalizeSettings, getSettingsError, resolveProviderName } from './settingsNormalizer';
 import { addConversationRuntime, addConversationStats, addTierRuntimeMs, getSessionConversationStats } from './stats';
@@ -296,12 +306,18 @@ function extractFilePathFromArgs(args: Record<string, unknown>): string {
   );
 }
 
+/** 注入「模式切换」合成消息：仅在历史中存在 ask 回复且当前非 ask 时调用
+ *  （见两处调用点的 some 条件）。
+ *  D-9：本消息不可能以 mode==='app' 注入——会话锁规则（ChatPanel.sessionLock）
+ *  保证：首条用户消息是 ask → 锁 coding（App 模式被禁选）；首条是 app → 锁 app
+ *  （不可能有 ask 回复）。因此旧的 app 专用文案分支是死代码，已删。
+ *  若未来放宽会话锁（允许 app↔ask 混切），需要恢复 app 模式的专用提示文案。 */
 function buildModeSwitchMessage(mode: WorkMode): UIMessage {
   return {
     id: createId(),
     role: 'assistant' as const,
     workMode: mode,
-    content: `[Mode: ${mode.toUpperCase()}] ${mode === 'app' ? 'You are now in App mode. Write a split-file .papr app under .CodePapr/apps/<appId>/ (shell index.html + css/ + js/; no giant index.html or server.js) with write/edit/patch, then open it with app_render({ appId }).' : `You are now in ${mode} mode with full tool access. Previous ask-mode responses are for context only; use tools proactively for this task.`}`,
+    content: `[Mode: ${mode.toUpperCase()}] You are now in ${mode} mode with full tool access. Previous ask-mode responses are for context only; use tools proactively for this task.`,
     synthetic: true,
     hidden: true,
     carryForwardInContext: true,

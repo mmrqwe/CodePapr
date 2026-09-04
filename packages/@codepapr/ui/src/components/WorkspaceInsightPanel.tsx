@@ -406,6 +406,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
       setPrewarming(false);
       setPrewarmingProgress('');
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [workspacePath, entries]);
 
   useEffect(() => {
@@ -792,6 +793,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     gitStatus?.available && gitStatus.isRepo
       ? listGitFilesForMode(gitStatus.files, 'unstaged')
       : [];
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   const activeGitFiles =
     gitStatus?.available && gitStatus.isRepo
       ? listGitFilesForMode(gitStatus.files, gitMode)
@@ -888,6 +890,7 @@ export function WorkspaceInsightPanel(props: WorkspaceInsightPanelProps) {
     }
     const timer = window.setTimeout(() => void initializeGitRepository(), 5000);
     return () => window.clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [gitStatus?.available, gitStatus?.isRepo, isInitializingGit, gitActionMessage]);
 
   useEffect(() => {

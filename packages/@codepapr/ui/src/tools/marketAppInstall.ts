@@ -1,6 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
+import { sha256 } from '@codepapr/common';
 import type { AppInstallScope, PaprAppListing } from '../utils/marketAppTypes';
 import { OFFICIAL_APPS_RAW_BASE } from './marketAppApi';
+import {
+  loadAppsLock,
+  removeAppFromLock,
+  saveAppsLock,
+  upsertAppLockEntry,
+  type AppLockEntry,
+} from '../utils/appsLock';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { usePermissionStore } from '../papr/permissionStore';
 import { isPluginApp, pluginIsEnabled, pluginShouldAutostartOverlay } from '../papr/pluginSurface';
@@ -12,6 +20,10 @@ const GITHUB_TREE_API =
 /** 单次下载超时：无 AbortSignal 的裸 fetch 遇到挂死的连接会让安装按钮永久
  *  置灰（promise 永不 settle）。与 marketSkillInstall 同一模式。 */
 const FETCH_TIMEOUT_MS = 30_000;
+
+// D-1：与 Rust papr_install_app_files / agent 侧 app_render 同一 kebab-case 口径。
+// appId 是 URL host：大写会被引擎小写化（装完即 404），空格/点生成畸形 origin。
+const APP_ID_KEBAB_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -30,6 +42,8 @@ interface GithubTreeItem {
 
 interface GithubTreeResponse {
   tree: GithubTreeItem[];
+  /** D-15：大仓库时 GitHub 截断清单并置 truncated:true——此时 tree 不完整。 */
+  truncated?: boolean;
 }
 
 export type AppInstallFile = {
@@ -161,6 +175,9 @@ export async function fetchAppTreeFileList(appDirectory: string): Promise<string
     });
     if (res.ok) {
       const data = (await res.json()) as GithubTreeResponse;
+      // D-15：truncated=true 时清单残缺（大仓库），继续下载会「成功」装上缺
+      // 文件的应用。视为本策略失败 → 返回 null 降级到标准文件列表策略。
+      if (data.truncated === true) return null;
       if (Array.isArray(data.tree)) {
         const found = data.tree
           .filter(
@@ -308,6 +325,57 @@ export function assertListingPermissions(
   }
 }
 
+/** D-16：锁记录构造（纯函数便于测试）。listing 自带的逐文件 sha256 优先，
+ *  缺失的按实际下载内容计算（registry 补全字段后即为完整性基准）。 */
+export function buildAppLockEntry(
+  listing: PaprAppListing,
+  scope: AppInstallScope,
+  files: Array<{ relativePath: string; content: string }>,
+): AppLockEntry {
+  const hashes: Record<string, string> = {};
+  for (const file of files) {
+    const declared = listing.sha256?.[file.relativePath];
+    hashes[file.relativePath] = declared && declared.trim() ? declared : sha256(file.content);
+  }
+  return {
+    listingId: listing.id,
+    version: listing.version,
+    source: 'mmrqwe/codepapr-apps',
+    scope,
+    files: hashes,
+    installedAt: Date.now(),
+  };
+}
+
+/** 锁文件写在项目 `.CodePapr/apps-lock.json`；无工作区（纯 global）时跳过，
+ *  更新判定回退 manifest 旧口径。 */
+async function recordInstalledAppLock(
+  workspacePath: string | null | undefined,
+  listing: PaprAppListing,
+  scope: AppInstallScope,
+  files: Array<{ relativePath: string; content: string }>,
+): Promise<void> {
+  const ws = workspacePath?.trim();
+  if (!ws) return;
+  const lock = await loadAppsLock(invoke, ws);
+  await saveAppsLock(invoke, ws, upsertAppLockEntry(lock, buildAppLockEntry(listing, scope, files)));
+}
+
+async function clearAppLockEntry(
+  workspacePath: string | null | undefined,
+  appId: string,
+): Promise<void> {
+  const ws = workspacePath?.trim();
+  if (!ws) return;
+  try {
+    const lock = await loadAppsLock(invoke, ws);
+    const next = removeAppFromLock(lock, appId);
+    if (next !== lock) await saveAppsLock(invoke, ws, next);
+  } catch {
+    // 锁清理失败不阻塞卸载
+  }
+}
+
 export async function installMarketApp(options: {
   listing: PaprAppListing;
   scope: AppInstallScope;
@@ -317,6 +385,13 @@ export async function installMarketApp(options: {
 
   if (scope === 'workspace' && !workspacePath) {
     return { ok: false, error: '安装到当前项目需要先打开工作区' };
+  }
+
+  if (!APP_ID_KEBAB_RE.test(listing.id)) {
+    return {
+      ok: false,
+      error: `应用 id "${listing.id}" 不合法：id 必须是 kebab-case（小写字母/数字/连字符，以字母或数字开头，最长 63 字符），已中止安装`,
+    };
   }
 
   try {
@@ -338,6 +413,13 @@ export async function installMarketApp(options: {
       appId: listing.id,
       files: files.map((f) => ({ relative_path: f.relativePath, content: f.content })),
     });
+
+    // D-16：安装成功即落锁（listing.version 成为更新判定的唯一事实源）
+    try {
+      await recordInstalledAppLock(workspacePath, listing, scope, files);
+    } catch {
+      // 锁写入失败不阻塞安装（判定回退 manifest 口径）
+    }
 
     // 始终 scan+register（global 安装无工作区时用空串：scan_workspace_apps
     // 空路径只扫 global，resolve_app_dir('') 正确回落 global 目录）。
@@ -429,6 +511,9 @@ export async function uninstallMarketApp(options: {
       appId,
       removeData: !!purgeData,
     });
+
+    // D-16：卸载同步清理锁记录
+    await clearAppLockEntry(workspacePath, appId);
 
     try {
       usePermissionStore.getState().clearManifest(appId);

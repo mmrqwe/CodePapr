@@ -154,7 +154,7 @@ App 的访问权限由**两个正交轴**组成，在 `manifest.json` 中声明�
 | `local` | `none` | 纯计算，仅 `papr.db` / `papr.fs`（app 自有沙箱，永远可用） |
 | `local` | `read` | + 读取项目文件（Agent 只读工具 read/grep/list/lsp/diagnostics 等） |
 | `local` | `write` | + 修改项目文件并执行命令（Agent write/edit/patch/bash，直接写项目文件） |
-| `network` | `true` | + 访问公网（papr.http + Agent websearch/webfetch + MCP） |
+| `network` | `true` | + 访问公网（papr.http + Agent websearch/webfetch + 远程 MCP server；**stdio/本机 MCP server 属本地能力，要求 `local ≥ read`**） |
 | `network` | `false` | 完全断网（iframe CSP + 后端沙箱强制，JS 无法绕过；**bash/后端进程级隔离仅 macOS 生效**，见下） |
 
 > **平台限制（C-5）**：`sandbox-exec` 进程级沙箱目前仅在 macOS 上强制。Windows / Linux 上，`network: false` / `local ≤ read` 的 app 其 **bash 工具与后端进程**实际不受这两轴限制（iframe 内的 CSP/storage 隔离仍然生效）；应用启动或 Agent 运行时会向调试日志推一条告警。跨平台进程沙箱为独立立项。
@@ -164,7 +164,7 @@ App 的访问权限由**两个正交轴**组成，在 `manifest.json` 中声明�
 - 推荐组合：计算器 `{none, 关}`、Todo/笔记 `{none, 关}`、数据分析看板 `{read, 开}`、重构工具 `{write, 关}`
 - 旧 `level` 字段（0-3）仍兼容：0→`{none,关}`、1→`{read,关}`、2→`{read,开}`、3→`{write,开}`
 
-Agent 工具白名单（在 `agents[].tools` 声明，必须落在访问档内）：`read`、`grep`、`list`、`lsp`、`diagnostics`、`read_image`、`skill_load`、`todo`、`local_time_now`（local≥read 或内置）、`websearch`、`webfetch`（需 network）、`write`、`edit`、`patch`、`bash`（需 local=write）。
+Agent 工具白名单（在 `agents[].tools` 声明，必须落在访问档内）：`read`、`grep`、`list`、`lsp`、`diagnostics`、`read_image`、`skill_load`、`todo`、`local_time_now`（local≥read 或内置）、`websearch`、`webfetch`（需 network）、`write`、`edit`、`patch`、`bash`（需 local=write）。注：`todo` 为历史兼容声明——校验接受但运行时不再挂载给 app agent（宿主会话对用户不可见，见审计 D-12）；stdio 类 MCP server 计入本地轴（`local: none` 不可调用，见 D-11）。
 
 设置 → **App Tab** 可设置「未声明时的默认」访问档（本地 × 网络），并逐 app 覆盖（覆盖只能收窄，不能放大声明）。已在 manifest 声明 local/network 的 app **不受**这组默认值约束。
 

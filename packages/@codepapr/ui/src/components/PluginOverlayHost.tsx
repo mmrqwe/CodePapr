@@ -247,6 +247,7 @@ function PluginOverlayCard({ app, lang, layout, zIndex, hidden, docked }: Plugin
   useEffect(() => {
     if (interacting) return;
     postWindowBounds(overlayToWindowBounds(layout));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [layout.x, layout.y, layout.width, layout.height, interacting, postWindowBounds]);
 
   const onPointerDown = useCallback(

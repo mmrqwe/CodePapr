@@ -41,19 +41,22 @@ pub(crate) fn registered_backend_port(app_id: &str) -> Option<u16> {
 }
 
 /// Build a plain HTTP response with the given status and body. Status codes
-/// and the CORS header are static constants, so response construction
-/// cannot fail.
+/// are static constants, so response construction cannot fail.
+///
+/// D-2：刻意不发 `Access-Control-Allow-Origin`——每个 app 独立 origin 的设计
+/// 目的就是 app 间隔离，`*` 会让 app A 的 JS fetch 读取 app B 的源码/manifest。
+/// 同源 iframe 加载自身资源不需要 ACAO；后端跨源走 http://127.0.0.1:port。
 fn resp(status: StatusCode, body: impl Into<Vec<u8>>) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
-        .header("Access-Control-Allow-Origin", "*")
         .body(body.into())
         .expect("static status code and header values cannot fail")
 }
 
 /// app_id 会被拼进文件服务路径（.CodePapr/apps/<app_id>/...)：拒绝一切
 /// 路径形态的 id（"..", 分隔符等），防止注册出能服务 .CodePapr 内部文件
-/// （如 project.sqlite）的「应用」。
+/// （如 project.sqlite）的「应用」。运行时读路径（scan/serve/mtime）保持此
+/// 宽校验，存量非规范目录仍可被恢复与卸载。
 fn is_valid_app_id(app_id: &str) -> bool {
     !app_id.is_empty()
         && app_id.len() <= 128
@@ -62,6 +65,28 @@ fn is_valid_app_id(app_id: &str) -> bool {
         && !app_id.contains("..")
         && !app_id.contains('/')
         && !app_id.contains('\\')
+}
+
+/// D-1：新建路径（market 安装 / 首次注册）用 kebab-case 严格校验，与 TS
+/// agent 侧 app_render/app_publish 的 /^[a-z0-9][a-z0-9-]{0,62}$/ 对齐。
+/// appId 会成为 URL host——大写会被浏览器引擎小写化（装完即 404），空格/点
+/// 生成畸形 origin。
+pub(crate) fn is_valid_app_id_strict(app_id: &str) -> bool {
+    let bytes = app_id.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 63
+        && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+        && bytes
+            .iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+}
+
+/// 存量豁免：目录（含 manifest.json）已在盘上时允许继续注册，避免收紧
+/// 判掉老用户已装的非规范 id。
+fn legacy_app_dir_exists(workspace_path: &str, app_id: &str) -> bool {
+    codepapr_core::db::resolve_app_dir(workspace_path, app_id)
+        .map(|dir| dir.join("manifest.json").is_file())
+        .unwrap_or(false)
 }
 
 /// papr.db 的 SQLite 文件（db.sqlite 及其 -wal/-shm 边车）不对外提供静态服务。
@@ -82,6 +107,14 @@ pub fn register_app_workspace(
 ) -> Result<(), String> {
     if !is_valid_app_id(&app_id) {
         return Err(format!("invalid app id: {app_id}"));
+    }
+    // D-1：新 id 一律 kebab-case；盘上已有 manifest 的存量非规范 id 豁免
+    // （restoreWorkspaceApps 冷启动恢复不能被打挂）。
+    if !is_valid_app_id_strict(&app_id) && !legacy_app_dir_exists(&workspace_path, &app_id) {
+        return Err(format!(
+            "appId '{app_id}' 不合法：新应用 id 必须是 kebab-case（小写字母/数字/连字符，\
+             以字母或数字开头，最长 63 字符）"
+        ));
     }
     // 注册时同步刷新 manifest 缓存：否则新建/修改后的 app 要等到下一次
     // scan_workspace_apps 才有缓存，期间协议层 CSP fail-open、papr.db/fs

@@ -52,6 +52,7 @@
     "@typescript-eslint/parser": "^8.65.0",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.0.0",
     "pyright": "^1.1.410",
     "typescript": "^5.9.3",

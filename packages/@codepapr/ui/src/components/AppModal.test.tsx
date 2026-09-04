@@ -295,6 +295,55 @@ describe('AppModal', () => {
     expect(container.textContent).toContain('hello from app');
   });
 
+  it('D-4 early return 之后不再藏 hook：openedApp 异步消失不炸 hook 顺序', async () => {
+    useAppRuntimeStore.setState({
+      apps: [
+        {
+          appId: 'app-1',
+          title: 'Test App',
+          html: '',
+          filePath: '.CodePapr/apps/app-1/index.html',
+          createdAt: 1,
+          updatedAt: 2,
+          manifestJson: JSON.stringify({ local: 'read', network: false }),
+        },
+      ],
+      openedAppId: 'app-1',
+    });
+
+    await act(async () => {
+      root.render(<AppModal lang="en" />);
+    });
+    expect(container.querySelector('iframe')).toBeTruthy();
+
+    // openedAppId 仍指向 app-1 但列表里已无该 app（异步 close/unmount 竞态窗口）
+    act(() => {
+      useAppRuntimeStore.setState((state) => ({ ...state, apps: [] }));
+    });
+    await flush();
+    expect(container.querySelector('iframe')).toBeNull();
+
+    // app 重新出现：恢复渲染且 hook 数量一致（旧实现在此处抛 Rendered more hooks）
+    act(() => {
+      useAppRuntimeStore.setState((state) => ({
+        ...state,
+        apps: [
+          {
+            appId: 'app-1',
+            title: 'Test App',
+            html: '',
+            filePath: '.CodePapr/apps/app-1/index.html',
+            createdAt: 1,
+            updatedAt: 2,
+            manifestJson: JSON.stringify({ local: 'read', network: false }),
+          },
+        ],
+      }));
+    });
+    await flush();
+    expect(container.querySelector('iframe')).toBeTruthy();
+  });
+
   it('C-1 热重载换 iframe 文档（updatedAt 变化）时取消旧文档在飞的 agent run', async () => {
     useAppRuntimeStore.setState({
       apps: [

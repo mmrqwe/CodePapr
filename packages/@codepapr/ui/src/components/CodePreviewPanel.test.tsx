@@ -69,6 +69,7 @@ vi.mock('./MonacoTextEditor', async () => {
           hints: 0,
           items: [],
         });
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
       }, [props.language, props.onDiagnosticsChange, props.value]);
 
       return React.createElement(

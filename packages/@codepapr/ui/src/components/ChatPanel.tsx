@@ -481,6 +481,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
       // stale cached path would suppress it).
       prevFtPathRef.current = '';
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [activeCharacter?.voice?.referenceSamplePath, activeCharacter?.voice?.referenceText, activeCharacter?.voice?.referenceTextLanguage, activeCharacter?.voice?.textLanguage, activeCharacter?.voice?.engine, activeCharacter?.voice?.playbackMode, activeCharacter?.voice?.sampleSteps, activeCharacter?.voice?.speed, activeCharacter?.voice?.modelName, activeCharacter?.voice?.fineTunedModelPath, activeCharacter?.voice?.useFineTuned, activeCharacter?.voice?.sentencesPerChunk, activeCharacter?.interactionMode, ttsSetVoiceConfig, ttsSetTextLanguage, ttsSetVoiceModel, ttsSetFineTunedModel, ttsSetPlaybackMode, ttsSetSampleSteps, ttsSetSpeed, ttsSetSentencesPerChunk, ttsSetInteractionMode, ttsServerStatus]);
 
   const prevHasStreamingRef = useRef(hasStreamingMessage);
@@ -540,6 +541,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     lastStreamingMsgIdRef.current = streaming.id;
     // NOTE: deliberately NOT depending on `visibleMessages` (it changes
     // reference every render). We read it via `visibleMessagesRef`.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [streamingMessage?.content, streamingMessage?.id, voiceEnabled, ttsServerStatus, ttsFeedStream]);
 
   // Finalization: when all streaming stops, force-complete the last message.
@@ -636,6 +638,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   const messageHeights = useMemo(
     () => visibleMessages.map((m) => heightCacheRef.current.get(m.id) ?? estimateMessageHeight(m)),
     // effectiveRoundWindow 入依赖：窗口滑动后必须用最新缓存重算占位高度。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
     [visibleMessages, effectiveRoundWindow]
   );
   const prefixHeights = useMemo(() => {
@@ -681,6 +684,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     return () => {
       observer.disconnect();
       itemObserverRef.current = null;
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
       observedItemsRef.current.clear();
     };
   }, []);
@@ -1208,6 +1212,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
         el.setSelectionRange(newPos, newPos);
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, []);
 
   const handleAtDismiss = useCallback(() => {
@@ -1317,6 +1322,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
 
     setMode(action.mode);
     await submitMessage(action.prompt, action.label, action.mode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [activeSessionId, isConfigured, isLoading, submitMessage]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {

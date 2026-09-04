@@ -1,13 +1,20 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore } from '../store/agentStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import { fetchMarketAppListings } from '../tools/marketAppApi';
 import { installMarketApp, uninstallMarketApp } from '../tools/marketAppInstall';
 import type { PaprAppListing, AppInstallScope } from '../utils/marketAppTypes';
-import { isMarketUpdateAvailable, readInstalledAppVersion } from '../utils/marketAppVersion';
+import { isMarketUpdateAvailable } from '../utils/marketAppVersion';
+import {
+  effectiveInstalledVersion,
+  emptyAppsLock,
+  loadAppsLock,
+  type AppsLockFile,
+} from '../utils/appsLock';
 import { DangerConfirmDialog } from './DangerConfirmDialog';
 import { copy, listingTitle } from './AppMarketModalCopy';
-import { AppListingCard, AppDetail } from './AppMarketModalViews';
+import { AppListingCard, AppDetail, type MarketInstalledScopes } from './AppMarketModalViews';
 import { remountDiscoveredApps } from './AppMarketModalSync';
 import { filterMarketListings } from './AppMarketModalFilter';
 
@@ -37,7 +44,14 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
   const [pendingUninstall, setPendingUninstall] = useState<{
     listing: PaprAppListing;
     scope: AppInstallScope;
+    /** D-14：卸载确认框的「保留数据」选项（remove_data=false 分支以前 UI 不可达） */
+    keepData: boolean;
   } | null>(null);
+  // D-14：同名双装（global + workspace）的作用域视图。scan 合并只回显生效
+  // 副本，全局副本必须在盘上再查一次才能如实呈现。
+  const [installedScopesMap, setInstalledScopesMap] = useState<Record<string, MarketInstalledScopes>>({});
+  // D-16：apps-lock.json——更新判定的单一事实源（锁缺失时回退 manifest）。
+  const [appsLock, setAppsLock] = useState<AppsLockFile>(emptyAppsLock);
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -63,20 +77,59 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
   const getInstalledAppScope = useCallback(
     (appId: string): 'global' | 'workspace' | null => {
       const match = installedApps.find((a) => a.appId === appId);
-      if (!match) return null;
-      return match.scope === 'global' ? 'global' : 'workspace';
+      if (match) return match.scope === 'global' ? 'global' : 'workspace';
+      // D-14：store 未挂载（重载竞态/扫描未跑）时回退盘上作用域视图，
+      // 避免已安装卡片错误显示为「未安装」。
+      const onDisk = installedScopesMap[appId];
+      if (onDisk?.workspace) return 'workspace';
+      if (onDisk?.global) return 'global';
+      return null;
     },
-    [installedApps],
+    [installedApps, installedScopesMap],
   );
 
   const getHasUpdate = useCallback(
     (listing: PaprAppListing): boolean => {
       const match = installedApps.find((a) => a.appId === listing.id);
-      if (!match) return false;
-      return isMarketUpdateAvailable(readInstalledAppVersion(match.manifestJson), listing.version);
+      const entry = appsLock.apps[listing.id];
+      if (!match) return entry ? isMarketUpdateAvailable(entry.version, listing.version) : false;
+      // D-16：优先锁记录，旧安装（无锁）回退盘上 manifest.version
+      return isMarketUpdateAvailable(effectiveInstalledVersion(entry, match.manifestJson), listing.version);
     },
-    [installedApps],
+    [installedApps, appsLock],
   );
+
+  const getInstalledScopes = useCallback(
+    (appId: string): MarketInstalledScopes | null => installedScopesMap[appId] ?? null,
+    [installedScopesMap],
+  );
+
+  const refreshInstalledScopes = useCallback(async () => {
+    void setAppsLock(await loadAppsLock(invoke, workspacePath || ''));
+    try {
+      const [merged, globals] = await Promise.all([
+        invoke<Array<{ app_id: string; scope?: string }>>('scan_workspace_apps', {
+          workspacePath: workspacePath || '',
+        }),
+        workspacePath
+          ? invoke<Array<{ app_id: string; scope?: string }>>('scan_workspace_apps', {
+              workspacePath: '',
+            })
+          : Promise.resolve<Array<{ app_id: string; scope?: string }>>([]),
+      ]);
+      const globalIds = new Set(globals.map((a) => a.app_id));
+      const map: Record<string, MarketInstalledScopes> = {};
+      for (const app of merged) {
+        map[app.app_id] = {
+          global: globalIds.has(app.app_id),
+          workspace: app.scope !== 'global',
+        };
+      }
+      setInstalledScopesMap(map);
+    } catch {
+      // 盘上作用域刷新失败不打断弹窗
+    }
+  }, [workspacePath]);
 
   const loadData = useCallback(async (force = false) => {
     setIsLoading(true);
@@ -89,7 +142,8 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+    void refreshInstalledScopes();
+  }, [refreshInstalledScopes]);
 
   useEffect(() => {
     void loadData(false);
@@ -139,6 +193,7 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
         } catch {
           // ignore
         }
+        await refreshInstalledScopes();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setInstallErrors((prev) => ({ ...prev, [listing.id]: msg || c.installError }));
@@ -146,12 +201,12 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
         finish();
       }
     },
-    [workspacePath, c, showToast, settings.lang],
+    [workspacePath, c, showToast, settings.lang, refreshInstalledScopes],
   );
 
   const handleUninstallApp = useCallback(
     (listing: PaprAppListing, scope: AppInstallScope) => {
-      setPendingUninstall({ listing, scope });
+      setPendingUninstall({ listing, scope, keepData: false });
     },
     [],
   );
@@ -159,7 +214,7 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
   const confirmUninstallApp = useCallback(
     async () => {
       if (!pendingUninstall) return;
-      const { listing, scope } = pendingUninstall;
+      const { listing, scope, keepData } = pendingUninstall;
 
       setUninstallingIds((prev) => new Set(prev).add(listing.id));
       const finish = () => {
@@ -175,7 +230,7 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
         const res = await uninstallMarketApp({
           appId: listing.id,
           scope,
-          purgeData: true,
+          purgeData: !keepData,
           workspacePath,
         });
 
@@ -189,6 +244,15 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
         const runtime = useAppRuntimeStore.getState();
         runtime.closeApp(listing.id);
         runtime.unpinPlugin(listing.id);
+        // D-14：卸载后重扫——同名另一作用域（global↔workspace）的副本必须
+        // 立即回到可见/可管理状态；旧实现不重扫，卡片状态停留在误导性的
+        // 「已安装」或漏掉尚存的另一副本。
+        try {
+          await remountDiscoveredApps(workspacePath || '', listing.id);
+        } catch {
+          // ignore
+        }
+        await refreshInstalledScopes();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setInstallErrors((prev) => ({ ...prev, [listing.id]: msg || c.installError }));
@@ -196,7 +260,7 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
         finish();
       }
     },
-    [pendingUninstall, workspacePath, c, showToast, settings.lang],
+    [pendingUninstall, workspacePath, c, showToast, settings.lang, refreshInstalledScopes],
   );
 
   const handleOpenApp = useCallback((appId: string) => {
@@ -370,6 +434,7 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
                   key={app.id}
                   listing={app}
                   installedScope={getInstalledAppScope(app.id)}
+                  installedScopes={getInstalledScopes(app.id)}
                   hasUpdate={getHasUpdate(app)}
                   isInstalling={installingIds.has(app.id)}
                   isUninstalling={uninstallingIds.has(app.id)}
@@ -392,6 +457,7 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
               <AppDetail
                 listing={selectedApp}
                 installedScope={getInstalledAppScope(selectedApp.id)}
+                installedScopes={getInstalledScopes(selectedApp.id)}
                 hasUpdate={getHasUpdate(selectedApp)}
                 isInstalling={installingIds.has(selectedApp.id)}
                 isUninstalling={uninstallingIds.has(selectedApp.id)}
@@ -420,7 +486,9 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
             listingTitle(pendingUninstall.listing, settings.lang),
             pendingUninstall.listing.kind === 'plugin',
           )}
-          warning={c.uninstallConfirmBody}
+          warning={
+            pendingUninstall.keepData ? c.uninstallKeepDataBody : c.uninstallConfirmBody
+          }
           confirmLabel={c.uninstallConfirmAction}
           cancelLabel={c.uninstallConfirmCancel}
           executing={uninstallingIds.has(pendingUninstall.listing.id)}
@@ -429,7 +497,20 @@ export function AppMarketModal({ onClose }: AppMarketModalProps) {
           onCancel={() => {
             if (!uninstallingIds.has(pendingUninstall.listing.id)) setPendingUninstall(null);
           }}
-        />
+        >
+          <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-fg-muted">
+            <input
+              type="checkbox"
+              checked={pendingUninstall.keepData}
+              className="accent-purple-500"
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setPendingUninstall((prev) => (prev ? { ...prev, keepData: checked } : prev));
+              }}
+            />
+            {c.uninstallKeepData}
+          </label>
+        </DangerConfirmDialog>
       )}
     </div>
   );

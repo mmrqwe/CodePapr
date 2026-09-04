@@ -73,6 +73,7 @@ export function AppModal({ lang }: AppModalProps) {
     return () => {
       clearTimers();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [openedAppId, openedApp?.updatedAt, clearTimers]);
 
   useEffect(() => {
@@ -160,13 +161,17 @@ export function AppModal({ lang }: AppModalProps) {
     }
   }, [openedApp, workspacePath, setAppRunning]);
 
+  // D-4：所有 hook 必须在 early return 之上——旧实现在 `if (!openedApp) return null`
+  // 之后才调 usePaprPermissionStore，任何 openedApp 异步变化的竞态都会炸
+  // "Rendered more hooks than during the previous render"。
+  const appSettings = usePaprPermissionStore((state) => state.appSettings);
+
   if (!openedApp) {
     return null;
   }
 
   const iframeSrc = `codepapr-app://${openedApp.appId}/${entryFile}`;
 
-  const appSettings = usePaprPermissionStore((state) => state.appSettings);
   const effectiveAccess = manifest
     ? resolveEffectiveAccess(
         manifest,

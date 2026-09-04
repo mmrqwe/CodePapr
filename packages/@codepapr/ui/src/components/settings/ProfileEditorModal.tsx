@@ -75,6 +75,7 @@ export function ProfileEditorModal({
     setModelFilter('');
     const cached = catalogCacheRef.current.get(profileModelsCacheKey(draft));
     setFetchedModels(cached ?? null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [draft.apiMode, draft.apiFormat, draft.baseURL, draft.apiKey]);
 
   useEffect(() => {

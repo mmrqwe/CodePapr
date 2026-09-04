@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 interface DangerConfirmDialogProps {
   title: string;
   warning: string;
@@ -5,6 +7,8 @@ interface DangerConfirmDialogProps {
   cancelLabel: string;
   executing?: boolean;
   executingLabel?: string;
+  /** 可选附加内容（如 D-14「保留数据」复选框），渲染在 warning 与按钮之间。 */
+  children?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -17,6 +21,7 @@ export function DangerConfirmDialog({
   cancelLabel,
   executing = false,
   executingLabel,
+  children,
   onConfirm,
   onCancel,
 }: DangerConfirmDialogProps) {
@@ -36,6 +41,7 @@ export function DangerConfirmDialog({
           {title}
         </h2>
         <p className="mb-5 text-xs leading-relaxed text-fg-muted">{warning}</p>
+        {children && <div className="mb-5">{children}</div>}
         <div className="flex justify-end gap-2">
           <button
             type="button"

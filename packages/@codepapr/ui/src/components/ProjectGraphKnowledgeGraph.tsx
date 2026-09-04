@@ -1185,6 +1185,7 @@ const ProjectGraphKnowledgeGraph = forwardRef<
       console.error('G6 init error:', err);
       setGraphError(err instanceof Error ? err.message : String(err));
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [projectGraph, handleNodeClick, dark, viewModeKey, focusKey, focus, graphNodeMap]);
 
   // 外部高亮请求变化：应用高亮；置 null 时清除全部状态并恢复搜索 dimming。

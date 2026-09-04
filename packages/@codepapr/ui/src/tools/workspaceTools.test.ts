@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolRegistry } from '@codepapr/core';
 
 const { invokeMock } = vi.hoisted(() => ({
@@ -854,6 +854,83 @@ describe('app_render agent tools validation', () => {
     );
     expect(stopIndex).toBeGreaterThanOrEqual(0);
     expect(paprDeleteIndex).toBeGreaterThan(stopIndex);
+  });
+});
+
+describe('D-13 app_stop / app_list 运行态对账', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({});
+    usePaprPermissionStore.getState().clearAll();
+    useAppRuntimeStore.setState((state) => ({
+      ...state,
+      apps: [
+        {
+          appId: 'orphan-app',
+          title: 'Orphan',
+          html: '<html></html>',
+          filePath: '.CodePapr/apps/orphan-app/index.html',
+          command: 'node',
+          args: ['server.js'],
+          port: 3456,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    }));
+  });
+
+  afterEach(() => {
+    useAppRuntimeStore.setState((state) => ({ ...state, apps: [] }));
+  });
+
+  it('store 无 pid 时按端口从 Rust 注册表找回 pid 并停止（不再误报未在运行）', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_background_processes') {
+        // 后端登记的是 127.0.0.1，store 丢 pid（webview reload 场景）
+        return [{ pid: 5555, previewUrl: 'http://127.0.0.1:3456/' }];
+      }
+      if (command === 'stop_background_process') return { stopped: true };
+      return {};
+    });
+
+    await expect(
+      build({ mode: 'app' }).execute('app_stop', { appId: 'orphan-app' }),
+    ).resolves.toMatchObject({ appId: 'orphan-app', stopped: true, pid: 5555 });
+
+    const stopCall = invokeMock.mock.calls.find(
+      ([command, args]) => command === 'stop_background_process' && args?.pid === 5555,
+    );
+    expect(stopCall).toBeTruthy();
+  });
+
+  it('app_list 的 isRunning 与 app_stop 口径一致（127.0.0.1 vs localhost 容错）', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_background_processes') {
+        return [{ pid: 5555, previewUrl: 'http://127.0.0.1:3456/' }];
+      }
+      if (command === 'scan_workspace_apps') return [];
+      return {};
+    });
+
+    const list = (await build({ mode: 'app' }).execute('app_list', {})) as Array<{
+      appId: string;
+      isRunning: boolean;
+      url: string | null;
+    }>;
+    const entry = list.find((a) => a.appId === 'orphan-app');
+    expect(entry?.isRunning).toBe(true);
+    expect(entry?.url).toBe('http://127.0.0.1:3456/');
+  });
+
+  it('注册表无活进程时 app_stop 仍报未在运行', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_background_processes') return [];
+      return {};
+    });
+    await expect(
+      build({ mode: 'app' }).execute('app_stop', { appId: 'orphan-app' }),
+    ).rejects.toThrow(/未在运行/);
   });
 });
 

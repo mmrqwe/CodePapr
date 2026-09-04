@@ -270,8 +270,11 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
     _ctx: UriSchemeContext<'_, R>,
     request: Request<Vec<u8>>,
 ) -> Response<Vec<u8>> {
-    let uri = request.uri().to_string();
+    serve_app_uri(&request.uri().to_string())
+}
 
+/// 协议 serve 主体（不依赖 UriSchemeContext，便于单测）：D-2 回归测试直接调它。
+fn serve_app_uri(uri: &str) -> Response<Vec<u8>> {
     let path = uri
         .strip_prefix("codepapr-app://localhost/")
         .or_else(|| uri.strip_prefix("codepapr-app://"))
@@ -442,10 +445,10 @@ pub fn handle_app_protocol<R: tauri::Runtime>(
         content
     };
 
+    // D-2：与 resp() 同理不发 ACAO `*`，保住 app 间 origin 隔离。
     let mut response = Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", mime)
-        .header("Access-Control-Allow-Origin", "*")
         .header("Cache-Control", "no-cache");
     if let Some(csp) = &csp {
         response = response.header("Content-Security-Policy", csp.as_str());

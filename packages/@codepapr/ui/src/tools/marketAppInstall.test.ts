@@ -150,6 +150,21 @@ describe('marketAppInstall download and installation strategies', () => {
     expect(files).toEqual(['manifest.json', 'index.html', 'js/vendor/lib.js']);
   });
 
+  it('D-15: truncated tree 响应视为策略失败（宁缺勿残）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          truncated: true,
+          tree: [{ path: 'apps/weather-hud/manifest.json', type: 'blob' }],
+        }),
+      })),
+    );
+    expect(await fetchAppTreeFileList('apps/weather-hud')).toBeNull();
+  });
+
   it('Strategy 3: smart HTML asset scanner discovers referenced scripts/styles when GitHub tree fails', async () => {
     vi.stubGlobal(
       'fetch',
@@ -209,6 +224,18 @@ describe('marketAppInstall download and installation strategies', () => {
     });
     expect(res.ok).toBe(false);
     expect(res.error).toContain('工作区');
+  });
+
+  it('D-1: 非 kebab-case 的 listing.id 安装前拒绝（不发任何下载请求）', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const res = await installMarketApp({
+      listing: { ...mockListing, id: 'My App', directory: 'apps/My App' },
+      scope: 'global',
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('kebab-case');
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('calls uninstallMarketApp gracefully', async () => {
@@ -323,6 +350,36 @@ describe('marketAppInstall supply-chain guards', () => {
     expect(res.error).toMatch(/local|网络/);
     expect(invokeMock).not.toHaveBeenCalledWith('papr_install_app_files', expect.anything());
   });
+
+  it('D-16 安装成功写 apps-lock.json：listing.version 与逐文件 sha256 落表', async () => {
+    stubManifestAndEntry('{"spec":"papr/0.1","name":"Weather"}');
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file' && args?.relativePath === '.CodePapr/apps-lock.json') {
+        throw new Error('no lock yet');
+      }
+      if (command === 'papr_install_app_files') return '/tmp/ws/.CodePapr/apps/weather-hud';
+      if (command === 'scan_workspace_apps') return [];
+      return {};
+    });
+
+    const res = await installMarketApp({
+      listing: mockListing,
+      scope: 'workspace',
+      workspacePath: '/tmp/ws',
+    });
+    expect(res.ok).toBe(true);
+
+    const write = invokeMock.mock.calls.find(
+      ([command, a]) =>
+        command === 'write_text_file' && a?.relativePath === '.CodePapr/apps-lock.json',
+    );
+    expect(write).toBeTruthy();
+    const lock = JSON.parse(String(write?.[1]?.content));
+    expect(lock.apps['weather-hud'].version).toBe('0.1.1');
+    expect(lock.apps['weather-hud'].scope).toBe('workspace');
+    expect(lock.apps['weather-hud'].source).toBe('mmrqwe/codepapr-apps');
+    expect(lock.apps['weather-hud'].files['manifest.json']).toMatch(/^[0-9a-f]{64}$/);
+  });
 });
 
 describe('uninstallMarketApp stops the backend process (B3)', () => {
@@ -370,5 +427,56 @@ describe('uninstallMarketApp stops the backend process (B3)', () => {
     expect(uninstallIdx).toBeGreaterThanOrEqual(0);
     // 必须先停进程再删文件，否则孤儿进程继续从已删除目录服务旧代码。
     expect(stopIdx).toBeLessThan(uninstallIdx);
+  });
+
+  it('D-14 purgeData=false 透传 removeData:false（保留数据卸载路径 UI 可达）', async () => {
+    const res = await uninstallMarketApp({
+      appId: 'weather-hud',
+      scope: 'global',
+      workspacePath: null,
+      purgeData: false,
+    });
+    expect(res.ok).toBe(true);
+    expect(invokeMock).toHaveBeenCalledWith(
+      'papr_uninstall_app',
+      expect.objectContaining({ appId: 'weather-hud', removeData: false }),
+    );
+  });
+
+  it('D-16 带工作区卸载时清理 apps-lock.json 条目', async () => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file' && args?.relativePath === '.CodePapr/apps-lock.json') {
+        return {
+          content: JSON.stringify({
+            version: 1,
+            apps: {
+              'weather-hud': {
+                listingId: 'weather-hud',
+                version: '0.1.1',
+                source: 'mmrqwe/codepapr-apps',
+                scope: 'workspace',
+                files: {},
+                installedAt: 1,
+              },
+            },
+          }),
+        };
+      }
+      return {};
+    });
+
+    const res = await uninstallMarketApp({
+      appId: 'weather-hud',
+      scope: 'workspace',
+      workspacePath: '/tmp/ws',
+      purgeData: true,
+    });
+    expect(res.ok).toBe(true);
+    const write = invokeMock.mock.calls.find(
+      ([command, args]) =>
+        command === 'write_text_file' && args?.relativePath === '.CodePapr/apps-lock.json',
+    );
+    expect(write).toBeTruthy();
+    expect(JSON.parse(String(write?.[1]?.content)).apps['weather-hud']).toBeUndefined();
   });
 });

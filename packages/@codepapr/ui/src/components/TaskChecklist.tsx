@@ -43,6 +43,7 @@ export function TaskChecklist({ checklist, lang, isLoading }: TaskChecklistProps
       currentTurnHasTodo.current = true;
       setCollapsed(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
   }, [hasNewUpdate, allDone, isLoading]);
 
   // ── 折叠摘要条 ──

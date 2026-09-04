@@ -190,7 +190,9 @@ describe('two-axis levelGrants', () => {
   });
 
   it('agentToolsFor derives tools from axes', () => {
-    expect(agentToolsFor('none', false)).toEqual(new Set(['todo', 'local_time_now']));
+    // D-12：app agent 不再挂载 todo（宿主会话对用户不可见，清单会跨边界出现）
+    expect(agentToolsFor('none', false)).toEqual(new Set(['local_time_now']));
+    expect(agentToolsFor('write', true).has('todo')).toBe(false);
     const readOff = agentToolsFor('read', false);
     expect(readOff.has('read')).toBe(true);
     expect(readOff.has('write')).toBe(false);
