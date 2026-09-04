@@ -22,6 +22,7 @@ describe('marketSkillInstall paths', () => {
       'skills/search/references',
       'skills/search/templates',
       'skills/search/scripts',
+      'skills/search/commands',
     ]);
   });
 

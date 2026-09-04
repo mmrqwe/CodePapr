@@ -3,6 +3,7 @@ import { cacheGet, cacheSet, cacheRemove } from '../utils/cacheStorage';
 
 const AGENTUSE_REPO = 'zerone-agent/agent-use-skills';
 const INTROS_PATH = 'awesome-skills/introductions/en';
+const FETCH_TIMEOUT_MS = 60_000;
 
 interface GitHubFileEntry {
   name: string;
@@ -16,8 +17,18 @@ interface GitHubFileEntry {
   type: string;
 }
 
+async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: { Accept: 'application/json' },
   });
   if (!response.ok) {
@@ -27,7 +38,7 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: { Accept: 'text/plain' },
   });
   if (!response.ok) {

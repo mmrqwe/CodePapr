@@ -2,9 +2,10 @@ import { skillMarkdownPath } from '../utils/skillsLock';
 
 const AGENTUSE_RAW = 'https://raw.githubusercontent.com/zerone-agent/agent-use-skills/main';
 const SKILL_BASE_URL = `${AGENTUSE_RAW}/awesome-skills/skills`;
-const PACK_RESOURCE_DIRS = ['agents', 'references', 'templates', 'scripts'] as const;
+const PACK_RESOURCE_DIRS = ['agents', 'references', 'templates', 'scripts', 'commands'] as const;
 const SKILL_DIR_PREFIXES = ['skills', '.CodePapr/skills', '.claude/skills'] as const;
 const BRANCH_FALLBACKS = ['main', 'master'] as const;
+const FETCH_TIMEOUT_MS = 60_000;
 const BINARY_RESOURCE_PATTERN =
   /\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|tgz|woff2?|ttf|eot|mp[34]|wav|bin|exe|dylib|so|wasm)$/i;
 const MAX_RESOURCE_DEPTH = 4;
@@ -76,9 +77,19 @@ export function resourceDirCandidates(packDir: string): string[] {
   return PACK_RESOURCE_DIRS.map((dir) => `${packDir}/${dir}`);
 }
 
+async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function tryFetchText(url: string): Promise<string | null> {
   try {
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     if (!response.ok) return null;
     return response.text();
   } catch {
@@ -88,7 +99,7 @@ async function tryFetchText(url: string): Promise<string | null> {
 
 async function fetchGithubJson<T>(url: string): Promise<T | null> {
   try {
-    const response = await fetch(url, { headers: { Accept: 'application/json' } });
+    const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } });
     if (!response.ok) return null;
     return (await response.json()) as T;
   } catch {
@@ -209,10 +220,19 @@ export async function collectSkillPackResources(params: {
   return planned;
 }
 
-async function findSkillMarkdown(repoPath: string, skillName: string): Promise<SkillFileHit | null> {
+async function findSkillMarkdown(
+  repoPath: string,
+  skillName: string,
+  allowRootFallback = true
+): Promise<SkillFileHit | null> {
   const branches = await candidateBranches(repoPath);
   for (const branch of branches) {
     for (const packDir of packDirCandidates(skillName)) {
+      if (!packDir && !allowRootFallback) {
+        // 多技能发现时子目录（如 assets/）没有 SKILL.md，不能拿仓库根的
+        // SKILL.md 冒充该子技能的内容。
+        continue;
+      }
       const filePath = packDir ? `${packDir}/SKILL.md` : 'SKILL.md';
       const content = await tryFetchText(rawGithubUrl(repoPath, branch, filePath));
       if (content) {
@@ -331,7 +351,7 @@ export async function planSkillInstall(name: string, sourceRepo: string): Promis
       const skillFiles: SkillInstallPlan['skillFiles'] = [];
       const extraFiles: PlannedFile[] = [];
       for (const subSkill of discovered) {
-        const subHit = await findSkillMarkdown(repoPath, subSkill.name);
+        const subHit = await findSkillMarkdown(repoPath, subSkill.name, false);
         const content =
           subHit?.content ??
           (await tryFetchText(rawGithubUrl(repoPath, branch, `${subSkill.packDir}/SKILL.md`)));
@@ -351,14 +371,27 @@ export async function planSkillInstall(name: string, sourceRepo: string): Promis
         );
       }
       if (skillFiles.length > 0) {
-        extraFiles.push(
-          ...(await collectTreeFiles(
-            repoPath,
-            'commands',
-            `.CodePapr/skills/${name}/commands`,
-            branch
-          ))
+        const rootCommands = await collectTreeFiles(
+          repoPath,
+          'commands',
+          `.CodePapr/skills/${name}/commands`,
+          branch
         );
+        if (rootCommands.length > 0 && !skillFiles.some((file) => file.skillId === name)) {
+          const packSkill = await tryFetchText(rawGithubUrl(repoPath, branch, 'SKILL.md'));
+          if (packSkill) {
+            skillFiles.push({
+              skillId: name,
+              relativePath: skillMarkdownPath(name),
+              content: packSkill,
+            });
+          }
+        }
+        // 根 commands 只有在对应 skill 根（<name>/SKILL.md）存在时才落盘，
+        // 否则它会成为没有任何 Skill 引用得到的孤儿目录。
+        if (rootCommands.length > 0 && skillFiles.some((file) => file.skillId === name)) {
+          extraFiles.push(...rootCommands);
+        }
         return { ok: true, plan: { skillFiles, extraFiles } };
       }
       return {

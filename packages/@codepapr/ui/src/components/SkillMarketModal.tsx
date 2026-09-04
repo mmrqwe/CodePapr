@@ -11,6 +11,7 @@ import {
   collectOverwriteCandidates,
   collectUninstallSkillIds,
   emptySkillsLock,
+  findLockEntry,
   isSkillListingInstalled,
   listExistingSkillPaths,
   loadSkillsLock,
@@ -688,10 +689,37 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
         return;
       }
 
+      // 更新时旧锁条目里、新方案已不再包含的子技能要一并删掉，
+      // 否则它们会以孤儿目录的形式留在磁盘上、脱离锁的管理。
+      const prevEntry = findLockEntry(currentLock, listing);
+      const staleSkillIds = prevEntry
+        ? prevEntry.skillIds.filter((id) => !plannedIds.includes(id))
+        : [];
+
       const result = await commitSkillInstall(planned.plan, workspacePath, invoke);
       if (!result.ok) {
         setInstallErrors((prev) => ({ ...prev, [listing.id]: result.error || c.installError }));
         return;
+      }
+
+      const { setSkillEnabledState } = useAgentStore.getState();
+      for (const staleId of staleSkillIds) {
+        try {
+          await invoke('delete_workspace_dir', {
+            workspacePath,
+            relativePath: `.CodePapr/skills/${staleId}`,
+          });
+        } catch {
+          try {
+            await invoke('delete_workspace_file', {
+              workspacePath,
+              relativePath: `.CodePapr/skills/${staleId}.md`,
+            });
+          } catch {
+            // 旧子技能可能已被手动删除
+          }
+        }
+        setSkillEnabledState(staleId, null);
       }
 
       const nextLock = upsertLockEntry(
@@ -761,6 +789,7 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
     try {
       const currentLock = await loadSkillsLock(invoke, workspacePath);
       const skillIds = collectUninstallSkillIds(listing, currentLock, definitionIds);
+      const { setSkillEnabledState } = useAgentStore.getState();
       for (const skillId of skillIds) {
         try {
           await invoke('delete_workspace_dir', {
@@ -777,6 +806,8 @@ export function SkillMarketModal({ onClose }: SkillMarketModalProps) {
             // 目录或扁平文件可能已经不在磁盘上
           }
         }
+        // 停用状态若不清理，重装同名 Skill 会静默保持禁用、不出现在目录里。
+        setSkillEnabledState(skillId, null);
       }
 
       const nextLock = removeListingFromLock(currentLock, listing);
