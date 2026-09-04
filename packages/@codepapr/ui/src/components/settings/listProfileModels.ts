@@ -5,6 +5,7 @@ import {
   type ListModelsAuth,
 } from '@codepapr/api';
 import { errorMessage } from '@codepapr/common';
+import { unwrapErrorBody } from '../../utils/errorEnvelope';
 import type { ModelProfile } from '../../store/agentStore';
 import type { Translation } from './types';
 
@@ -88,10 +89,23 @@ export function formatListModelsError(err: unknown, t: Translation): string {
       case 'network':
         return t.fetchModelsNetwork;
       default:
-        return `${t.fetchModelsFailed}: ${err.message.slice(0, 300)}`;
+        return formatFetchModelsDetail(t, err.message);
     }
   }
-  return `${t.fetchModelsFailed}: ${errorMessage(err).slice(0, 300)}`;
+  return formatFetchModelsDetail(t, errorMessage(err));
+}
+
+/** 未知类失败：错误体可能是 `HTTP NNN: {json}` 信封，先拆封再展示，不吐裸 JSON。 */
+function formatFetchModelsDetail(t: Translation, message: string): string {
+  const unwrapped = unwrapErrorBody(message);
+  if (unwrapped.kind === 'json') {
+    const label = unwrapped.label ? `${unwrapped.label}: ` : '';
+    return `${t.fetchModelsFailed}: ${label}${unwrapped.text}`.slice(0, 300);
+  }
+  if (unwrapped.kind === 'html') {
+    return `${t.fetchModelsFailed}: HTML error page`;
+  }
+  return `${t.fetchModelsFailed}: ${message.slice(0, 300)}`;
 }
 
 export function filterModelCatalog(ids: string[], query: string): string[] {

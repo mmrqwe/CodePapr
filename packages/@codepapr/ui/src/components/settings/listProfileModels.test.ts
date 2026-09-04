@@ -98,6 +98,14 @@ describe('formatListModelsError', () => {
     );
     expect(formatListModelsError(new DOMException('aborted', 'AbortError'), t)).toBe('');
   });
+
+  it('unwraps HTTP-prefixed JSON bodies instead of dumping raw JSON', () => {
+    const body =
+      '{"type":"error","error":{"type":"CreditsError","message":"Insufficient balance."}}';
+    const text = formatListModelsError(new ListModelsError('http', `HTTP 401: ${body}`, 401), t);
+    expect(text).toContain('CreditsError: Insufficient balance.');
+    expect(text).not.toContain('{"type"');
+  });
 });
 
 describe('filterModelCatalog', () => {
