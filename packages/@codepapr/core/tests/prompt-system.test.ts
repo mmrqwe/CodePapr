@@ -438,7 +438,7 @@ describe('promptSystem', () => {
     expect(en).toContain('Plugins default to index.html');
   });
 
-  it('app_publish points at session catalog, not app_list', () => {
+  it('app_publish points at session catalog, with app_list as discovery fallback', () => {
     for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
       const prompt = buildRuntimeSystemPrompt({
         mode: 'agent',
@@ -447,7 +447,8 @@ describe('promptSystem', () => {
         toolNames: ['app_publish'],
       });
       expect(prompt).toContain('app_publish');
-      expect(prompt).not.toContain('app_list');
+      // 目录为空时不再硬死锁：app_publish 文案引导用 app_list 兜底发现（T1/T6）。
+      expect(prompt).toContain('app_list');
     }
     const zhCN = buildRuntimeSystemPrompt({
       mode: 'agent',
@@ -456,6 +457,7 @@ describe('promptSystem', () => {
       toolNames: ['app_publish'],
     });
     expect(zhCN).toContain('已启用插件');
+    expect(zhCN).toContain('停用');
     const en = buildRuntimeSystemPrompt({
       mode: 'agent',
       workspacePath: '/tmp/project',
@@ -652,7 +654,7 @@ describe('promptSystem', () => {
     }
   });
 
-  it('suppresses mutating tool hints in ask mode', () => {
+  it('suppresses mutating tool hints in ask mode but keeps read-only git hint', () => {
     const prompt = buildRuntimeSystemPrompt({
       mode: 'ask',
       workspacePath: '/tmp/project',
@@ -660,7 +662,10 @@ describe('promptSystem', () => {
       toolNames: ['read', 'write', 'edit', 'patch', 'git', 'lsp_edit'],
     });
     expect(prompt).not.toContain('SEARCH/REPLACE');
-    expect(prompt).not.toContain('git(action');
     expect(prompt).not.toContain('lsp_edit');
+    // T4：ask 保留 git，但只暴露只读 action，不提 stage/commit。
+    expect(prompt).toContain('git(action: status/diff/log)');
+    expect(prompt).toContain('只读模式');
+    expect(prompt).not.toContain('action: commit');
   });
 });

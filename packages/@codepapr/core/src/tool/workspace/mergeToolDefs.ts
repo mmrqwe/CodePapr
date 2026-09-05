@@ -82,12 +82,13 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 5. grep ────
   {
     name: 'grep',
-    description: '按正则表达式搜索项目文件内容，返回匹配位置与上下文。正则无效时自动降级为字面量搜索并在 note 中说明。支持 UTF-8/UTF-16/GB18030 等编码。semantic:true 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级正则并告知。结果 note 会解释被截断(truncated)与跳过文件(skippedFiles：超大/二进制/读取失败)的原因。',
+    description: '搜索项目文件内容，返回匹配位置与上下文。默认字面量搜索（. + 等元字符按原样匹配）；isRegexp:true 才按正则，正则无效时自动降级为字面量并在 note 中说明。支持 UTF-8/UTF-16/GB18030 等编码。semantic:true 切换语义模式（LSP workspace symbol 检索），无 LSP 时降级并告知。结果 note 会解释被截断(truncated)与跳过文件(skippedFiles：超大/二进制/读取失败)的原因。',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '正则表达式（默认模式）或符号名（语义模式）。' },
-        semantic: { type: 'boolean', description: '设为 true 则使用 LSP workspace symbol 语义检索；无 LSP 时降级正则搜索。' },
+        query: { type: 'string', description: '搜索文本（默认字面量）；isRegexp:true 时为正则表达式；语义模式下为符号名。' },
+        isRegexp: { type: 'boolean', description: 'true 时 query 按正则表达式解析；默认 false（字面量匹配）。' },
+        semantic: { type: 'boolean', description: '设为 true 则使用 LSP workspace symbol 语义检索；无 LSP 时降级为普通搜索。' },
         relativePath: { type: 'string', description: '语义模式下的锚点文件路径，用于确定语言服务器。' },
         caseSensitive: { type: 'boolean', description: '区分大小写；默认 smart-case。' },
         contextLines: { type: 'number', description: '匹配前后额外返回多少行上下文，默认 1，最大 8。' },
@@ -313,7 +314,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 22. app_list ────
   {
     name: 'app_list',
-    description: '列出当前工作区中所有已注册的 .papr 应用。返回 appId、标题、kind、pinned、是否有后端、是否运行中、端口、inbox 频道契约。仅 App 模式：创建前调用检查重复。编程 Agent 的推送契约在会话上下文「已启用插件」，不要用此工具发现 publish 目标。',
+    description: '列出当前工作区中所有已注册的 .papr 应用（只读）。返回 appId、标题、kind、pinned、是否有后端、是否运行中、端口、inbox 频道契约、插件启用态。App 模式创建前调用检查重复；编程 Agent 在会话上下文「已启用插件」缺失或不确定目标时，用本工具发现可推送目标（只推 enabled 且声明 inbox 的），不要 invent 频道。',
     parameters: {
       type: 'object',
       properties: {},

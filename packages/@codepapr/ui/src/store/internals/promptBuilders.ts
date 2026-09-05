@@ -105,7 +105,7 @@ export function buildAgentRuntimeSystemPrompt(
     if (name === 'read_image') return multimodalEnabled;
     if (APP_ONLY_TOOL_NAMES.has(name)) return mode === 'app';
     if (PLAN_ONLY_TOOL_NAMES.has(name)) return mode === 'plan';
-    if (MUTATING_TOOL_NAMES.has(name)) return !isReadOnlyMode(mode);
+    if (MUTATING_TOOL_NAMES.has(name)) return name === 'git' || !isReadOnlyMode(mode);
     if (name === 'websearch' || name === 'webfetch') return !mcpSearchEnabled;
     return true;
   });

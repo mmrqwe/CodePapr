@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::web::client::{
     build_web_client, cache_search_response, get_cached_search, is_source_cooling_down,
-    mark_source_failed, mark_source_ok,
+    mark_source_empty, mark_source_failed, mark_source_ok,
 };
 use crate::web::text::normalize_search_text;
 
@@ -682,7 +682,8 @@ pub(crate) fn search_web_impl(
                     generic_outcomes.push((name, entries));
                 }
                 Ok(_) => {
-                    mark_source_failed(name);
+                    // 合法 0 命中不是源故障：只进极短冷却，避免冷门查询拖死后续热门查询
+                    mark_source_empty(name);
                     eprintln!("内置搜索源 {name} 返回空结果");
                 }
                 Err(err) => {

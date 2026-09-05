@@ -9,14 +9,18 @@ pub(crate) const SCRAPER_USER_AGENT: &str =
 pub(crate) const SEARCH_CACHE_TTL_SECS: u64 = 300;
 pub(crate) const SEARCH_RETRY_MAX: u32 = 2;
 pub(crate) const DDG_MIN_REQUEST_INTERVAL_MS: u64 = 1500;
-/// 源失败后的冷却时间：期间跳过该源，避免反复撞限流/风控
+/// 源硬失败后的冷却时间：期间跳过该源，避免反复撞限流/风控
 pub(crate) const SOURCE_COOLDOWN_SECS: u64 = 300;
+/// 源返回合法空结果的冷却时间：0 命中是查询相关而非源故障，
+/// 长冷却会让冷门查询拖死后续热门查询，只留极短退避防止空转放大。
+pub(crate) const SOURCE_EMPTY_COOLDOWN_SECS: u64 = 30;
 
 pub(crate) static SEARCH_CACHE: OnceLock<Mutex<HashMap<String, (Instant, WebSearchResponse)>>> =
     OnceLock::new();
 pub(crate) static RATE_LIMIT_LAST_REQUEST: OnceLock<Mutex<HashMap<String, Instant>>> =
     OnceLock::new();
-pub(crate) static SOURCE_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+pub(crate) static SOURCE_FAILURES: OnceLock<Mutex<HashMap<String, (Instant, Duration)>>> =
+    OnceLock::new();
 
 pub(crate) fn build_web_client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
@@ -202,11 +206,20 @@ pub(crate) fn cache_search_response(cache_key: &str, response: &WebSearchRespons
 }
 
 pub(crate) fn mark_source_failed(source: &str) {
+    mark_source_cooldown(source, Duration::from_secs(SOURCE_COOLDOWN_SECS));
+}
+
+/// 合法 0 命中：只进极短冷却（与 HTTP 失败区分）。
+pub(crate) fn mark_source_empty(source: &str) {
+    mark_source_cooldown(source, Duration::from_secs(SOURCE_EMPTY_COOLDOWN_SECS));
+}
+
+fn mark_source_cooldown(source: &str, cooldown: Duration) {
     if let Ok(mut map) = SOURCE_FAILURES
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
     {
-        map.insert(source.to_string(), Instant::now());
+        map.insert(source.to_string(), (Instant::now(), cooldown));
     }
 }
 
@@ -225,7 +238,7 @@ pub(crate) fn is_source_cooling_down(source: &str) -> bool {
         .lock()
         .ok()
         .and_then(|map| map.get(source).copied())
-        .map(|failed_at| failed_at.elapsed() < Duration::from_secs(SOURCE_COOLDOWN_SECS))
+        .map(|(failed_at, cooldown)| failed_at.elapsed() < cooldown)
         .unwrap_or(false)
 }
 
@@ -279,5 +292,28 @@ mod tests {
         assert!(is_source_cooling_down("unit-test-source"));
         mark_source_ok("unit-test-source");
         assert!(!is_source_cooling_down("unit-test-source"));
+    }
+
+    #[test]
+    fn empty_result_cooldown_is_shorter_than_failure_cooldown() {
+        mark_source_empty("unit-test-empty");
+        assert!(is_source_cooling_down("unit-test-empty"));
+        mark_source_failed("unit-test-failed");
+        let (empty_cd, failed_cd) = {
+            let map = SOURCE_FAILURES
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap();
+            (
+                map.get("unit-test-empty").unwrap().1,
+                map.get("unit-test-failed").unwrap().1,
+            )
+        };
+        assert_eq!(failed_cd, Duration::from_secs(SOURCE_COOLDOWN_SECS));
+        assert!(empty_cd < failed_cd);
+        mark_source_ok("unit-test-empty");
+        mark_source_ok("unit-test-failed");
+        assert!(!is_source_cooling_down("unit-test-empty"));
+        assert!(!is_source_cooling_down("unit-test-failed"));
     }
 }

@@ -295,6 +295,42 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * ask 只读模式下允许放行的 git 只读 action：git 整体是变更类工具
+ * （MUTATING_TOOL_NAMES），但 status/diff/log 不改变仓库状态，
+ * Ask 问答需要看分支/diff，按 action 在执行层细粒度放行。
+ */
+export const GIT_READ_ONLY_ACTIONS: ReadonlySet<string> = new Set(['status', 'diff', 'log']);
+
+/**
+ * 只读（ask）模式 FilteringToolRegistry 的工具放行谓词：
+ * - git：注册期（args === undefined）始终放行——只读 action 有价值；
+ *   执行期按 action 严格白名单校验，变更 action 拒绝。
+ * - 其余工具：命中 MUTATING_TOOL_NAMES 即拒绝。
+ */
+export function allowToolForReadOnlyMode(
+  tool: IToolDefinition,
+  args?: Record<string, unknown>
+): boolean {
+  if (tool.name === 'git') {
+    return args === undefined
+      || (typeof args.action === 'string' && GIT_READ_ONLY_ACTIONS.has(args.action));
+  }
+  return !MUTATING_TOOL_NAMES.has(tool.name);
+}
+
+/** 只读模式执行层拦截变更调用时的报错文案（引导模型改走允许的路径）。 */
+export function readOnlyModeBlockMessage(
+  tool: IToolDefinition,
+  args?: Record<string, unknown>
+): string {
+  if (tool.name === 'git' && args !== undefined) {
+    const action = typeof args.action === 'string' ? args.action : '(缺失 action)';
+    return `只读模式不允许 git(action: ${action})。仅允许只读查看类 action：${[...GIT_READ_ONLY_ACTIONS].join(' / ')}。`;
+  }
+  return `当前为只读模式，工具 ${tool.name} 不可用。`;
+}
+
+/**
  * 可并行执行的工具。同一轮内连续命中该名单的工具调用会合并为一个并行段
  * 并发执行（墙钟从 sum 降到 max）。变更类（write/edit/bash/git）、交互类
  * （question）与网络类（websearch/webfetch/mcp__*）不在此列，各自保持串行
@@ -315,10 +351,13 @@ export const PARALLEL_SAFE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'task',
 ]);
 
-/** 仅在 app 模式下可用的工具（应用管理/渲染相关）。 */
+/**
+ * 仅在 app 模式下可用的工具（应用渲染/生命周期管理）。
+ * app_list 是只读发现工具：agent/plan/ask 也开放，避免「能 publish 但无从发现
+ * 目标」的死锁（上下文「已启用插件」为空时模型可主动查目录与启用态）。
+ */
 export const APP_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'app_render',
-  'app_list',
   'app_start',
   'app_stop',
   'app_delete',
@@ -345,7 +384,7 @@ export function filterToolsForMode<T extends IToolDefinition>(
   mode: PromptMode
 ): T[] {
   return tools.filter((tool) => {
-    if (isReadOnlyMode(mode) && MUTATING_TOOL_NAMES.has(tool.name)) return false;
+    if (isReadOnlyMode(mode) && !allowToolForReadOnlyMode(tool)) return false;
     if (mode !== 'app' && APP_ONLY_TOOL_NAMES.has(tool.name)) return false;
     if (mode !== 'plan' && PLAN_ONLY_TOOL_NAMES.has(tool.name)) return false;
     return true;

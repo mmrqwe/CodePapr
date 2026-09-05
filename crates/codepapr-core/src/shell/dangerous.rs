@@ -326,6 +326,90 @@ pub(crate) fn detect_dangerous_invocation(command: &str, args: &[String]) -> Opt
     detect_dangerous_command(&line)
 }
 
+/// grep 族（grep/egrep/fgrep）的递归仓库搜标志：`-r`、`-R`、`-rn`、`--recursive`。
+fn has_recursive_flag(args: &[String]) -> bool {
+    args.iter().any(|arg| {
+        if arg == "--recursive" || arg.starts_with("--recursive=") {
+            return true;
+        }
+        match arg.strip_prefix('-') {
+            // 组合短选项（-rn/-nr/-e 等）：只要含 r/R 即递归；`--` 前缀已在上面处理。
+            Some(short) if !short.is_empty() && !arg.starts_with("--") => {
+                short.contains('r') || short.contains('R')
+            }
+            _ => false,
+        }
+    })
+}
+
+/// rg/ag/ack 的位置参数：约定「第一个非 flag 是 pattern，其余是路径」。
+/// 无法完美解析带值 flag（如 `-g ts`），因此只用于目录形态判断，宁可漏报不误报。
+fn positional_after_pattern(args: &[String]) -> Vec<String> {
+    let mut non_flags = args
+        .iter()
+        .filter(|a| !a.starts_with('-') && a.as_str() != "--")
+        .cloned()
+        .collect::<Vec<_>>();
+    if !non_flags.is_empty() {
+        non_flags.remove(0);
+    }
+    non_flags
+}
+
+fn is_dir_like(path: &str) -> bool {
+    path == "." || path == ".." || path.ends_with('/') || path.ends_with(std::path::MAIN_SEPARATOR)
+}
+
+const REPO_SEARCH_COMMANDS: &[&str] = &["grep", "egrep", "fgrep", "rg", "ripgrep", "ag", "ack"];
+
+/// 仓库向内容搜索命令检测：`grep` 工具带忽略规则/截断/跳过保护，bash 直跑
+/// 递归搜索会绕开这些策略并在大仓库卡顿。只拦「高置信仓库向」：
+/// - grep 族：递归 flag（-r/-R/-rn/--recursive）；无递归 flag 视为 stdin/单文件过滤，放行。
+/// - rg/ag/ack（天然递归）：段首且无显式文件路径参数（默认扫当前树），或路径参数是目录形态。
+///   `rg -`（stdin）与 `rg --files`（文件列表）豁免；管道后无路径参数的段放行（意图不明不误伤）。
+pub(crate) fn detect_repo_content_search(command_line: &str) -> Option<String> {
+    let line = command_line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    for (index, segment) in split_segments(line).iter().enumerate() {
+        let tokens = tokenize(segment);
+        let Some(head) = find_head_index(&tokens) else {
+            continue;
+        };
+        let name = command_name(&tokens[head]);
+        if !REPO_SEARCH_COMMANDS.contains(&name.as_str()) {
+            continue;
+        }
+        let args = &tokens[head + 1..];
+        let searches_repo = match name.as_str() {
+            "grep" | "egrep" | "fgrep" => has_recursive_flag(args),
+            _ => {
+                if args.iter().any(|a| a.as_str() == "-")
+                    || args.iter().any(|a| a.starts_with("--files"))
+                {
+                    false
+                } else {
+                    let paths = positional_after_pattern(args);
+                    if paths.is_empty() {
+                        index == 0
+                    } else {
+                        paths.iter().any(|p| is_dir_like(p))
+                    }
+                }
+            }
+        };
+        if searches_repo {
+            return Some(format!(
+                "仓库向内容搜索命令 `{segment}` 被拦截。请改用 grep 工具：默认字面量匹配，\
+                 isRegexp:true 才按正则，支持 includeGlobs/excludeGlobs 文件过滤，\
+                 自动跳过构建产物并截断输出。管道/stdin 文本过滤（不加 -r、无目录参数）不受此限制。"
+            ));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,5 +504,45 @@ mod tests {
             detect_dangerous_invocation("rm", &["-rf".to_string(), "node_modules".to_string()])
                 .is_none()
         );
+    }
+
+    #[test]
+    fn repo_content_search_blocks_recursive_grep() {
+        assert!(detect_repo_content_search("grep -rn TODO .").is_some());
+        assert!(detect_repo_content_search("grep -R foo src").is_some());
+        assert!(detect_repo_content_search("grep --recursive foo src").is_some());
+    }
+
+    #[test]
+    fn repo_content_search_blocks_bare_repo_searchers() {
+        assert!(detect_repo_content_search("rg -n foo").is_some());
+        assert!(detect_repo_content_search("rg foo .").is_some());
+        assert!(detect_repo_content_search("rg foo src/").is_some());
+        assert!(detect_repo_content_search("ag TODO").is_some());
+        assert!(detect_repo_content_search("ack foo").is_some());
+    }
+
+    #[test]
+    fn repo_content_search_blocks_in_pipeline_head() {
+        // `rg` 作为管道首段（无 stdin）默认扫当前树，即使后面接了 wc。
+        assert!(detect_repo_content_search("rg foo | wc -l").is_some());
+    }
+
+    #[test]
+    fn repo_content_search_allows_file_and_stdin_usage() {
+        // 单文件 grep、显式文件路径 rg、管道内 stdin 过滤都不拦。
+        assert!(detect_repo_content_search("grep TODO src/main.rs").is_none());
+        assert!(detect_repo_content_search("rg foo Cargo.toml").is_none());
+        assert!(detect_repo_content_search("cat log.txt | grep -i warn").is_none());
+        assert!(detect_repo_content_search("make 2>&1 | rg error").is_none());
+        assert!(detect_repo_content_search("git ls-files | rg \"\\.rs$\"").is_none());
+    }
+
+    #[test]
+    fn repo_content_search_allows_non_search_commands() {
+        assert!(detect_repo_content_search("npm install").is_none());
+        assert!(detect_repo_content_search("ls -la").is_none());
+        // 搜索词作为参数而非段首命令时不误报。
+        assert!(detect_repo_content_search("echo rg -n foo").is_none());
     }
 }

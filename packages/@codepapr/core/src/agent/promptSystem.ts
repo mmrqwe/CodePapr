@@ -1323,7 +1323,15 @@ function buildToolConstraints(
         : '- [bash] 执行 shell 命令（支持管道、&&、变量），如 `bash(command: "npm test")`。dev server / 长命令用 `background: true`（返回 pid，用 `bash(action: list/stop)` 管理）。用 `workdir` 指定工作目录（不要在命令里 cd，不跨调用保留）。不要用 `sleep` 等待页面加载或异步完成——browser 导航与后台服务已内置等待。超过 3 行或含嵌套引号/正则的提取/比对逻辑写临时脚本文件（如 `.CodePapr/tmp/validate.mjs`）再执行，不要 `node -e`/`python -c` 内联——引号嵌套脆弱易错。不要主动探索工作区外的家目录或其他路径（如 ~/Desktop、~/Downloads、~/Pictures）——仅在用户明确要求时访问。'
     );
   }
-  if (hasTool(toolNames, 'git') && !isAsk && !isApp) {
+  if (hasTool(toolNames, 'git') && isAsk) {
+    common.push(
+      lang === 'en'
+        ? '- [git] Read-only here: only `git(action: status/diff/log)` are accepted. stage/commit/branch/restore/reset are rejected — inspect and answer, never change repo state.'
+        : lang === 'zh-TW'
+        ? '- [git] 唯讀模式：僅 `git(action: status/diff/log)` 可用。stage/commit/branch/restore/reset 會被拒絕——只做檢視與回答，不變更倉庫狀態。'
+        : '- [git] 只读模式：仅 `git(action: status/diff/log)` 可用。stage/commit/branch/restore/reset 会被拒绝——只做查看与回答，不变更仓库状态。'
+    );
+  } else if (hasTool(toolNames, 'git') && !isApp) {
     common.push(
       lang === 'en'
         ? '- [git] Inspect: `git(action: status/diff/log)`. Stage & commit: `git(action: stage)` then `git(action: commit)`. Branch: `git(action: branch)`. restore/reset auto-creates backups — do NOT manually `git stash`.'
@@ -1335,10 +1343,10 @@ function buildToolConstraints(
   if (hasTool(toolNames, 'read') || hasTool(toolNames, 'glob') || hasTool(toolNames, 'grep') || hasTool(toolNames, 'list')) {
     common.push(
       lang === 'en'
-        ? '- [read] Read file content (startLine/endLine/aroundLine). `list` browse directories, `glob` find files by name. To search file CONTENT, always use the `grep` tool (regex) — never `bash grep/rg`.'
+        ? '- [read] Read file content (startLine/endLine/aroundLine). `list` browse directories, `glob` find files by name. To search file CONTENT, always use the `grep` tool (literal by default; `isRegexp:true` for regex) — never `bash grep/rg`.'
         : lang === 'zh-TW'
-        ? '- [read] 讀取檔案內容（startLine/endLine/aroundLine）。`list` 瀏覽目錄，`glob` 按檔名查找。搜索檔案內容一律用 `grep` 工具（正則），不要用 `bash grep/rg`。'
-        : '- [read] 读取文件内容（startLine/endLine/aroundLine）。`list` 浏览目录，`glob` 按文件名查找。搜索文件内容一律用 `grep` 工具（正则），不要用 `bash grep/rg`。'
+        ? '- [read] 讀取檔案內容（startLine/endLine/aroundLine）。`list` 瀏覽目錄，`glob` 按檔名查找。搜索檔案內容一律用 `grep` 工具（預設字面量，`isRegexp:true` 才按正則），不要用 `bash grep/rg`。'
+        : '- [read] 读取文件内容（startLine/endLine/aroundLine）。`list` 浏览目录，`glob` 按文件名查找。搜索文件内容一律用 `grep` 工具（默认字面量，`isRegexp:true` 才按正则），不要用 `bash grep/rg`。'
     );
   }
   if (hasTool(toolNames, 'read_image')) {
@@ -1439,10 +1447,10 @@ function buildToolConstraints(
     );
     lines.push(
       lang === 'en'
-        ? '- [app_list] List all registered apps (appId, title, kind, pinned, hasBackend, isRunning, port, inbox). App-mode only: call before creating to check for duplicates. Coding-Agent publish contracts live in session context, not this tool.'
+        ? '- [app_list] List all registered apps (appId, title, kind, pinned, hasBackend, isRunning, port, inbox, plugin enabled state). Read-only: call before creating to check for duplicates; also use it to discover publish targets when the "Enabled plugins" section is absent.'
           : lang === 'zh-TW'
-          ? '- [app_list] 列出所有已註冊應用（appId、標題、kind、pinned、是否有後端、是否運行中、端口、inbox）。僅 App 模式：創建前調用檢查重複。編程 Agent 的推送契約在會話上下文，不靠此工具。'
-          : '- [app_list] 列出所有已注册应用（appId、标题、kind、pinned、是否有后端、是否运行中、端口、inbox）。仅 App 模式：创建前调用检查重复。编程 Agent 的推送契约在会话上下文，不靠此工具。'
+          ? '- [app_list] 列出所有已註冊應用（appId、標題、kind、pinned、是否有後端、是否運行中、端口、inbox、外掛啟用態）。唯讀：創建前調用檢查重複；「已啟用外掛」章節缺失時也可用它發現可推送目標。'
+          : '- [app_list] 列出所有已注册应用（appId、标题、kind、pinned、是否有后端、是否运行中、端口、inbox、插件启用态）。只读：创建前调用检查重复；「已启用插件」章节缺失时也可用它发现可推送目标。'
     );
     lines.push(
       lang === 'en'
@@ -1473,10 +1481,10 @@ function buildToolConstraints(
     );
     lines.push(
       lang === 'en'
-        ? '- [app_publish] Push content to a .papr app/plugin channel: app_publish({ appId, channel, payload }). Session context "## Enabled plugins" lists current publish targets (enabled + declared inbox). Follow that appId/channel/example exactly. Do not publish to plugins that are not listed and do not invent channels. Data is persisted (the app can reload history) and delivered live if the app is mounted. Unknown channels are rejected with the valid list.'
+        ? '- [app_publish] Push content to a .papr app/plugin channel: app_publish({ appId, channel, payload }). Session context "## Enabled plugins" lists current publish targets (enabled + declared inbox). Follow that appId/channel/example exactly. If the section is absent, call app_list to discover enabled apps with inbox contracts — never invent channels. Publishing to a disabled plugin still persists but returns a disabledTarget warning (no live consumer) — prompt the user to enable it. Data is persisted (the app can reload history) and delivered live if the app is mounted. Unknown channels are rejected with the valid list.'
           : lang === 'zh-TW'
-          ? '- [app_publish] 向 .papr 應用/外掛的頻道推送內容：app_publish({ appId, channel, payload })。會話上下文「已啟用外掛」列出目前可推送目標（已啟用且宣告了 inbox）。嚴格按其 appId/頻道/example 推送。未列出的外掛不要推，也不要 invent 頻道。數據會持久化（應用可回放歷史），應用已掛載時即時送達。傳未聲明頻道會被拒絕並列出可用頻道。'
-          : '- [app_publish] 向 .papr 应用/插件的频道推送内容：app_publish({ appId, channel, payload })。会话上下文「已启用插件」列出当前可推送目标（已启用且声明了 inbox）。严格按其 appId/频道/example 推送。未列出的插件不要推，也不要 invent 频道。数据会持久化（应用可回放历史），应用已挂载时即时送达。传未声明频道会被拒绝并列出可用频道。'
+          ? '- [app_publish] 向 .papr 應用/外掛的頻道推送內容：app_publish({ appId, channel, payload })。會話上下文「已啟用外掛」列出目前可推送目標（已啟用且宣告了 inbox）。嚴格按其 appId/頻道/example 推送；章節缺失時先用 app_list 查目錄與啟用態，不要 invent 頻道。推給已停用的外掛會被拒絕並說明原因。數據會持久化（應用可回放歷史），應用已掛載時即時送達。傳未聲明頻道會被拒絕並列出可用頻道。'
+          : '- [app_publish] 向 .papr 应用/插件的频道推送内容：app_publish({ appId, channel, payload })。会话上下文「已启用插件」列出当前可推送目标（已启用且声明了 inbox）。严格按其 appId/频道/example 推送；章节缺失时先用 app_list 查目录与启用态，不要 invent 频道。推给已停用的插件会落库但返回 disabledTarget 告警（当前无人实时消费），应提示用户启用。数据会持久化（应用可回放历史），应用已挂载时即时送达。传未声明频道会被拒绝并列出可用频道。'
     );
   }
 

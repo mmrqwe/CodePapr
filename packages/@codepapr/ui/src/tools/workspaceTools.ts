@@ -1,5 +1,6 @@
 import {
   ToolRegistry,
+  APP_ONLY_TOOL_NAMES,
   registerSharedMergeToolDispatchers,
   getWorkspaceSmartContext,
   detectDeadCode,
@@ -190,9 +191,10 @@ export function registerWorkspaceTools(
 
   // 按模式过滤工具可见性
   const mode = options.mode ?? 'agent';
-  const APP_TOOLS = ['app_render', 'app_list', 'app_start', 'app_stop', 'app_delete'];
+  // 与 agentConfig 的 APP_ONLY_TOOL_NAMES 单一事实源保持一致：
+  // app_list 是只读发现工具，已从 app-only 名单移出，Agent/Plan/Ask 均可见（T1）。
   if (mode !== 'app') {
-    for (const name of APP_TOOLS) {
+    for (const name of APP_ONLY_TOOL_NAMES) {
       registry.hideFromLlm(name);
     }
   }

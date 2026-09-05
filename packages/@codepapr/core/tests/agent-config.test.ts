@@ -3,6 +3,8 @@ import {
   parseAgentMarkdown,
   filterToolsForAgent,
   filterToolsForMode,
+  allowToolForReadOnlyMode,
+  readOnlyModeBlockMessage,
   buildTaskToolDefinition,
   BUILTIN_AGENTS,
   VERIFIER_PROMPT_OBJECTIVE,
@@ -153,9 +155,11 @@ describe('agentConfig - filterToolsForMode', () => {
     tool('memory_list'),
   ];
 
-  it('ask 模式：移除变更类工具和 app 工具和 question，保留只读工具 + task', () => {
+  it('ask 模式：移除变更类工具、写类 app 工具与 question，保留只读工具 + task + 只读 git + 只读 app_list', () => {
     expect(filterToolsForMode(all, 'ask').map((t) => t.name)).toEqual([
       'read',
+      'git',
+      'app_list',
       'task',
       'memory_search',
       'memory_list',
@@ -188,7 +192,7 @@ describe('agentConfig - filterToolsForMode', () => {
     expect(names).toContain('memory_list');
   });
 
-  it('plan 模式：有变更工具 + question，无 app 工具', () => {
+  it('plan 模式：有变更工具 + question + 只读 app_list，无 app 渲染/生命周期工具', () => {
     const names = filterToolsForMode(all, 'plan').map((t) => t.name);
     expect(names).toContain('read');
     expect(names).toContain('write');
@@ -197,11 +201,11 @@ describe('agentConfig - filterToolsForMode', () => {
     expect(names).toContain('git');
     expect(names).toContain('question');
     expect(names).toContain('task');
+    expect(names).toContain('app_list');
     expect(names).not.toContain('app_render');
-    expect(names).not.toContain('app_list');
   });
 
-  it('agent 模式：有变更工具 + task，无 app 工具和 question', () => {
+  it('agent 模式：有变更工具 + task + 只读 app_list，无 app 渲染/生命周期工具和 question', () => {
     const names = filterToolsForMode(all, 'agent').map((t) => t.name);
     expect(names).toContain('read');
     expect(names).toContain('write');
@@ -209,8 +213,24 @@ describe('agentConfig - filterToolsForMode', () => {
     expect(names).toContain('bash');
     expect(names).toContain('git');
     expect(names).toContain('task');
+    expect(names).toContain('app_list');
     expect(names).not.toContain('app_render');
+    expect(names).not.toContain('app_start');
     expect(names).not.toContain('question');
+  });
+
+  it('只读放行谓词：git 注册期可见，执行期仅 status/diff/log（T4）', () => {
+    const gitTool = tool('git');
+    expect(allowToolForReadOnlyMode(gitTool)).toBe(true);
+    expect(allowToolForReadOnlyMode(gitTool, { action: 'status' })).toBe(true);
+    expect(allowToolForReadOnlyMode(gitTool, { action: 'diff' })).toBe(true);
+    expect(allowToolForReadOnlyMode(gitTool, { action: 'log' })).toBe(true);
+    expect(allowToolForReadOnlyMode(gitTool, { action: 'commit' })).toBe(false);
+    expect(allowToolForReadOnlyMode(gitTool, { action: 'reset' })).toBe(false);
+    expect(allowToolForReadOnlyMode(gitTool, {})).toBe(false);
+    expect(readOnlyModeBlockMessage(gitTool, { action: 'commit' })).toContain('git(action: commit)');
+    expect(allowToolForReadOnlyMode(tool('write'))).toBe(false);
+    expect(allowToolForReadOnlyMode(tool('read'))).toBe(true);
   });
 
   it('app 模式：有变更工具 + app 工具 + task，无 question', () => {

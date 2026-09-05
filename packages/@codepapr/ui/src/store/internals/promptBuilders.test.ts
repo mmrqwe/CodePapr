@@ -247,12 +247,22 @@ describe('buildAgentRuntimeSystemPrompt', () => {
     expect(prompt).toContain('app_render');
   });
 
-  it('omits mutating tool hints in read-only ask mode', () => {
+  it('omits mutating tool hints in read-only ask mode but keeps read-only git', () => {
     const settings = makeRuntimeSettings();
     const prompt = buildAgentRuntimeSystemPrompt(settings, 'ask', '/tmp/ws');
     expect(prompt).not.toContain('SEARCH/REPLACE');
-    expect(prompt).not.toContain('git(action');
     expect(prompt).not.toContain('lsp_edit');
+    // T4：ask 保留 git，仅只读 action，不提 stage/commit。
+    expect(prompt).toContain('git(action: status/diff/log)');
+    expect(prompt).not.toContain('action: commit');
+  });
+
+  it('agent mode exposes read-only app_list for publish-target discovery (T1)', () => {
+    const settings = makeRuntimeSettings();
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
+    // agent 有 app_publish，其文案引导用 app_list 兜底发现可推送目标。
+    expect(prompt).toContain('app_publish');
+    expect(prompt).toContain('app_list');
   });
 
   it('omits websearch/webfetch hints when MCP search is enabled', () => {

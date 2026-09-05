@@ -1113,7 +1113,7 @@ name: 'web_download_file',
   {
     name: 'app_publish',
     description:
-      '向 .papr 应用/插件的频道推送内容。用法 app_publish({ appId, channel, payload })。只推会话上下文「已启用插件」里列出的目标（已启用且声明了 inbox），payload 严格按其中的 description/example。未列出的插件不要推、不要 invent 频道。事件追加到应用 db（key: inbox:<channel>，最近 200 条）；已挂载时实时送达（papr.events.on）。传错频道会拒绝并列出可用频道。相关工作结束后主动更新对应面板。',
+      '向 .papr 应用/插件的频道推送内容。用法 app_publish({ appId, channel, payload })。优先按会话上下文「已启用插件」列出的目标推送（已启用且声明了 inbox），payload 严格按其中的 description/example；上下文未列出但不确定有无目标时，先 app_list 查目录与启用态，只推 enabled 且声明了该频道的应用，不要 invent 频道。事件追加到应用 db（key: inbox:<channel>，最近 200 条）；已挂载时实时送达（papr.events.on）。传错频道会被拒绝并列出可用频道；推给已停用的插件会落库但返回 disabledTarget 告警（当前无人消费，应提示用户启用）。相关工作结束后主动更新对应面板。',
     parameters: {
       type: 'object',
       properties: {

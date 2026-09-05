@@ -132,14 +132,36 @@ export class ToolRegistry {
 /**
  * 注册时按谓词过滤的 ToolRegistry：不满足谓词的工具被静默跳过（既不进入工具集，也不注册 handler）。
  * 用于 ask/plan 等只读模式对变更类工具的硬拦截。
+ * 谓词带可选 args：注册期 args===undefined（按名字决策，决定 LLM 可见性），
+ * 执行期带真实 args 二次校验（支持 git 这类"整体变更、部分 action 只读"的细粒度放行）。
  */
 export class FilteringToolRegistry extends ToolRegistry {
-  constructor(private readonly allowPredicate: (tool: IToolDefinition) => boolean) {
+  constructor(
+    private readonly allowPredicate: (tool: IToolDefinition, args?: Record<string, unknown>) => boolean,
+    private readonly blockMessage?: (tool: IToolDefinition, args?: Record<string, unknown>) => string
+  ) {
     super();
   }
 
   register(tool: IToolDefinition, handler: ToolHandler): void {
     if (!this.allowPredicate(tool)) return;
     super.register(tool, handler);
+  }
+
+  /**
+   * 执行期二次校验（带 args）：支持按参数细粒度放行的工具（如 ask 模式下
+   * git 仅允许 status/diff/log）。注册期放行、执行期拒绝的工具会在这里抛出
+   * blockMessage（默认给出只读模式通用文案）。
+   */
+  override async execute(
+    name: string,
+    args: Record<string, unknown>,
+    context?: ToolExecutionContext
+  ): Promise<unknown> {
+    const def = this.get(name);
+    if (def && !this.allowPredicate(def, args)) {
+      throw new Error(this.blockMessage?.(def, args) ?? `只读模式：工具 ${name} 当前模式不可用。`);
+    }
+    return await super.execute(name, args, context);
   }
 }

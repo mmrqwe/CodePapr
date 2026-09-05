@@ -2,7 +2,8 @@ import {
   AppendOnlyLog,
   ToolRegistry,
   FilteringToolRegistry,
-  MUTATING_TOOL_NAMES,
+  allowToolForReadOnlyMode,
+  readOnlyModeBlockMessage,
   isReadOnlyMode,
   Serializer,
   type EditHistory,
@@ -231,7 +232,7 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
 } {
   const mode: PromptMode = config.runtime.mode ?? 'agent';
   const registry = isReadOnlyMode(mode)
-    ? new FilteringToolRegistry((tool) => !MUTATING_TOOL_NAMES.has(tool.name))
+    ? new FilteringToolRegistry(allowToolForReadOnlyMode, readOnlyModeBlockMessage)
     : new ToolRegistry();
   registerWorkspaceTools(
     registry,

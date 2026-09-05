@@ -509,11 +509,12 @@ fn dispatch_tool_inner(
             } else {
                 arg_string_req(args, &["query", "pattern"])?
             };
+            let is_regexp = arg_bool(args, "isRegexp") == Some(true);
             let result = workspace_fs::search::search_workspace_text_impl_full(
                 ctx.workspace_path.clone(),
                 query,
                 arg_bool(args, "caseSensitive"),
-                Some(true),
+                Some(is_regexp),
                 arg_usize(args, "contextLines"),
                 arg_usize(args, "maxResults"),
                 arg_usize(args, "maxMatchesPerFile"),
@@ -527,7 +528,11 @@ fn dispatch_tool_inner(
             if args.get("semantic") == Some(&Value::Bool(true)) {
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("degraded".to_string(), json!(true));
-                    let note = "语义搜索在 sidecar 宿主中降级为正则搜索。";
+                    let note = if is_regexp {
+                        "语义搜索在 sidecar 宿主中降级为正则搜索。"
+                    } else {
+                        "语义搜索在 sidecar 宿主中降级为字面量搜索。"
+                    };
                     match obj.get("note").and_then(Value::as_str) {
                         Some(existing) if !existing.is_empty() => {
                             obj.insert("note".to_string(), json!(format!("{note} {existing}")));

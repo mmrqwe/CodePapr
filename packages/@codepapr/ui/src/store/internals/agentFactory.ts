@@ -5,7 +5,8 @@ import {
   Session,
   ToolRegistry,
   FilteringToolRegistry,
-  MUTATING_TOOL_NAMES,
+  allowToolForReadOnlyMode,
+  readOnlyModeBlockMessage,
   isReadOnlyMode,
   generateToolOutputFilename,
   resolveToolContextOverrides,
@@ -390,7 +391,7 @@ export function buildAgentSessionParts(
 ): AgentSessionParts {
   const mode: PromptMode = runtime.mode ?? 'agent';
   const toolRegistry = isReadOnlyMode(mode)
-    ? new FilteringToolRegistry((tool) => !MUTATING_TOOL_NAMES.has(tool.name))
+    ? new FilteringToolRegistry(allowToolForReadOnlyMode, readOnlyModeBlockMessage)
     : new ToolRegistry();
   const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
   const sessionBootstrapPrompt =

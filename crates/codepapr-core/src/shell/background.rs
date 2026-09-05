@@ -2,7 +2,9 @@ use crate::shared::{
     canonical_workspace, child_reap_timeout, ensure_path_accessible, expanded_path,
     normalize_workspace_filter, parse_browser_url, run_blocking_workspace_task, unix_millis,
 };
-use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
+use crate::shell::dangerous::{
+    detect_dangerous_command, detect_dangerous_invocation, detect_repo_content_search,
+};
 use crate::shell::process_tree::{
     kill_process_tree, prepare_new_process_group, prepare_parent_death_signal, wait_for_child_exit,
 };
@@ -747,6 +749,9 @@ pub(crate) fn run_workspace_shell_command_impl(
             "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
         ));
     }
+    if let Some(reason) = detect_repo_content_search(&command) {
+        return Err(reason);
+    }
     let workspace = canonical_workspace(&workspace_path)?;
     validate_restricted_shell_command(&command, &workspace)?;
     super::path_guard::ensure_command_paths_accessible(&workspace, &command, &[])?;
@@ -1033,6 +1038,9 @@ pub fn start_workspace_shell_background_command(
         return Err(format!(
             "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
         ));
+    }
+    if let Some(reason) = detect_repo_content_search(&command) {
+        return Err(reason);
     }
     let workspace = canonical_workspace(&workspace_path)?;
     validate_restricted_shell_command(&command, &workspace)?;

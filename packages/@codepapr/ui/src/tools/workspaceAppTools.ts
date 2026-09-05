@@ -625,6 +625,13 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       throw new Error(`${manifestPath} 不是合法 JSON，请修复 manifest 后再推送。`);
     }
 
+    // 启用态提示：已停用的插件仍允许落库（保留下次启用时回放历史的能力，见既有契约），
+    // 但在结果里回一个 disabledTarget 标记 + 明确 warning，让模型知道「当前无人消费」，
+    // 引导它提示用户去设置启用，而不是误以为推送已生效。
+    const pluginDisabled =
+      parsePaprKind(manifest) === 'plugin' &&
+      !pluginIsEnabled(manifest, useAppRuntimeStore.getState().pluginChrome[rawAppId]);
+
     // inbox 契约：声明了 inbox 的应用只接受已声明频道；报错带出全部可用频道
     // 与描述，LLM 可自我纠正重发。未声明 inbox 的应用不限制（向后兼容）。
     const inbox = manifest.inbox;
@@ -671,7 +678,10 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       channel,
       seq,
       delivered,
-      hint: delivered
+      ...(pluginDisabled ? { disabledTarget: true } : {}),
+      hint: pluginDisabled
+        ? `插件 '${rawAppId}' 当前已停用：事件已落库（下次启用可回放），但现在无人实时消费。请提示用户在「设置 → 插件」中启用后再看效果；不要因此改推其他频道或插件。`
+        : delivered
         ? '已实时推送到挂载中的应用（papr.events.on 收到事件）。'
         : `事件已写入应用存储（papr.db 键 inbox:${channel}），应用打开时可回放历史；当前应用未挂载。`,
     };

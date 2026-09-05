@@ -51,7 +51,9 @@ describe('registerWorkspaceTools (domain split)', () => {
   it('exposes exactly the merged LLM surface under default options', () => {
     const registry = build();
     // hideFromLlm 会把细粒度工具从 getAll() 删除，默认只留下合并工具 + websearch。
+    // app_list 已从 app-only 移出，对 agent/plan/ask 只读可见（T1）。
     expect(names(registry)).toEqual([
+      'app_list',
       'app_publish',
       'bash', 'browser', 'diagnostics', 'edit', 'git', 'glob', 'graph', 'grep',
       'list', 'lsp', 'lsp_edit', 'patch', 'read', 'skill', 'webfetch', 'websearch', 'write',
@@ -1553,9 +1555,16 @@ describe('app_publish (agent → app/plugin 推送)', () => {
     });
     useAppRuntimeStore.getState().disablePlugin('kanban');
 
-    await build().execute('app_publish', { appId: 'kanban', channel: 'cards', payload: { op: 'add' } });
+    const result = (await build().execute('app_publish', {
+      appId: 'kanban',
+      channel: 'cards',
+      payload: { op: 'add' },
+    })) as Record<string, unknown>;
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);
     expect(useAppRuntimeStore.getState().pluginChrome.kanban.enabled).toBe(false);
+    // T6：停用的插件仍落库（保留下次启用回放），但回 disabledTarget 告警，避免模型误认为已生效。
+    expect(result.disabledTarget).toBe(true);
+    expect(String(result.hint)).toContain('停用');
   });
 });
 

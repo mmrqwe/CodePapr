@@ -50,6 +50,7 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
     return await registry.execute('workspace_apply_diff', args, context);
   });
   registry.register(findTool('grep'), async (args, context) => {
+    const isRegexp = args.isRegexp === true;
     if (args.semantic === true) {
       const relativePath = typeof args.relativePath === 'string' ? args.relativePath : undefined;
       if (relativePath) {
@@ -59,14 +60,16 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
             relativePath,
           }, context) as { available?: boolean };
           if (result && result.available !== false) return result;
-        } catch { /* LSP 不可用，降级正则 */ }
+        } catch { /* LSP 不可用，降级普通搜索 */ }
       }
-      const regexResult = await registry.execute('workspace_search_text', { ...args, isRegexp: true }, context) as Record<string, unknown>;
-      const semanticNote = '语义搜索不可用（无 LSP 或未指定锚点文件 relativePath），已降级正则搜索。';
-      const innerNote = typeof regexResult.note === 'string' ? regexResult.note : '';
-      return { ...regexResult, degraded: true, note: innerNote ? `${semanticNote} ${innerNote}` : semanticNote };
+      const fallbackResult = await registry.execute('workspace_search_text', { ...args, isRegexp }, context) as Record<string, unknown>;
+      const semanticNote = isRegexp
+        ? '语义搜索不可用（无 LSP 或未指定锚点文件 relativePath），已降级正则搜索。'
+        : '语义搜索不可用（无 LSP 或未指定锚点文件 relativePath），已降级字面量搜索。';
+      const innerNote = typeof fallbackResult.note === 'string' ? fallbackResult.note : '';
+      return { ...fallbackResult, degraded: true, note: innerNote ? `${semanticNote} ${innerNote}` : semanticNote };
     }
-    return await registry.execute('workspace_search_text', { ...args, isRegexp: true }, context);
+    return await registry.execute('workspace_search_text', { ...args, isRegexp }, context);
   });
   registry.register(findTool('glob'), async (args, context) => {
     const rawQuery = asString(args.query, 'query');
