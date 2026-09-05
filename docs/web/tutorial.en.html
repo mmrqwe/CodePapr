@@ -972,9 +972,9 @@ After the change, at least run verification for the affected scope; if no narrow
 
     <!-- Character Roleplay -->
     <section class="section" id="characters">
-      <div class="section-header"><h2>Character Roleplay</h2></div>
+      <div class="section-header"><h2>Character Roleplay <span class="tag">Experimental</span></h2></div>
       <div class="content">
-        <p>CodePapr supports creating, importing, and managing AI characters, allowing the Agent to converse with you in a specific persona. Once enabled, the profile is injected into the Session Bootstrap (assembled in <code>promptBuilders.ts</code> / <code>characterTypes.ts</code>), not core <code>promptSystem.ts</code> and not ImmutablePrefix.</p>
+        <p><strong>Experimental feature, off by default</strong>: enable "Characters" under Settings → General → Experimental features to reveal the toolbar entry. CodePapr supports creating, importing, and managing AI characters, allowing the Agent to converse with you in a specific persona. Once enabled, the profile is injected into the Session Bootstrap (assembled in <code>promptBuilders.ts</code> / <code>characterTypes.ts</code>), not core <code>promptSystem.ts</code> and not ImmutablePrefix.</p>
 
         <h3>Character Data Model</h3>
         <p>Each character includes the following fields:</p>
@@ -993,8 +993,8 @@ After the change, at least run verification for the affected scope; if no narrow
           </tbody>
         </table>
 
-        <h3>Roleplay Format Conventions</h3>
-        <p>When a character is activated, the system prompt specifies the following format rules to ensure TTS can correctly distinguish dialogue from actions:</p>
+        <h3>Roleplay Format Conventions (roleplay mode only)</h3>
+        <p>In <strong>roleplay</strong> mode, the system prompt specifies the following format rules so TTS can correctly distinguish dialogue from actions. In Ask / Plan modes the character is always injected as a coding persona and this format does not apply:</p>
         <table>
           <thead><tr><th>Format</th><th>Meaning</th><th>TTS Behavior</th></tr></thead>
           <tbody>
@@ -1027,11 +1027,11 @@ After the change, at least run verification for the affected scope; if no narrow
         <p>Supported PNG chunk keywords: <code>chara</code>, <code>ccv3</code>, <code>character</code>, <code>character_card</code></p>
 
         <h3>Exporting Character Cards</h3>
-        <p>Click a character's <strong>Export</strong> button in the character list to export it as a PNG character card. The PNG embeds the complete CCv3 JSON and can be used in tools like SillyTavern.</p>
+        <p>Click a character's <strong>Export</strong> button in the character list to export it as a PNG character card. The PNG embeds the complete CCv3 JSON and can be used in tools like SillyTavern. Portable voice settings (speed, sample steps, sentences per chunk, playback mode, languages) are written to <code>extensions.codepapr.voice</code>; local reference-audio and fine-tuned-model file paths are not exported with the card.</p>
 
         <h3>Activating/Switching Characters</h3>
-        <p>Click <strong>Enable</strong> on the editor to apply the character to the <strong>current session only</strong>. Clicking a name in the list opens it for editing and does not activate it. Opening the panel selects the character already enabled for this session.</p>
-        <p>Character personas are placed in the Session Bootstrap (<strong>not in the system prompt's ImmutablePrefix</strong>), so switching characters does not break the LLM prefix cache. New sessions start with no character.</p>
+        <p>Click <strong>Enable</strong> on the editor to apply the character to the <strong>current session only</strong>; unsaved edits in the panel are saved automatically first. Clicking a name in the list opens it for editing and does not activate it. Opening the panel selects the character already enabled for this session. In an empty session, switching characters replaces the previous character's greeting with the new one.</p>
+        <p>Character personas are placed in the Session Bootstrap (<strong>not in the system prompt's ImmutablePrefix</strong>), so switching characters does not break the LLM prefix cache. In Ask / Plan modes the character is always injected as a coding persona; the roleplay format only applies in Agent mode. New sessions start with no character.</p>
 
         <div class="callout success">
           <strong>Tip:</strong> Character roleplay does not affect the Agent's code understanding and execution abilities. The Agent can still search projects, modify files, and run commands — only the output tone and style will match the character setting.
@@ -1041,9 +1041,9 @@ After the change, at least run verification for the affected scope; if no narrow
 
     <!-- Voice Synthesis (TTS) -->
     <section class="section" id="tts">
-      <div class="section-header"><h2>Voice Synthesis (TTS)</h2></div>
+      <div class="section-header"><h2>Voice Synthesis (TTS) <span class="tag">Experimental</span></h2></div>
       <div class="content">
-        <p>CodePapr integrates the <strong>GPT-SoVITS</strong> voice cloning engine, capable of synthesizing a character's text replies into speech locally. Only 3-10 seconds of reference audio are needed to clone a character's voice.</p>
+        <p><strong>Experimental feature, off by default</strong>: enable "Voice" under Settings → General → Experimental features to reveal voice controls; auto-read also requires "Characters" enabled with voice configured on the active character. CodePapr integrates the <strong>GPT-SoVITS</strong> voice cloning engine, capable of synthesizing a character's text replies into speech locally. Only 3-10 seconds of reference audio are needed to clone a character's voice.</p>
 
         <div class="diagram">
 TTS Data Flow:
@@ -1066,7 +1066,7 @@ TTS Data Flow:
         <h3>Configuring Voice for a Character</h3>
         <ol>
           <li>Click the <strong>Character Avatar Button</strong> in the toolbar to open the character editing panel</li>
-          <li>Switch to the <strong>Voice Tab</strong> and enable <strong>"Enable Voice Output"</strong></li>
+          <li>Switch to the <strong>Voice Tab</strong></li>
           <li><strong>Upload Reference Audio</strong>:
             <ul>
               <li>Duration 3-10 seconds (5 seconds recommended); too short gives poor cloning, too long gets truncated</li>
@@ -1081,15 +1081,16 @@ TTS Data Flow:
               <li><strong>Speed</strong>: 50% - 200%</li>
               <li><strong>Synthesis Speed</strong>: only 4 / 8 / 16 tiers. 4=fastest, 8=balanced, 16=highest quality</li>
               <li><strong>Merge Sentences</strong>: 1-5, merge this many sentences in one synthesis batch to reduce round trips</li>
+              <li><strong>Playback Mode</strong>: defaults to <code>ws-batch</code>; <code>streamed-pipeline</code> / <code>streamed-pcm</code> / <code>whole</code> also selectable</li>
             </ul>
           </li>
           <li>Click the <strong>"Preview"</strong> button to preview the effect</li>
-          <li>Click <strong>Save</strong> when satisfied</li>
+          <li>Flip the <strong>"Enable Voice Output"</strong> switch (it refuses to turn on while the reference audio or reference text is missing), then click <strong>Save</strong></li>
         </ol>
 
-        <h3>Current Playback Mode</h3>
-        <p>The current UI uses <strong>WebSocket batch streaming (<code>ws-batch</code>)</strong> as the default and only effective mode: all sentences are sent in bulk over a single persistent WebSocket connection and returned one by one, with first-word latency around 1-2 seconds and smooth inter-sentence transitions.</p>
-        <p>The code layer retains three modes: <code>whole</code>, <code>streamed-pipeline</code>, and <code>streamed-pcm</code>, but the character editing panel has not yet exposed a switch for them; users need not worry about this.</p>
+        <h3>Playback Modes</h3>
+        <p>The Voice Tab exposes four playback modes. The default and recommended one is <strong>WebSocket batch streaming (<code>ws-batch</code>)</strong>: sentences are first merged into chunks per the "Merge Sentences" setting (3 by default), then each chunk is sent over a single persistent WebSocket connection and returned one by one, with first-word latency around 1-2 seconds and smooth inter-sentence transitions.</p>
+        <p>The other three: <code>streamed-pipeline</code> / <code>streamed-pcm</code> (per-sentence HTTP requests with PCM pushed straight to the player; best compatibility) and <code>whole</code> (waits for the complete reply, then synthesizes and plays it in one go; slowest start but the most coherent).</p>
 
         <h3>Voice Fine-tuning</h3>
         <p>For higher audio quality requirements, use the fine-tuning feature in the Voice Tab:</p>

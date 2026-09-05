@@ -323,6 +323,8 @@ fn main() {
             tts::tts_check_installed,
             tts::tts_save_voice_file,
             tts::tts_delete_character_voices,
+            tts::tts_voice_storage_summary,
+            tts::tts_prune_voice_storage,
             tts::tts_read_voice_file,
             tts::tts_finetune_start,
             tts::tts_finetune_collect_and_start,

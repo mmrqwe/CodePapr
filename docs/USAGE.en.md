@@ -490,6 +490,8 @@ The desktop uses non-blocking Toast notifications instead of traditional alerts:
 
 ## Character Roleplay
 
+> **Experimental feature**: off by default. Enable "Characters" under Settings → General → Experimental features to reveal the toolbar entry.
+
 Create, import, and activate AI personas so the Agent speaks to you with a specific character's identity.
 
 **Creating a character:** Click the character button in the toolbar → "New Character", fill in:
@@ -500,9 +502,9 @@ Create, import, and activate AI personas so the Agent speaks to you with a speci
 
 **Importing character cards:** Supports PNG character cards (SillyTavern / CCv3 spec) and JSON file import. JSON data in PNGs is embedded as tEXt/iTXt chunks; the avatar is imported as well.
 
-**Exporting character cards:** Export characters as PNG cards for cross-tool use.
+**Exporting character cards:** Export characters as PNG cards for cross-tool use. Portable voice settings (speed, sample steps, sentences per chunk, playback mode, languages) are written to `extensions.codepapr.voice`; local reference audio and fine-tuned model files are not exported — re-upload a reference audio on the target machine before enabling voice.
 
-**Activating a character:** Click Enable on the character editor. Enable applies to the **current session only**; clicking a name in the list opens it for editing and does not activate it. Opening the panel selects the character already enabled for this session. The profile is injected into the Session Bootstrap (not ImmutablePrefix), so switching characters does not break the DeepSeek system-prefix cache. Default is a coding persona: the character colors tone while still writing code and using tools. Switch to Roleplay in the character panel for stage-play format. New sessions start with no character.
+**Activating a character:** Click Enable on the character editor — unsaved edits are saved automatically first. Enable applies to the **current session only**; clicking a name in the list opens it for editing and does not activate it. In an empty session, switching characters replaces the greeting with the new character's first message. Opening the panel selects the character already enabled for this session. The profile is injected into the Session Bootstrap (not ImmutablePrefix), so switching characters does not break the DeepSeek system-prefix cache. Default is a coding persona: the character colors tone while still writing code and using tools. Switch to Roleplay in the character panel for stage-play format. In Ask / Plan modes the character is always injected as a coding persona; the roleplay format only applies in Agent mode. New sessions start with no character.
 
 **Roleplay format convention (roleplay mode only):**
 - `*Asterisk-wrapped text*` → Actions/narration/scene description (not spoken by TTS)
@@ -512,19 +514,22 @@ Create, import, and activate AI personas so the Agent speaks to you with a speci
 
 ## Text-to-Speech (TTS)
 
+> **Experimental feature**: off by default. Enable "Voice" under Settings → General → Experimental features to reveal voice controls. Auto-read also requires an enabled character (turn on "Characters" too).
+
 The voice system is powered by GPT-SoVITS for local voice cloning, enabling characters to read dialogue aloud.
 
 **Installing GPT-SoVITS:** Click the TTS speaker button in ChatPanel for the first time — if not installed, the installer wizard appears automatically. Or trigger installation from the Voice Tab in the character editor. The installer runs: Python check → clone GPT-SoVITS repo → pip install → download pretrained models (~2GB, using hf-mirror source) → verify. Requires Python 3.10+ installed.
 
 **Configuring voice for a character:**
-1. Open the character editor (toolbar character avatar button) → Voice Tab → enable "Voice Output"
+1. Open the character editor (toolbar character avatar button) → Voice Tab
 2. Upload reference audio (3-10s, 5s recommended, clean voice, WAV/MP3/M4A/AAC, 16kHz+)
 3. Enter reference text (the exact words spoken in the audio)
 4. Select reference audio language and speech language
 5. Adjust speed (50%-200%), synthesis speed (4=fastest / 8=balanced / 16=highest quality), sentence chunking (1-5)
 6. Click "Test" to preview
+7. Finally flip the "Voice Output" switch (it refuses to turn on without a reference audio and transcript)
 
-**Playback mode:** The current UI uses WebSocket batch streaming (`ws-batch`) as the default and only active mode, with ~1-2s latency to first word. Other modes are retained in the codebase but not yet exposed in the settings UI.
+**Playback modes:** The character panel's Voice Tab exposes four modes; `ws-batch` is the default and recommended one: synthesis runs over a persistent WebSocket where each request carries one chunk (3 merged sentences by default, adjustable 1-5 via "sentence chunking"), ~1-2s to first word. The others: `streamed-pipeline` / `streamed-pcm` (per-sentence HTTP with PCM direct playback) and `whole` (wait for the full reply, slowest start but most coherent).
 
 **Playback controls:**
 - Characters with voice enabled auto-read AI replies

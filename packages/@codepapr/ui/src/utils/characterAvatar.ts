@@ -1,6 +1,12 @@
 import type { CharacterProfile } from './characterTypes';
 
+/**
+ * Persisted state must keep the data URL as a fallback whenever the avatar
+ * never made it to disk; stripping it unconditionally would lose the image
+ * on the next reload. When an avatarPath exists the data URL is redundant.
+ */
 export function stripAvatarDataUrl(character: CharacterProfile): CharacterProfile {
+  if (!character.avatarPath) return character;
   return { ...character, avatarDataUrl: null };
 }
 

@@ -1,6 +1,8 @@
 import {
   type CharacterProfile,
   type CharacterInteractionMode,
+  type TtsPlaybackMode,
+  type VoiceConfig,
   createCharacterId,
   resolveCharacterInteractionMode,
 } from './characterTypes';
@@ -223,6 +225,70 @@ function readCodepaprInteractionMode(
   return 'persona';
 }
 
+const PLAYBACK_MODES: TtsPlaybackMode[] = ['whole', 'streamed-pipeline', 'streamed-pcm', 'ws-batch'];
+const REFERENCE_LANGUAGES = new Set(['all_zh', 'all_yue', 'en', 'all_ja', 'all_ko', 'zh', 'ja', 'auto']);
+
+function readCodepaprVoice(
+  raw: Record<string, unknown>,
+  data: Record<string, unknown>
+): VoiceConfig | undefined {
+  for (const ext of [data.extensions, raw.extensions]) {
+    if (!ext || typeof ext !== 'object' || Array.isArray(ext)) continue;
+    const cp = (ext as Record<string, unknown>).codepapr;
+    if (!cp || typeof cp !== 'object' || Array.isArray(cp)) continue;
+    const voice = (cp as Record<string, unknown>).voice;
+    if (!voice || typeof voice !== 'object' || Array.isArray(voice)) continue;
+    const v = voice as Record<string, unknown>;
+    const speed = typeof v.speed === 'number' ? Math.min(2, Math.max(0.5, v.speed)) : 1;
+    const sampleSteps =
+      typeof v.sampleSteps === 'number' ? Math.min(32, Math.max(4, Math.round(v.sampleSteps))) : 8;
+    const sentencesPerChunk =
+      typeof v.sentencesPerChunk === 'number'
+        ? Math.min(5, Math.max(1, Math.round(v.sentencesPerChunk)))
+        : 3;
+    const config: VoiceConfig = {
+      // Voice must be re-armed locally: reference audio / model paths never
+      // travel with the card, so an imported card cannot synthesize as-is.
+      enabled: false,
+      engine: 'gpt-sovits',
+      speed,
+      sampleSteps,
+      sentencesPerChunk,
+    };
+    if (typeof v.playbackMode === 'string' && PLAYBACK_MODES.includes(v.playbackMode as TtsPlaybackMode)) {
+      config.playbackMode = v.playbackMode as TtsPlaybackMode;
+    }
+    if (typeof v.textLanguage === 'string' && REFERENCE_LANGUAGES.has(v.textLanguage)) {
+      config.textLanguage = v.textLanguage;
+    }
+    if (
+      typeof v.referenceTextLanguage === 'string' &&
+      REFERENCE_LANGUAGES.has(v.referenceTextLanguage)
+    ) {
+      config.referenceTextLanguage = v.referenceTextLanguage;
+    }
+    if (typeof v.trainingLanguage === 'string' && REFERENCE_LANGUAGES.has(v.trainingLanguage)) {
+      config.trainingLanguage = v.trainingLanguage;
+    }
+    return config;
+  }
+  return undefined;
+}
+
+/** Portable subset of the voice config — never includes local file paths. */
+export function buildPortableVoiceExtension(voice: VoiceConfig | undefined): Record<string, unknown> | undefined {
+  if (!voice) return undefined;
+  return {
+    speed: voice.speed,
+    sampleSteps: voice.sampleSteps ?? 8,
+    sentencesPerChunk: voice.sentencesPerChunk ?? 3,
+    playbackMode: voice.playbackMode ?? 'ws-batch',
+    textLanguage: voice.textLanguage,
+    referenceTextLanguage: voice.referenceTextLanguage,
+    trainingLanguage: voice.trainingLanguage,
+  };
+}
+
 export function normalizeCharacterCard(
   raw: Record<string, unknown>,
   avatarDataUrl: string | null
@@ -245,6 +311,7 @@ export function normalizeCharacterCard(
     name,
     avatarDataUrl,
     interactionMode: readCodepaprInteractionMode(raw, data),
+    voice: readCodepaprVoice(raw, data),
     description: readString(data.description),
     personality: readString(data.personality),
     scenario: readString(data.scenario),
@@ -266,6 +333,7 @@ export function normalizeCharacterCard(
 }
 
 export function buildCharacterCardSpec(character: CharacterProfile): Record<string, unknown> {
+  const portableVoice = buildPortableVoiceExtension(character.voice);
   return {
     spec: 'chara_card_v3',
     spec_version: '3.0',
@@ -285,6 +353,7 @@ export function buildCharacterCardSpec(character: CharacterProfile): Record<stri
       extensions: {
         codepapr: {
           interactionMode: resolveCharacterInteractionMode(character),
+          ...(portableVoice ? { voice: portableVoice } : {}),
         },
       },
     },

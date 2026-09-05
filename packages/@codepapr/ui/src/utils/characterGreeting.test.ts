@@ -7,7 +7,6 @@ vi.mock('@tauri-apps/api/core', () => ({
 import {
   maybeInsertActiveCharacterGreeting,
   sessionCanHardDelete,
-  sessionHasConversation,
 } from './characterGreeting';
 import { useAgentStore } from '../store/agentStore';
 import { useCharactersStore } from '../store/charactersStore';
@@ -47,21 +46,6 @@ function makeSession(id = 'sess-1'): SessionMeta {
     updatedAt: 1,
   };
 }
-
-describe('sessionHasConversation', () => {
-  it('ignores synthetic assistant lines', () => {
-    const messages: UIMessage[] = [
-      { id: 'info', role: 'assistant', content: 'hint', timestamp: 1, synthetic: true },
-    ];
-    expect(sessionHasConversation(messages)).toBe(false);
-  });
-
-  it('treats a real user or assistant line as conversation', () => {
-    expect(
-      sessionHasConversation([{ id: 'u', role: 'user', content: 'hi', timestamp: 1 }])
-    ).toBe(true);
-  });
-});
 
 describe('sessionCanHardDelete', () => {
   it('allows delete when messages are loaded and empty', () => {
@@ -124,7 +108,99 @@ describe('maybeInsertActiveCharacterGreeting', () => {
     expect(messages[0]?.role).toBe('assistant');
     expect(messages[0]?.synthetic).toBeUndefined();
     expect(messages[0]?.content).toBe('Hello User, I am Ada.');
-    expect(messages[0]?.id).toBe('character-greeting:sess-1:char-greet');
+    expect(messages[0]?.id).toMatch(/^character-greeting:sess-1:char-greet:[0-9a-z]+$/);
+
+    // Second run with the same character/greeting must be a no-op.
+    expect(maybeInsertActiveCharacterGreeting()).toBe(false);
+    expect(useAgentStore.getState().sessionMessages['sess-1']).toHaveLength(1);
+  });
+
+  it('replaces a stale greeting from a different character in an empty session', () => {
+    const first = makeCharacter({ id: 'char-a', name: 'Ada', firstMessage: 'Ada here.' });
+    const second = makeCharacter({ id: 'char-b', name: 'Ben', firstMessage: 'Ben here.' });
+    useCharactersStore.setState({ characters: [first, second], activeCharacterId: first.id });
+    useAgentStore.setState({
+      activeSessionId: 'sess-1',
+      sessions: [makeSession()],
+      messages: [],
+      sessionMessages: { 'sess-1': [] },
+      sessionMessagesLoading: false,
+      _messageLoadFailedSessions: {},
+      workspacePath: '',
+      settings: {
+        ...useAgentStore.getState().settings,
+        experimentalCharacters: true,
+      },
+    });
+
+    expect(maybeInsertActiveCharacterGreeting()).toBe(true);
+    useCharactersStore.setState({ activeCharacterId: second.id });
+    expect(maybeInsertActiveCharacterGreeting()).toBe(true);
+
+    const messages = useAgentStore.getState().sessionMessages['sess-1'] ?? [];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content).toBe('Ben here.');
+    expect(messages[0]?.id).toContain('char-b');
+  });
+
+  it('refreshes the inserted greeting when the selected greeting index changes', () => {
+    const character = makeCharacter({
+      alternateGreetings: ['Alt greeting.'],
+      selectedGreetingIndex: 0,
+    });
+    useCharactersStore.setState({ characters: [character], activeCharacterId: character.id });
+    useAgentStore.setState({
+      activeSessionId: 'sess-1',
+      sessions: [makeSession()],
+      messages: [],
+      sessionMessages: { 'sess-1': [] },
+      sessionMessagesLoading: false,
+      _messageLoadFailedSessions: {},
+      workspacePath: '',
+      settings: {
+        ...useAgentStore.getState().settings,
+        experimentalCharacters: true,
+      },
+    });
+
+    expect(maybeInsertActiveCharacterGreeting()).toBe(true);
+    useCharactersStore.setState({
+      characters: [{ ...character, selectedGreetingIndex: 1 }],
+    });
+    expect(maybeInsertActiveCharacterGreeting()).toBe(true);
+
+    const messages = useAgentStore.getState().sessionMessages['sess-1'] ?? [];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content).toBe('Alt greeting.');
+  });
+
+  it('never touches a session that already has real conversation', () => {
+    const first = makeCharacter({ id: 'char-a', firstMessage: 'Ada here.' });
+    const second = makeCharacter({ id: 'char-b', firstMessage: 'Ben here.' });
+    useCharactersStore.setState({ characters: [first, second], activeCharacterId: first.id });
+    const existing: UIMessage[] = [
+      { id: 'character-greeting:sess-1:char-a', role: 'assistant', content: 'Ada here.', timestamp: 1 },
+      { id: 'u1', role: 'user', content: 'hi', timestamp: 2 },
+    ];
+    useAgentStore.setState({
+      activeSessionId: 'sess-1',
+      sessions: [makeSession()],
+      messages: existing,
+      sessionMessages: { 'sess-1': existing },
+      sessionMessagesLoading: false,
+      _messageLoadFailedSessions: {},
+      workspacePath: '',
+      settings: {
+        ...useAgentStore.getState().settings,
+        experimentalCharacters: true,
+      },
+    });
+    useCharactersStore.setState({ activeCharacterId: second.id });
+
+    expect(maybeInsertActiveCharacterGreeting()).toBe(false);
+    const messages = useAgentStore.getState().sessionMessages['sess-1'] ?? [];
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.id).toContain('char-a');
   });
 
   it('does not insert when the session already has a user message', () => {

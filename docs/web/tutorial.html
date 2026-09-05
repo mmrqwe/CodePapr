@@ -972,9 +972,9 @@ https://api.deepseek.com/v1</code></pre>
 
     <!-- 角色扮演 -->
     <section class="section" id="characters">
-      <div class="section-header"><h2>角色扮演</h2></div>
+      <div class="section-header"><h2>角色扮演 <span class="tag">实验性</span></h2></div>
       <div class="content">
-        <p>CodePapr 支持创建、导入和管理 AI 角色，让 Agent 以特定人设与你对话。启用角色后，人设进入 Session Bootstrap（由 <code>promptBuilders.ts</code> / <code>characterTypes.ts</code> 组装），不是 core 的 <code>promptSystem.ts</code>，也不进入 ImmutablePrefix。</p>
+        <p><strong>实验性功能，默认关闭</strong>：需在 设置 → 通用 → 实验性功能 中勾选「角色」，工具栏才会出现角色入口。CodePapr 支持创建、导入和管理 AI 角色，让 Agent 以特定人设与你对话。启用角色后，人设进入 Session Bootstrap（由 <code>promptBuilders.ts</code> / <code>characterTypes.ts</code> 组装），不是 core 的 <code>promptSystem.ts</code>，也不进入 ImmutablePrefix。</p>
 
         <h3>角色数据模型</h3>
         <p>每个角色包含以下字段：</p>
@@ -993,8 +993,8 @@ https://api.deepseek.com/v1</code></pre>
           </tbody>
         </table>
 
-        <h3>角色扮演格式约定</h3>
-        <p>激活角色后，系统提示词会明确以下格式规则，确保 TTS 能正确区分对话和动作：</p>
+        <h3>角色扮演格式约定（仅「角色扮演」模式）</h3>
+        <p>「角色扮演」模式下，系统提示词会明确以下格式规则，确保 TTS 能正确区分对话和动作；Ask / Plan 模式中角色一律按「编码人设」注入，不适用该格式：</p>
         <table>
           <thead><tr><th>格式</th><th>含义</th><th>TTS 行为</th></tr></thead>
           <tbody>
@@ -1027,11 +1027,11 @@ https://api.deepseek.com/v1</code></pre>
         <p>支持的 PNG chunk 关键字：<code>chara</code>、<code>ccv3</code>、<code>character</code>、<code>character_card</code></p>
 
         <h3>导出角色卡</h3>
-        <p>在角色列表中点击角色的<strong>导出</strong>按钮，角色将被导出为 PNG 角色卡。PNG 中嵌入完整的 CCv3 JSON，可在 SillyTavern 等工具中使用。</p>
+        <p>在角色列表中点击角色的<strong>导出</strong>按钮，角色将被导出为 PNG 角色卡。PNG 中嵌入完整的 CCv3 JSON，可在 SillyTavern 等工具中使用。语音配置中可跨机移植的参数（语速、采样步数、合并句数、播放模式、语言设置）会写入 <code>extensions.codepapr.voice</code>；本机参考音频与微调模型文件路径不随卡片导出。</p>
 
         <h3>启用/切换角色</h3>
-        <p>在角色编辑页点击<strong>启用</strong>，只对<strong>当前会话</strong>生效。列表里点击角色名是进入编辑，不会激活。打开面板时会选中当前会话已启用的角色。</p>
-        <p>角色人设放在 Session Bootstrap 中（<strong>不在系统提示词的 ImmutablePrefix 中</strong>），因此切换角色不会破坏 LLM 前缀缓存。新会话默认不带角色。</p>
+        <p>在角色编辑页点击<strong>启用</strong>，只对<strong>当前会话</strong>生效；若面板中有未保存的修改，会先自动保存再启用。列表里点击角色名是进入编辑，不会激活。打开面板时会选中当前会话已启用的角色。空会话中切换角色时，旧角色的开场白会被替换为新角色的开场白。</p>
+        <p>角色人设放在 Session Bootstrap 中（<strong>不在系统提示词的 ImmutablePrefix 中</strong>），因此切换角色不会破坏 LLM 前缀缓存。Ask / Plan 模式下角色固定按「编码人设」注入（角色扮演格式仅在 Agent 模式生效）。新会话默认不带角色。</p>
 
         <div class="callout success">
           <strong>提示：</strong>角色扮演不影响 Agent 的代码理解和执行能力。Agent 仍然能搜索项目、修改文件、运行命令——只是输出的语气和风格会匹配角色设定。
@@ -1041,9 +1041,9 @@ https://api.deepseek.com/v1</code></pre>
 
     <!-- 语音合成（TTS） -->
     <section class="section" id="tts">
-      <div class="section-header"><h2>语音合成（TTS）</h2></div>
+      <div class="section-header"><h2>语音合成（TTS） <span class="tag">实验性</span></h2></div>
       <div class="content">
-        <p>CodePapr 集成了 <strong>GPT-SoVITS</strong> 语音克隆引擎，可在本地将角色的文字回复合成为语音。只需 3-10 秒的参考音频即可克隆一个角色的声音。</p>
+        <p><strong>实验性功能，默认关闭</strong>：需在 设置 → 通用 → 实验性功能 中勾选「语音」才会显示语音控件；自动朗读还需同时开启「角色」并为已启用角色配置语音。CodePapr 集成了 <strong>GPT-SoVITS</strong> 语音克隆引擎，可在本地将角色的文字回复合成为语音。只需 3-10 秒的参考音频即可克隆一个角色的声音。</p>
 
         <div class="diagram">
 TTS 数据流：
@@ -1066,7 +1066,7 @@ TTS 数据流：
         <h3>为角色配置语音</h3>
         <ol>
           <li>点击工具栏的<strong>角色头像按钮</strong>，打开角色编辑面板</li>
-          <li>切换到 <strong>Voice Tab</strong>，开启 <strong>“启用语音输出”</strong></li>
+          <li>切换到 <strong>Voice Tab</strong></li>
           <li><strong>上传参考音频</strong>：
             <ul>
               <li>时长 3-10 秒（推荐 5 秒），太短克隆不准、太长会被截断</li>
@@ -1081,15 +1081,16 @@ TTS 数据流：
               <li><strong>语速</strong>：50% - 200%</li>
               <li><strong>合成速度</strong>：仅 4 / 8 / 16 三档。4=极速、8=均衡、16=最高质量</li>
               <li><strong>合并句数</strong>：1-5，一次合成合并几句一起推理，减少往返次数</li>
+              <li><strong>播放模式</strong>：默认 <code>ws-batch</code>，可选 <code>streamed-pipeline</code> / <code>streamed-pcm</code> / <code>whole</code></li>
             </ul>
           </li>
           <li>点击 <strong>“试听”</strong> 按钮预览效果</li>
-          <li>满意后点击 <strong>保存</strong></li>
+          <li>打开 <strong>“启用语音输出”</strong> 开关（未上传参考音频或未填参考文本时开关会拒绝开启），满意后点击 <strong>保存</strong></li>
         </ol>
 
-        <h3>当前播放模式</h3>
-        <p>当前 UI 采用 <strong>WebSocket 批量流式（<code>ws-batch</code>）</strong>作为默认且唯一实际生效的模式：所有句子通过一条持久 WebSocket 连接批量发送、逐个返回，首字延迟约 1-2 秒，句间衔接流畅。</p>
-        <p>代码层保留了 <code>whole</code>、<code>streamed-pipeline</code>、<code>streamed-pcm</code> 三种模式，但角色编辑面板暂未开放切换，用户无需关注。</p>
+        <h3>播放模式</h3>
+        <p>角色面板 Voice Tab 提供四种播放模式，默认且推荐 <strong>WebSocket 批量流式（<code>ws-batch</code>）</strong>：句子先按「合并句数」（默认 3 句）合成 chunk，再经由一条持久 WebSocket 连接逐请求发送、逐条返回，首字延迟约 1-2 秒，句间衔接流畅。</p>
+        <p>其余三种：<code>streamed-pipeline</code> / <code>streamed-pcm</code>（逐句 HTTP 请求，PCM 直推播放器，兼容性最好）、<code>whole</code>（等整条回复生成完毕后一次性合成播放，启动最慢但整体最连贯）。</p>
 
         <h3>语音微调</h3>
         <p>对音质有更高要求时，可在 Voice Tab 中使用微调功能：</p>

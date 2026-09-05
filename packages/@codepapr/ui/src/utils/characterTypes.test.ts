@@ -120,6 +120,19 @@ describe('buildCharacterSystemPrompt', () => {
     expect(prompt).toContain('still produce real code in fenced blocks');
   });
 
+  it('forces persona format for roleplay characters outside Agent mode', () => {
+    for (const mode of ['ask', 'plan', 'app'] as const) {
+      const prompt = buildCharacterSystemPrompt(
+        makeCharacter({ interactionMode: 'roleplay' }),
+        mode
+      );
+      expect(prompt).toContain('Work in the voice of "TestChar"');
+      expect(prompt).toContain('coding agent');
+      expect(prompt).not.toContain('You are roleplaying as the character');
+      expect(prompt).not.toContain('Spoken dialogue must be plain text');
+    }
+  });
+
   it('expands macros in description fields', () => {
     const prompt = buildCharacterSystemPrompt(
       makeCharacter({ description: 'I am {{char}}. I talk to {{user}}.' })

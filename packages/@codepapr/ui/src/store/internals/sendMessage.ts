@@ -1417,7 +1417,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             runtimeSystemPrompt,
             JSON.stringify(skillDefinitions),
             normalizedSettings.systemPrompt ?? '',
-            normalizedSettings.experimentalCharacters ? (getActiveCharacterPrompt() ?? '') : '',
+            normalizedSettings.experimentalCharacters ? (getActiveCharacterPrompt(mode) ?? '') : '',
             publishCatalogSignature(publishTargets),
           ].join('\u0000');
           const runtimeSessionBootstrapPrompt = resolveSessionBootstrap(
@@ -1430,6 +1430,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 skillDefinitions,
                 memorySection,
                 pluginsSection,
+                mode,
               )
           );
           // Inject the frozen, memory-containing bootstrap so the main agent's

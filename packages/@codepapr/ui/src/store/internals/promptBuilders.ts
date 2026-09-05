@@ -24,8 +24,13 @@ import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
 import { SESSION_BOOTSTRAP_MESSAGE_ID } from '../../utils/contextSurface';
 import { shouldExposeReadImage } from '../../utils/visionRouting';
 import type { Settings, UIMessage } from './types';
-import { getActiveCharacter, getActiveCharacterPrompt } from '../charactersStore';
-import { expandCharacterMacros, sanitizeCachePrompt } from '../../utils/characterTypes';
+import { getActiveCharacter } from '../charactersStore';
+import {
+  buildCharacterSystemPrompt,
+  effectiveCharacterInteractionMode,
+  expandCharacterMacros,
+  sanitizeCachePrompt,
+} from '../../utils/characterTypes';
 import { useAppRuntimeStore } from '../appRuntimeStore';
 import {
   buildPublishCatalogSection,
@@ -184,6 +189,7 @@ export function buildAgentSessionBootstrapPrompt(
   skillDefinitions: readonly SkillDefinition[] = [],
   memorySection?: string,
   pluginsSection?: string,
+  workMode: WorkMode = 'agent',
 ): string {
   const lang = settings.lang ?? 'zh-CN';
   const customPromptSection = (settings.systemPrompt ?? '').trim();
@@ -202,12 +208,20 @@ export function buildAgentSessionBootstrapPrompt(
     memorySection,
     customPromptSection: customPromptSection || undefined,
   });
-  const characterPrompt = settings.experimentalCharacters ? getActiveCharacterPrompt() : '';
+  const activeCharacter = settings.experimentalCharacters ? getActiveCharacter() : null;
+  if (!activeCharacter) return bootstrap;
+  const characterPrompt = buildCharacterSystemPrompt(activeCharacter, workMode);
   if (!characterPrompt) return bootstrap;
 
+  const isRoleplay = effectiveCharacterInteractionMode(activeCharacter, workMode) === 'roleplay';
   const heading = lang === 'en' ? '## Character' : lang === 'zh-TW' ? '## 角色人設' : '## 角色人设';
-  const hint =
-    lang === 'en'
+  const hint = isRoleplay
+    ? lang === 'en'
+      ? 'The following character is enabled in roleplay format for this Agent session: replies follow its Roleplay Format convention (stage directions in *asterisks*, spoken lines as plain text). Code fences, tools, and engineering duties are unchanged.'
+      : lang === 'zh-TW'
+        ? '以下角色在 Agent 模式以角色扮演格式啟用：回覆遵循其 Roleplay Format 約定（*星号*為舞台指示，純文本為台詞）。程式碼、工具與工程職責不變。'
+        : '以下角色在 Agent 模式以角色扮演格式启用：回复遵循其 Roleplay Format 约定（*星号*为舞台指示，纯文本为台词）。代码、工具与工程职责不变。'
+    : lang === 'en'
       ? 'The following is a personality overlay for replies to the user. It does not change tools or engineering duties.'
       : lang === 'zh-TW'
         ? '以下為回覆使用者時的人設疊加，不改變工具與工程職責。'

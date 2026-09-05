@@ -79,6 +79,8 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   const [scriptGenerating, setScriptGenerating] = useState(false);
   const [trainingDataExists, setTrainingDataExists] = useState(false);
   const [generateError, setGenerateError] = useState('');
+  const [voiceStorage, setVoiceStorage] = useState<{ totalBytes: number; orphanBytes: number } | null>(null);
+  const [voiceStorageBusy, setVoiceStorageBusy] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -170,9 +172,12 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
       });
   };
 
-  const handleSave = async () => {
-    if (!editing) return;
-    if (!editing.name.trim()) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (!editing) return false;
+    if (!editing.name.trim()) {
+      toast.error(t.characterNameRequired);
+      return false;
+    }
     const next: CharacterProfile = {
       ...editing,
       name: editing.name.trim(),
@@ -184,6 +189,7 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
     await upsertCharacter(next);
     setEditing(next);
     savedSnapshotRef.current = snapshotCharacter(next);
+    return true;
   };
 
   const handleDelete = async (id: string) => {
@@ -197,6 +203,12 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
 
   const handleEnable = async (id: string) => {
     const enabling = activeCharacterId !== id;
+    if (enabling && editing && editing.id === id && isDirty(editing)) {
+      // Persist the draft first: prompts and TTS read the stored card, so
+      // enabling without saving would silently use the previous version.
+      const saved = await handleSave();
+      if (!saved) return;
+    }
     await setActiveCharacter(enabling ? id : null);
     if (enabling) {
       maybeInsertActiveCharacterGreeting();
@@ -208,6 +220,52 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
     if (!confirmDiscard()) return;
     setEditing(character);
     savedSnapshotRef.current = snapshotCharacter(character);
+  };
+
+  const formatVoiceBytes = (bytes: number) =>
+    bytes >= 1024 * 1024
+      ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+  const refreshVoiceStorage = useCallback(async () => {
+    try {
+      const keep = useCharactersStore.getState().characters.map((c) => c.id);
+      const res = await invoke<{ totalBytes: number; orphanBytes: number }>(
+        'tts_voice_storage_summary',
+        { keepCharacterIds: keep },
+      );
+      setVoiceStorage(res);
+    } catch {
+      setVoiceStorage(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (voiceFeatureEnabled && voiceTab === 'voice') {
+      void refreshVoiceStorage();
+    }
+  }, [voiceFeatureEnabled, voiceTab, refreshVoiceStorage]);
+
+  const handlePruneVoiceStorage = async () => {
+    if (typeof window !== 'undefined' && !window.confirm(t.voiceStorageCleanConfirm)) return;
+    setVoiceStorageBusy(true);
+    try {
+      const keep = characters.map((c) => c.id);
+      const res = await invoke<{ deletedFiles: number; freedBytes: number }>(
+        'tts_prune_voice_storage',
+        { keepCharacterIds: keep },
+      );
+      toast.success(
+        t.voiceStorageCleaned
+          .replace('{{count}}', String(res.deletedFiles))
+          .replace('{{size}}', formatVoiceBytes(res.freedBytes)),
+      );
+      await refreshVoiceStorage();
+    } catch (err) {
+      toast.error(`Voice storage cleanup failed: ${errorMessage(err)}`);
+    } finally {
+      setVoiceStorageBusy(false);
+    }
   };
 
   const handleRequestClose = () => {
@@ -937,7 +995,17 @@ Requirements:
                   </div>
                   <button
                     type="button"
-                    onClick={() => updateVoiceField({ enabled: !editing?.voice?.enabled })}
+                    onClick={() => {
+                      if (!editing?.voice?.enabled) {
+                        const hasRef = Boolean(editing?.voice?.referenceSamplePath);
+                        const hasTranscript = Boolean(editing?.voice?.referenceText?.trim());
+                        if (!hasRef || !hasTranscript) {
+                          toast.error(t.voiceEnableNeedReference);
+                          return;
+                        }
+                      }
+                      updateVoiceField({ enabled: !editing?.voice?.enabled });
+                    }}
                     className={`relative inline-flex h-6 w-10 items-center rounded-full transition-colors ${
                       editing?.voice?.enabled ? 'bg-accent' : 'bg-slate-700'
                     }`}
@@ -1471,6 +1539,31 @@ Requirements:
                           </select>
                         </div>
                       </FieldRow>
+                    )}
+
+                    {voiceStorage && (
+                      <div className="flex items-center justify-between rounded-2xl border border-line bg-base px-5 py-3">
+                        <div>
+                          <div className="text-sm font-medium text-fg">{t.voiceStorageTitle}</div>
+                          <div className="mt-0.5 text-xs text-fg-muted">
+                            {voiceStorage.orphanBytes > 0
+                              ? t.voiceStorageDesc
+                                .replace('{{total}}', formatVoiceBytes(voiceStorage.totalBytes))
+                                .replace('{{orphan}}', formatVoiceBytes(voiceStorage.orphanBytes))
+                              : t.voiceStorageNothing.replace('{{total}}', formatVoiceBytes(voiceStorage.totalBytes))}
+                          </div>
+                        </div>
+                        {voiceStorage.orphanBytes > 0 && (
+                          <button
+                            type="button"
+                            onClick={handlePruneVoiceStorage}
+                            disabled={voiceStorageBusy}
+                            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-danger hover:text-danger disabled:opacity-50"
+                          >
+                            {t.voiceStorageClean}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </>
                 )}

@@ -52,9 +52,10 @@ export interface VoiceConfig {
    *   HTTP response into the shared rodio sink. Bypasses full-WAV decode.
    * - `'streamed-pcm'`: same PCM direct path as streamed-pipeline; kept
    *   for backward compatibility.
-   * - `'ws-batch'` (fastest): batch-synthesise all sentences over a
-   *   persistent WebSocket connection, eliminating per-sentence HTTP
-   *   round-trip overhead. ~1-2s to first word.
+ * - `'ws-batch'` (default, fastest): synthesise over a persistent
+ *   WebSocket connection; sentences are merged per `sentencesPerChunk`
+ *   and each chunk goes out as one batch request, eliminating
+ *   per-sentence HTTP round-trip overhead. ~1-2s to first word.
    *
  * Optional for backwards compatibility — characters created before
  * this field existed default to `'ws-batch'` at runtime.
@@ -206,6 +207,15 @@ export function resolveCharacterInteractionMode(
   return character.interactionMode === 'roleplay' ? 'roleplay' : 'persona';
 }
 
+/** Roleplay format only makes sense in Agent mode; Ask/Plan/App always get the coding persona. */
+export function effectiveCharacterInteractionMode(
+  character: CharacterProfile,
+  workMode?: string
+): CharacterInteractionMode {
+  if (workMode !== undefined && workMode !== 'agent') return 'persona';
+  return resolveCharacterInteractionMode(character);
+}
+
 const PERSONA_CONTRACT = `# Character overlay
 You remain the coding agent for this workspace. Tools, file edits, markdown, code fences, diffs, lists, and engineering quality stay exactly as specified in the rest of the system prompt.
 
@@ -243,10 +253,13 @@ Well now, that's a question I haven't heard in a **very** long time.
 *He chuckles and gestures toward a dusty bookshelf.*
 (tapping his chin) Let me think...`;
 
-export function buildCharacterSystemPrompt(character: CharacterProfile): string {
+export function buildCharacterSystemPrompt(
+  character: CharacterProfile,
+  workMode?: string
+): string {
   const parts: string[] = [];
   const name = character.name.trim();
-  const mode = resolveCharacterInteractionMode(character);
+  const mode = effectiveCharacterInteractionMode(character, workMode);
 
   if (mode === 'persona') {
     if (name) {

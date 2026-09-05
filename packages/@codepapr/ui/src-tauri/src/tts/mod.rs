@@ -992,10 +992,10 @@ pub async fn tts_synthesize_and_play(
 
 /// Batch-synthesise multiple sentences via a single WebSocket connection.
 ///
-/// Sends all texts in one JSON message, receives WAV audio for each
-/// sentence as it completes (prefixed with a 4-byte big-endian index),
-/// and enqueues each to the audio player via `enqueue_wav` for seamless
-/// playback. Also caches each WAV to disk for instant replay.
+/// The frontend groups consecutive sentences into chunks (`sentencesPerChunk`)
+/// and each batch item is sent in one JSON message; WAV audio comes back per
+/// item (prefixed with a 4-byte big-endian index) and is enqueued to the
+/// audio player via `enqueue_wav` for seamless in-memory playback.
 ///
 /// Falls back to HTTP per-sentence synthesis when the WebSocket path is
 /// unavailable (e.g. api.py hasn't been patched yet).
@@ -1765,6 +1765,125 @@ pub(crate) fn delete_character_voices_in(
 #[tauri::command]
 pub fn tts_delete_character_voices(character_id: String) -> Result<(), String> {
     delete_character_voices_in(&voices_dir(), &character_id)
+}
+
+/// Files/dirs inside `voices/` that are "owned" by a character id:
+/// root-level `<id>_ref.<ext>` files plus the `<id>/` working directory.
+fn is_character_owned_entry(name: &str, character_ids: &[String]) -> bool {
+    for id in character_ids {
+        if name == *id || name.starts_with(&format!("{id}_ref.")) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Does the entry *look* character-owned (matches the sanitize_character_id
+/// shape)? Used to find orphans: entries left behind by deleted or renamed
+/// characters. Unknown-looking files are never touched.
+fn looks_character_owned(name: &str) -> bool {
+    let candidate = match name.strip_suffix(".wav") {
+        Some(stripped) if stripped.ends_with("_ref") => &stripped[..stripped.len() - 4],
+        _ => {
+            if let Some(pos) = name.find("_ref.") {
+                &name[..pos]
+            } else {
+                // Directory-style entry: the whole name must be a valid id.
+                name
+            }
+        }
+    };
+    !candidate.is_empty()
+        && candidate.len() <= 64
+        && candidate
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn dir_size(path: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if let Ok(meta) = entry.metadata() {
+                    total += meta.len();
+                }
+            }
+        }
+    }
+    total
+}
+
+/// Scan `~/.codepapr/voices` and report the bytes occupied by entries that do
+/// not belong to any of `keep_character_ids` (orphaned reference audio, stale
+/// fine-tune work dirs).
+#[tauri::command]
+pub fn tts_voice_storage_summary(keep_character_ids: Vec<String>) -> Result<serde_json::Value, String> {
+    let dir = voices_dir();
+    let root = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+    if !root.is_dir() {
+        return Ok(serde_json::json!({ "totalBytes": 0u64, "orphanBytes": 0u64 }));
+    }
+    let mut total = 0u64;
+    let mut orphan = 0u64;
+    let entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&root)
+        .map_err(|e| format!("Cannot read voices dir: {e}"))?
+        .flatten()
+        .collect();
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let size = if entry.path().is_dir() {
+            dir_size(&entry.path())
+        } else {
+            entry.metadata().map(|m| m.len()).unwrap_or(0)
+        };
+        total += size;
+        if !is_character_owned_entry(&name, &keep_character_ids) && looks_character_owned(&name) {
+            orphan += size;
+        }
+    }
+    Ok(serde_json::json!({ "totalBytes": total, "orphanBytes": orphan }))
+}
+
+/// Delete voices-dir entries that look character-owned but belong to none of
+/// `keep_character_ids`. Returns the number of files removed and bytes freed.
+#[tauri::command]
+pub fn tts_prune_voice_storage(keep_character_ids: Vec<String>) -> Result<serde_json::Value, String> {
+    let dir = voices_dir();
+    let root = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+    let mut deleted_files = 0u64;
+    let mut freed_bytes = 0u64;
+    if !root.is_dir() {
+        return Ok(serde_json::json!({ "deletedFiles": deleted_files, "freedBytes": freed_bytes }));
+    }
+    let entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&root)
+        .map_err(|e| format!("Cannot read voices dir: {e}"))?
+        .flatten()
+        .collect();
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if is_character_owned_entry(&name, &keep_character_ids) || !looks_character_owned(&name) {
+            continue;
+        }
+        let path = entry.path();
+        let size = if path.is_dir() { dir_size(&path) } else {
+            path.metadata().map(|m| m.len()).unwrap_or(0)
+        };
+        let removed = if path.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if removed.is_ok() {
+            deleted_files += 1;
+            freed_bytes += size;
+        }
+    }
+    Ok(serde_json::json!({ "deletedFiles": deleted_files, "freedBytes": freed_bytes }))
 }
 
 #[tauri::command]

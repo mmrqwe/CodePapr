@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { loadCharactersStateMock, saveCharactersStateMock, toastErrorMock } = vi.hoisted(() => ({
+const { loadCharactersStateMock, saveCharactersStateMock, toastErrorMock, invokeMock } = vi.hoisted(() => ({
   loadCharactersStateMock: vi.fn(),
   saveCharactersStateMock: vi.fn(),
   toastErrorMock: vi.fn(),
+  invokeMock: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: invokeMock,
 }));
 
 vi.mock('../utils/characterStorage', () => ({
@@ -117,6 +122,7 @@ describe('useCharactersStore persist guard', () => {
       activeCharacterId: null,
       characters: [],
     });
+    invokeMock.mockResolvedValue('/home/.codepapr/avatars/char_img.png');
     await useCharactersStore.getState().loadCharacters();
     await useCharactersStore.getState().upsertCharacter({
       id: 'char_img',
@@ -137,6 +143,40 @@ describe('useCharactersStore persist guard', () => {
       updatedAt: '',
     });
     expect(saveCharactersStateMock.mock.calls[0]?.[0].characters[0]?.avatarDataUrl).toBeNull();
+    expect(saveCharactersStateMock.mock.calls[0]?.[0].characters[0]?.avatarPath).toBe(
+      '/home/.codepapr/avatars/char_img.png'
+    );
+  });
+
+  it('keeps the data URL in the persisted blob when the avatar file could not be written', async () => {
+    loadCharactersStateMock.mockResolvedValueOnce({
+      version: 1,
+      activeCharacterId: null,
+      characters: [],
+    });
+    invokeMock.mockRejectedValue(new Error('disk full'));
+    await useCharactersStore.getState().loadCharacters();
+    await useCharactersStore.getState().upsertCharacter({
+      id: 'char_img_fail',
+      name: 'Ada',
+      avatarDataUrl: 'data:image/png;base64,aaaa',
+      description: '',
+      personality: '',
+      scenario: '',
+      firstMessage: '',
+      exampleMessages: '',
+      systemPrompt: '',
+      postHistoryInstructions: '',
+      tags: [],
+      creator: '',
+      characterVersion: '',
+      source: 'manual',
+      createdAt: '',
+      updatedAt: '',
+    });
+    const persisted = saveCharactersStateMock.mock.calls[0]?.[0].characters[0];
+    expect(persisted?.avatarDataUrl).toBe('data:image/png;base64,aaaa');
+    expect(persisted?.avatarPath).toBeUndefined();
   });
 });
 

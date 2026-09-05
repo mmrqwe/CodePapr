@@ -212,11 +212,44 @@ fn generate_fallback_card(json: &str) -> Result<Vec<u8>, String> {
     Ok(png)
 }
 
+fn validate_export_path(save_path: &str) -> Result<(), String> {
+    let path = Path::new(save_path);
+    let is_png = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("png"))
+        .unwrap_or(false);
+    if !is_png {
+        return Err("Character cards can only be exported as .png files".to_string());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Export path has no parent directory".to_string())?;
+    let home = match codepapr_core::shared::home_dir() {
+        Ok(h) => h,
+        // Cannot resolve the sandbox root: keep the legacy (unchecked) behaviour
+        // rather than blocking legitimate exports.
+        Err(_) => return Ok(()),
+    };
+    let parent_canonical = parent
+        .canonicalize()
+        .map_err(|_| "Export directory does not exist".to_string())?;
+    let home_canonical = home.canonicalize().unwrap_or_else(|_| home.clone());
+    if !parent_canonical.starts_with(&home_canonical) {
+        return Err(format!(
+            "Character card export is restricted to the user directory ({}) for security; choose Desktop, Documents or Downloads",
+            home_canonical.display()
+        ));
+    }
+    Ok(())
+}
+
 fn generate_and_write(
     json_spec: &str,
     avatar_data_url: Option<&str>,
     save_path: &str,
 ) -> Result<(), String> {
+    validate_export_path(save_path)?;
     let png_bytes = if let Some(data_url) = avatar_data_url {
         let raw_avatar = parse_data_url(data_url)?;
         if raw_avatar.len() >= 8 && raw_avatar[..8] == PNG_SIGNATURE {
@@ -502,5 +535,36 @@ mod tests {
         assert!(!path.exists());
         assert!(sanitize_avatar_character_id("../x").is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_validate_export_path_rejects_non_png() {
+        let err = validate_export_path("/tmp/card.txt").unwrap_err();
+        assert!(err.contains(".png"));
+    }
+
+    #[test]
+    fn test_validate_export_path_rejects_missing_directory() {
+        let err = validate_export_path("/definitely/not/a/real/dir/card.png").unwrap_err();
+        assert!(err.contains("does not exist"));
+    }
+
+    #[test]
+    fn test_validate_export_path_allows_home_and_blocks_outside() {
+        let home = match codepapr_core::shared::home_dir() {
+            Ok(h) => h,
+            // No home resolvable: validation deliberately passes everything through.
+            Err(_) => {
+                assert!(validate_export_path("/tmp/whatever-card.png").is_ok());
+                return;
+            }
+        };
+        if home == std::path::Path::new("/") {
+            return; // root home would make the outside check vacuous
+        }
+        let inside = home.join("codepapr-card-test.png");
+        assert!(validate_export_path(inside.to_str().unwrap()).is_ok());
+        let outside = std::env::temp_dir().join("codepapr-card-test.png");
+        assert!(validate_export_path(outside.to_str().unwrap()).is_err());
     }
 }

@@ -113,7 +113,9 @@ function buildBootstrapRefresher(
       settings,
       workspacePath,
       runtime.skillDefinitions ?? [],
-      memorySection
+      memorySection,
+      undefined,
+      runtime.mode ?? 'agent'
     );
     return bootstrap.trim() || null;
   };
@@ -396,7 +398,14 @@ export function buildAgentSessionParts(
   const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
   const sessionBootstrapPrompt =
     runtime.sessionBootstrapPrompt ??
-    buildAgentSessionBootstrapPrompt(settings, workspacePath, runtime.skillDefinitions ?? []);
+    buildAgentSessionBootstrapPrompt(
+      settings,
+      workspacePath,
+      runtime.skillDefinitions ?? [],
+      undefined,
+      undefined,
+      runtime.mode ?? 'agent'
+    );
   const composedSystemPrompt = (overrides.systemPrompt ?? settings.systemPrompt).trim();
   const currentModel = (overrides.model ?? settings.model).trim();
   registerWorkspaceTools(toolRegistry, workspacePath, runtime.editHistory, (paths) => {
@@ -534,7 +543,14 @@ export function createAgent(
   const systemPrompt = (overrides.systemPrompt ?? settings.systemPrompt).trim();
   const sessionBootstrapPrompt =
     runtime.sessionBootstrapPrompt ??
-    buildAgentSessionBootstrapPrompt(settings, workspacePath, runtime.skillDefinitions ?? []);
+    buildAgentSessionBootstrapPrompt(
+      settings,
+      workspacePath,
+      runtime.skillDefinitions ?? [],
+      undefined,
+      undefined,
+      runtime.mode ?? 'agent'
+    );
 
   try {
     if (shouldUseSidecarAgentRuntime() || shouldUseWorkerAgentRuntime()) {

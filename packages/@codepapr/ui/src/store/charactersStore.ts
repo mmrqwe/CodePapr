@@ -105,6 +105,9 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
     }
     if (!get().loaded) return;
     const next = await persistCharacterAvatar(character);
+    if (character.avatarDataUrl && !next.avatarPath) {
+      toast.warning('角色头像未能写入磁盘，已随角色数据暂存，下次启动会自动重试。');
+    }
     set((state) => {
       const idx = state.characters.findIndex((c) => c.id === next.id);
       const characters =
@@ -166,12 +169,12 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
   },
 }));
 
-export function getActiveCharacterPrompt(): string {
+export function getActiveCharacterPrompt(workMode?: string): string {
   const { characters, activeCharacterId } = useCharactersStore.getState();
   if (!activeCharacterId) return '';
   const character = characters.find((c) => c.id === activeCharacterId);
   if (!character) return '';
-  return buildCharacterSystemPrompt(character);
+  return buildCharacterSystemPrompt(character, workMode);
 }
 
 export function getActiveCharacter(): CharacterProfile | null {

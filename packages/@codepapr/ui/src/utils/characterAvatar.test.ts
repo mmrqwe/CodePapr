@@ -14,4 +14,12 @@ describe('stripAvatarDataUrl', () => {
       avatarDataUrl: null,
     });
   });
+
+  it('keeps the data URL when the avatar never made it to disk', () => {
+    const character = {
+      ...createEmptyCharacter(),
+      avatarDataUrl: 'data:image/png;base64,aaaa',
+    };
+    expect(stripAvatarDataUrl(character).avatarDataUrl).toBe('data:image/png;base64,aaaa');
+  });
 });

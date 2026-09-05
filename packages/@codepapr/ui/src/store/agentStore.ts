@@ -1141,7 +1141,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           normalizedSettings,
           workspacePath,
           skillDefinitions,
-          memorySection
+          memorySection,
+          undefined,
+          mode
         );
 
         // 与真实 agent 重建对齐：surface 节点水合 + 冻结 prune 参数，

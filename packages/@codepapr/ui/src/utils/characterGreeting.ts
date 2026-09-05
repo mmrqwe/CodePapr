@@ -4,14 +4,20 @@ import { saveCurrentProjectState } from '../store/internals/projectSnapshot';
 import type { UIMessage } from '../store/internals/types';
 import { expandCharacterMacros, resolveCharacterGreeting, sanitizeCachePrompt } from './characterTypes';
 
-export function characterGreetingMessageId(sessionId: string, characterId: string): string {
-  return `character-greeting:${sessionId}:${characterId}`;
+export function characterGreetingMessageId(sessionId: string, characterId: string, revision?: string): string {
+  const base = `character-greeting:${sessionId}:${characterId}`;
+  return revision ? `${base}:${revision}` : base;
 }
 
-export function sessionHasConversation(messages: UIMessage[]): boolean {
-  return messages.some(
-    (m) => (m.role === 'user' || m.role === 'assistant') && !m.synthetic
-  );
+/** Small stable FNV-1a hash so edits to the greeting text/index replace the
+ *  inserted message instead of being blocked as "already inserted". */
+export function greetingRevision(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 /** 用户还没发过消息：侧栏可直接删除（不必归档）。角色开场白不算对话。
@@ -25,10 +31,25 @@ export function expandCharacterGreeting(text: string, characterName: string): st
   return sanitizeCachePrompt(expandCharacterMacros(text, { char: characterName }));
 }
 
+function isGreetingMessage(message: UIMessage): boolean {
+  return message.id.startsWith('character-greeting:');
+}
+
+/** Real user/assistant turns, ignoring character greetings and synthetic lines. */
+function hasRealConversation(messages: UIMessage[]): boolean {
+  return messages.some(
+    (m) =>
+      (m.role === 'user' || m.role === 'assistant') && !m.synthetic && !isGreetingMessage(m)
+  );
+}
+
 /**
  * If the active session is empty and the enabled character has a first_mes,
  * insert it as a real assistant message (visible + in context, TTS-eligible).
- * Returns true when a greeting was inserted.
+ * When the session is still empty but carries a greeting from a *different*
+ * character (e.g. the user just switched characters), the stale greeting is
+ * replaced with the new character's one instead of being blocked by it.
+ * Returns true when a greeting was inserted or replaced.
  */
 export function maybeInsertActiveCharacterGreeting(): boolean {
   const state = useAgentStore.getState();
@@ -44,12 +65,15 @@ export function maybeInsertActiveCharacterGreeting(): boolean {
   if (!state.sessions.some((session) => session.id === sessionId)) return false;
 
   const messages = state.sessionMessages[sessionId] ?? state.messages;
-  const greetingId = characterGreetingMessageId(sessionId, character.id);
-  if (messages.some((m) => m.id.startsWith('character-greeting:'))) return false;
-  if (sessionHasConversation(messages)) return false;
+  if (hasRealConversation(messages)) return false;
 
   const text = expandCharacterGreeting(greetingRaw, character.name);
   if (!text) return false;
+
+  const greetingId = characterGreetingMessageId(sessionId, character.id, greetingRevision(text));
+  const currentGreetingInPlace = messages.some((m) => m.id === greetingId);
+  const staleGreetingPresent = messages.some((m) => isGreetingMessage(m) && m.id !== greetingId);
+  if (currentGreetingInPlace && !staleGreetingPresent) return false;
 
   const greetingMsg: UIMessage = {
     id: greetingId,
@@ -58,14 +82,20 @@ export function maybeInsertActiveCharacterGreeting(): boolean {
     timestamp: Date.now(),
   };
 
+  let changed = false;
   useAgentStore.setState((s) => {
     if (s.activeSessionId !== sessionId) return s;
     if (!s.sessions.some((session) => session.id === sessionId)) return s;
     const current = s.sessionMessages[sessionId] ?? s.messages;
-    if (current.some((m) => m.id === greetingId || m.id.startsWith('character-greeting:'))) {
-      return s;
-    }
-    const nextMessages = [...current, greetingMsg];
+    if (hasRealConversation(current)) return s;
+    const stillCurrentInPlace = current.some((m) => m.id === greetingId);
+    const stillStalePresent = current.some((m) => isGreetingMessage(m) && m.id !== greetingId);
+    if (stillCurrentInPlace && !stillStalePresent) return s;
+    changed = true;
+    const nextMessages = [
+      ...current.filter((m) => !isGreetingMessage(m)),
+      greetingMsg,
+    ];
     return {
       messages: nextMessages,
       sessionMessages: {
@@ -75,6 +105,7 @@ export function maybeInsertActiveCharacterGreeting(): boolean {
     };
   });
 
+  if (!changed) return false;
   saveCurrentProjectState(useAgentStore.getState());
   return true;
 }
