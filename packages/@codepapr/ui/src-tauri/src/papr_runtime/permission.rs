@@ -307,6 +307,7 @@ mod tests {
             level,
             local,
             network,
+            inbox: None,
         }
     }
 

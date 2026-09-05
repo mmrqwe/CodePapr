@@ -1464,6 +1464,37 @@ describe('app_publish (agent → app/plugin 推送)', () => {
     expect(result).toMatchObject({ channel: 'anything', seq: 1 });
   });
 
+  it('store 中残缺 manifest（旧 Rust 剥离 inbox）时校验仍回落到磁盘原文', async () => {
+    // 回归：global 插件冷启动挂载的 manifestJson 曾被 Rust scan 剥掉 inbox，
+    // resolveAppManifest store 优先导致频道校验被静默绕过。现在磁盘原文优先。
+    const fullManifest = kanbanManifest({ inbox: { board: { description: '推送看板' } } });
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file') throw new Error(`not found: ${String(args?.relativePath ?? '')}`);
+      if (command === 'scan_workspace_apps') {
+        return [{ app_id: 'kanban', manifest_json: JSON.stringify(fullManifest), scope: 'global' }];
+      }
+      if (command === 'papr_inbox_append') return { seq: 1, ts: 1000 };
+      throw new Error(`Unexpected invoke: ${command}`);
+    });
+    useAppRuntimeStore.setState({ apps: [], pinnedPluginIds: [], pluginChrome: {} });
+    useAppRuntimeStore.getState().mountApp({
+      appId: 'kanban',
+      title: 'Kanban',
+      html: '',
+      filePath: '~/.codepapr/apps/kanban/index.html',
+      manifestJson: JSON.stringify(kanbanManifest()),
+      scope: 'global',
+    });
+
+    const registry = build();
+    await expect(
+      registry.execute('app_publish', { appId: 'kanban', channel: 'wrong', payload: { op: 'add' } }),
+    ).rejects.toThrow(/未声明频道 'wrong'[\s\S]*board：推送看板/);
+    await expect(
+      registry.execute('app_publish', { appId: 'kanban', channel: 'board', payload: { op: 'add' } }),
+    ).resolves.toMatchObject({ channel: 'board', seq: 1 });
+  });
+
   it('应用已挂载时实时推送 papr://event 信封', async () => {
     seed(kanbanManifest({ inbox: { cards: {} } }));
     const received: AppChannelEnvelope[] = [];

@@ -935,6 +935,7 @@ mod tests {
             // 两轴模型：papr.db/papr.fs 永远可用；local=write 覆盖 agent 写项目场景。
             local: Some(PaprLocalAccess::Write),
             network: None,
+            inbox: None,
         };
         manifest::store_manifest(app_id, m);
     }
@@ -1117,6 +1118,7 @@ mod tests {
             level: None,
             local: None,
             network: None,
+            inbox: None,
         };
 
         // 两轴模型（#48）：local 轴未声明 → 默认 none，papr.fs 写被拒绝

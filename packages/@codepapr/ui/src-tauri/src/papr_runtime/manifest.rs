@@ -73,6 +73,9 @@ pub struct PaprSurface {
 pub struct PaprLifecycle {
     pub autostart: Option<bool>,
     pub persist_position: Option<bool>,
+    /// 仅 plugin：启用后 overlay 何时出现（always/onDemand/never）。
+    /// 结构体必须覆盖此字段，否则任何 struct→JSON 的再序列化都会静默丢配置。
+    pub show: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,9 +103,19 @@ pub struct PaprManifest {
     pub local: Option<PaprLocalAccess>,
     #[serde(default)]
     pub network: Option<bool>,
+    /// 频道契约（channel → {description, example}）。结构体必须覆盖此字段：
+    /// 之前缺失导致 scan 重序列化后 inbox 被剥离，前端「已启用插件」目录永远为空。
+    #[serde(default)]
+    pub inbox: Option<HashMap<String, serde_json::Value>>,
 }
 
 pub fn load_manifest(apps_dir: &Path, app_id: &str) -> Result<PaprManifest, String> {
+    load_manifest_with_raw(apps_dir, app_id).map(|(manifest, _)| manifest)
+}
+
+/// 读取并校验 manifest，同时返回磁盘原文。scan 等对外通道应透传原文，
+/// 避免结构体未覆盖的字段（inbox、description 等）在反/重序列化中被剥离。
+pub fn load_manifest_with_raw(apps_dir: &Path, app_id: &str) -> Result<(PaprManifest, String), String> {
     let manifest_path = apps_dir.join(app_id).join("manifest.json");
     let content = fs::read_to_string(&manifest_path).map_err(|err| {
         format!(
@@ -125,7 +138,7 @@ pub fn load_manifest(apps_dir: &Path, app_id: &str) -> Result<PaprManifest, Stri
         return Err("manifest name 不能为空".to_string());
     }
 
-    Ok(manifest)
+    Ok((manifest, content))
 }
 
 pub fn clear_manifest(app_id: &str) {
@@ -194,6 +207,41 @@ mod tests {
     }
 
     #[test]
+    fn load_manifest_preserves_inbox_and_show_through_round_trip() {
+        // 回归：Rust 结构体曾缺 inbox/show 字段，serde 静默丢未知字段，
+        // scan 重序列化后前端「已启用插件」目录永远为空。
+        let dir = std::env::temp_dir().join(format!("papr-test-inbox-{}", std::process::id()));
+        let app_dir = dir.join("kanban");
+        fs::create_dir_all(&app_dir).unwrap();
+
+        let json = r#"{"spec":"papr/0.1","name":"看板","kind":"plugin","description":"极简看板","lifecycle":{"show":"onDemand"},"inbox":{"board":{"description":"推送看板","example":{"op":"replace","blocks":[]}},"canvas":{"example":{"op":"replace","nodes":[]}}}}"#;
+        fs::write(app_dir.join("manifest.json"), json).unwrap();
+
+        let (manifest, raw) = load_manifest_with_raw(&dir, "kanban").unwrap();
+        assert_eq!(raw, json, "raw 应为磁盘原文");
+
+        let inbox = manifest.inbox.as_ref().expect("结构体必须保留 inbox");
+        assert_eq!(inbox.len(), 2);
+        assert!(inbox.contains_key("board"));
+        assert!(inbox.contains_key("canvas"));
+        assert_eq!(
+            manifest.lifecycle.as_ref().and_then(|l| l.show.as_deref()),
+            Some("onDemand")
+        );
+
+        // 结构体自身重序列化也不能丢字段（缓存/papr_get_manifest 出口）。
+        let reserialized = serde_json::to_string(&manifest).unwrap();
+        let reparsed: PaprManifest = serde_json::from_str(&reserialized).unwrap();
+        assert_eq!(reparsed.inbox.expect("重序列化后 inbox 仍在").len(), 2);
+        assert_eq!(
+            reparsed.lifecycle.and_then(|l| l.show).as_deref(),
+            Some("onDemand")
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn reject_wrong_spec() {
         let dir = std::env::temp_dir().join(format!("papr-test-spec-{}", std::process::id()));
         let app_dir = dir.join("bad-spec");
@@ -253,6 +301,7 @@ mod tests {
             level: None,
             local: Some(PaprLocalAccess::Read),
             network: Some(false),
+            inbox: None,
         };
 
         store_manifest("test-cache", manifest);

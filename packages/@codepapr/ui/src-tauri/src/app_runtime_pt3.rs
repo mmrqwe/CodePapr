@@ -90,7 +90,7 @@ fn scan_apps_in_dir(apps_dir: &std::path::Path, scope: &str) -> Vec<DiscoveredAp
         if !is_valid_app_id(&app_id) {
             continue;
         }
-        let manifest = match papr_runtime::manifest::load_manifest(apps_dir, &app_id) {
+        let (manifest, manifest_raw) = match papr_runtime::manifest::load_manifest_with_raw(apps_dir, &app_id) {
             Ok(m) => m,
             Err(_) => continue,
         };
@@ -99,7 +99,9 @@ fn scan_apps_in_dir(apps_dir: &std::path::Path, scope: &str) -> Vec<DiscoveredAp
         if !index_path.is_file() {
             continue;
         }
-        let manifest_json = serde_json::to_string(&manifest).ok();
+        // 透传磁盘原文：serde 结构体会剥离未声明字段（inbox 曾因此丢失），
+        // 前端「已启用插件」目录与 app_publish 频道校验都依赖完整 manifest。
+        let manifest_json = Some(manifest_raw);
         papr_runtime::manifest::store_manifest(&app_id, manifest.clone());
         apps.push(DiscoveredApp {
             app_id,
@@ -386,6 +388,30 @@ mod tests {
         let result = workspace_scan(tmp.to_string_lossy().to_string());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].icon.as_deref(), Some("📊"));
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_manifest_json_preserves_inbox_and_unknown_fields() {
+        // 回归：scan 曾把 manifest 过一遍 Rust 结构体重序列化，serde 丢弃未知字段
+        // （inbox），导致前端「已启用插件」目录与 app_publish 频道校验全部失明。
+        // 现在必须透传磁盘原文。
+        let tmp = std::env::temp_dir().join(format!("papr-scan-inbox-{}", std::process::id()));
+        let apps_dir = tmp.join(".CodePapr/apps/kanban");
+        fs::create_dir_all(&apps_dir).unwrap();
+
+        let manifest = r#"{"spec":"papr/0.1","name":"看板","kind":"plugin","description":"极简看板","lifecycle":{"show":"onDemand"},"inbox":{"board":{"description":"推送看板","example":{"op":"replace"}}}}"#;
+        fs::write(apps_dir.join("manifest.json"), manifest).unwrap();
+        fs::write(apps_dir.join("index.html"), "<html></html>").unwrap();
+
+        let result = workspace_scan(tmp.to_string_lossy().to_string());
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].manifest_json.as_deref(),
+            Some(manifest),
+            "scan 必须原样透传 manifest.json"
+        );
 
         fs::remove_dir_all(&tmp).ok();
     }

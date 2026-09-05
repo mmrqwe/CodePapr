@@ -252,14 +252,8 @@ export async function resolveAppManifest(
   appId: string,
   workspacePath: string,
 ): Promise<{ manifest: PaprManifest; scope: 'global' | 'workspace' } | null> {
-  const inStore = useAppRuntimeStore.getState().apps.find((a) => a.appId === appId);
-  if (inStore?.manifestJson) {
-    try {
-      return { manifest: JSON.parse(inStore.manifestJson) as PaprManifest, scope: inStore.scope ?? 'workspace' };
-    } catch {
-      /* ignore */
-    }
-  }
+  // 磁盘原文优先：store 里的 manifestJson 可能陈旧（会话中用户改了盘）或残缺
+  // （旧版本 Rust scan 曾剥离 inbox 字段）——manifest.json 才是唯一事实源。
   if (workspacePath) {
     const wsManifestRaw = await readAppTextFile(workspacePath, `.CodePapr/apps/${appId}/manifest.json`);
     if (wsManifestRaw) {
@@ -281,6 +275,14 @@ export async function resolveAppManifest(
     }
   } catch {
     /* best-effort */
+  }
+  const inStore = useAppRuntimeStore.getState().apps.find((a) => a.appId === appId);
+  if (inStore?.manifestJson) {
+    try {
+      return { manifest: JSON.parse(inStore.manifestJson) as PaprManifest, scope: inStore.scope ?? 'workspace' };
+    } catch {
+      /* ignore */
+    }
   }
   return null;
 }
