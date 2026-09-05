@@ -5,8 +5,9 @@
  * - internal: true → 不经 task 工具暴露给主 Agent，仅供运行时压缩管线调用
  *   （轮间压缩与 mid-loop 压缩）
  * - tools: {} → 纯推理，压缩输入（transcript）已含全部事实，无需回读工作区
- * - 输出严格 JSON 检查点（userGoal/constraints/completedWork/importantContext/
- *   todoList/pendingWork），解析与降级由 contextCheckpoint 管线负责
+ * - 输出 v3 结构化检查点 state（goal/constraints/confirmedFacts/...），
+ *   系统提示词由 contextCheckpoint.buildStateMergePrompt 运行时注入，
+ *   解析与降级由 contextCheckpoint 管线负责
  *
  * 与 verifier 的差异：verifier 走 uiTaskTool.runSubagent（主线程工作区工具），
  * compactor 直接调 core 的 resolveSubagentExecution + runSubagentSession——
@@ -16,7 +17,6 @@
 
 import {
   BUILTIN_AGENTS,
-  COMPACTOR_PROMPT,
   resolveSubagentExecution,
   runSubagentSession,
   SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS,
@@ -83,7 +83,8 @@ export function buildCompactorDefinition(params: {
     temperature: settings.compactionTemperature,
     tools: {},
     internal: true,
-    prompt: COMPACTOR_PROMPT,
+    // 运行时由 contextCheckpoint 用 v3 状态合并提示词覆盖；此处不设静态正文。
+    prompt: '',
   };
 }
 

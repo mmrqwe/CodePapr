@@ -44,10 +44,7 @@ export async function loadMemoryBootstrapSection(
   try {
     const entries = await loadMemoryEntries(workspacePath, true);
     const rendered = buildMemoryProjection(entries.map(toProjectionEntry)).trim();
-    if (!rendered || rendered.includes('暂无已验证')) {
-      return undefined;
-    }
-    return rendered;
+    return rendered || undefined;
   } catch (err) {
     console.warn(
       '[memory-ledger] 读取账本失败:',

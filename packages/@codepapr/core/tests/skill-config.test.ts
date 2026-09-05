@@ -6,6 +6,7 @@ import {
   getDefaultSearchSkillTemplate,
   isSkillAvailableToLoad,
   parseSkillMarkdown,
+  buildSkillCatalogSignature,
   resolveSkillCatalogName,
   skillRootFromPath,
 } from '../src/agent/skillConfig';
@@ -142,5 +143,24 @@ describe('skillConfig', () => {
       })
     ).toBe('suite/article-illustrator');
     expect(resolveSkillCatalogName({ name: 'search', description: '', prompt: '' })).toBe('search');
+  });
+
+  it('catalog signature covers rendered fields only (prompt body / paths excluded)', () => {
+    const base = {
+      name: 'search',
+      description: '搜索资料',
+      prompt: '正文 v1',
+      rootPath: '/Users/me/.CodePapr/skills/search',
+    };
+    const sig = buildSkillCatalogSignature([base]);
+    // 正文编辑（经 skill_load 按需读取，不进 Bootstrap）不应拆缓存。
+    expect(buildSkillCatalogSignature([{ ...base, prompt: '正文 v2' }])).toBe(sig);
+    // 绝对路径漂移（换机器/换目录）不应拆缓存。
+    expect(buildSkillCatalogSignature([{ ...base, rootPath: '/Users/you/x', sourcePath: '/other' }])).toBe(sig);
+    // 描述 / 启用态 / 正文是否非空影响渲染，必须反映到签名。
+    expect(buildSkillCatalogSignature([{ ...base, description: '改描述' }])).not.toBe(sig);
+    expect(buildSkillCatalogSignature([{ ...base, enabled: false }])).not.toBe(sig);
+    expect(buildSkillCatalogSignature([{ ...base, prompt: '  ' }])).not.toBe(sig);
+    expect(buildSkillCatalogSignature([])).not.toBe(sig);
   });
 });

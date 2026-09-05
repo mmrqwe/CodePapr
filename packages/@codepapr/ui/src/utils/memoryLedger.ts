@@ -187,9 +187,6 @@ export function buildMemoryProjection(entries: readonly ProjectionEntry[]): stri
     totalTokens += lineTokens;
   }
 
-  if (lines.length === 0) {
-    return '（暂无已验证的项目记忆）';
-  }
   return lines.join('\n');
 }
 

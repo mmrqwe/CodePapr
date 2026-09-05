@@ -169,8 +169,8 @@ describe('buildMemoryProjection', () => {
     expect(projection).toContain('用户确认的真事实');
   });
 
-  it('renders a placeholder when empty', () => {
-    expect(buildMemoryProjection([])).toContain('暂无');
+  it('renders empty string when nothing qualifies（Bootstrap 段随之整体省略）', () => {
+    expect(buildMemoryProjection([])).toBe('');
   });
 
   it('redacts secrets in rendered entries', () => {

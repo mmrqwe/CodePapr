@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildAgentRuntimeSystemPrompt, buildAgentRuntimeUserPrompt, buildAgentSessionBootstrapPrompt } from './promptBuilders';
+import { buildAgentRuntimeSystemPrompt, buildAgentRuntimeUserPrompt, buildAgentSessionBootstrapPrompt, buildProjectGraphBootstrapSummary, PROJECT_GRAPH_SUMMARY_MAX_CHARS } from './promptBuilders';
 import { useCharactersStore } from '../charactersStore';
 import { useAppRuntimeStore } from '../appRuntimeStore';
 import type { CharacterProfile } from '../../utils/characterTypes';
@@ -343,5 +343,34 @@ describe('buildAgentRuntimeUserPrompt', () => {
     });
     expect(prompt).not.toContain('Post-History Instructions');
     expect(prompt).not.toContain('Stay in character');
+  });
+});
+
+describe('buildProjectGraphBootstrapSummary', () => {
+  it('caps the total summary size for unbounded repos (CTX-04)', () => {
+    const files = Array.from({ length: 5000 }, (_, i) => ({
+      path: `src/mod${Math.floor(i / 50)}/file${i}.ts`,
+    }));
+    const graph = {
+      files,
+      nodes: [],
+      summary: { files: files.length, symbols: 0, imports: 0, reexports: 0, entryPoints: 0, truncated: false },
+    };
+    const summary = buildProjectGraphBootstrapSummary(graph as never, 12, PROJECT_GRAPH_SUMMARY_MAX_CHARS);
+    expect(summary.length).toBeLessThanOrEqual(PROJECT_GRAPH_SUMMARY_MAX_CHARS + 200);
+    expect(summary).toContain('truncated'.slice(0, 0) + '截断');
+    const english = buildProjectGraphBootstrapSummary(graph as never, 12, 600, 'en');
+    expect(english).toContain('truncated by budget');
+  });
+
+  it('keeps small graphs intact', () => {
+    const graph = {
+      files: [{ path: 'src/main.ts', entryPoint: true }],
+      nodes: [],
+      summary: { files: 1, symbols: 0, imports: 0, reexports: 0, entryPoints: 1, truncated: false },
+    };
+    const summary = buildProjectGraphBootstrapSummary(graph as never);
+    expect(summary).toContain('src/main.ts [entry]');
+    expect(summary).toContain('Summary: 1 files');
   });
 });

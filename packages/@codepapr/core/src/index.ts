@@ -275,7 +275,7 @@ export type {
   ProjectVerifyCommands,
   DetectProjectVerifyCommandsInput,
 } from './agent/projectVerifyCommands';
-export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, isReadOnlyMode, MUTATING_TOOL_NAMES, PARALLEL_SAFE_TOOL_NAMES, APP_ONLY_TOOL_NAMES, PLAN_ONLY_TOOL_NAMES, GIT_READ_ONLY_ACTIONS, allowToolForReadOnlyMode, readOnlyModeBlockMessage, buildTaskToolDefinition, listDelegableAgents, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, VERIFIER_PROMPT_OBJECTIVE, VERIFIER_PROMPT_SUBJECTIVE, COMPACTOR_PROMPT, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
+export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, isReadOnlyMode, MUTATING_TOOL_NAMES, PARALLEL_SAFE_TOOL_NAMES, APP_ONLY_TOOL_NAMES, PLAN_ONLY_TOOL_NAMES, GIT_READ_ONLY_ACTIONS, allowToolForReadOnlyMode, readOnlyModeBlockMessage, buildTaskToolDefinition, listDelegableAgents, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, VERIFIER_PROMPT_OBJECTIVE, VERIFIER_PROMPT_SUBJECTIVE, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
 export type { AgentDefinition, AgentMode } from './agent/agentConfig';
 export {
   TODO_TOOL_NAME,
@@ -316,6 +316,7 @@ export {
   applySkillEnablement,
   isSkillAvailableToLoad,
   buildSkillsSection,
+  buildSkillCatalogSignature,
   skillRootFromPath,
   resolveSkillCatalogName,
 } from './agent/skillConfig';

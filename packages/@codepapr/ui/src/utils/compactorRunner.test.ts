@@ -128,12 +128,9 @@ describe('buildCompactorDefinition', () => {
     expect(def.tools).toEqual({});
   });
 
-  it('三语 prompt 与 core COMPACTOR_PROMPT 一致', () => {
+  it('prompt 为空占位：v3 状态合并提示词由 contextCheckpoint 运行时覆盖', () => {
     const def = buildCompactorDefinition({ settings: makeSettings(), ...base });
-    const prompt = def.prompt as Record<string, string>;
-    expect(prompt['zh-CN']).toContain('userGoal');
-    expect(prompt['zh-TW']).toContain('pendingWork');
-    expect(prompt.en).toContain('checkpoint');
+    expect(def.prompt).toBe('');
   });
 });
 

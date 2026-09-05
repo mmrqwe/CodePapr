@@ -215,6 +215,46 @@ describe('promptSystem', () => {
     expect(turnPrompt).not.toContain('## 项目文件夹');
   });
 
+  it('renders the absolute workspace path in Session Bootstrap, not in the immutable prefix', () => {
+    const systemPrompt = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/Users/dev/secret-project',
+      lang: 'zh-CN',
+      toolNames: ['edit'],
+    });
+    expect(systemPrompt).not.toContain('/Users/dev/secret-project');
+    expect(systemPrompt).not.toContain('## 项目文件夹');
+
+    const bootstrap = buildSessionBootstrapPrompt({
+      workspacePath: '/Users/dev/secret-project',
+      lang: 'zh-CN',
+    });
+    expect(bootstrap).toContain('## 项目文件夹');
+    expect(bootstrap).toContain('/Users/dev/secret-project');
+
+    const subagentPrompt = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/Users/dev/secret-project',
+      lang: 'en',
+      toolNames: ['read'],
+      subagent: true,
+    });
+    expect(subagentPrompt).not.toContain('/Users/dev/secret-project');
+  });
+
+  it('keeps the no-workspace reminder in the mode prompt without leaking a path', () => {
+    const noWorkspace = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '',
+      lang: 'zh-CN',
+      toolNames: ['edit'],
+    });
+    expect(noWorkspace).toContain('未选择项目文件夹');
+
+    const bootstrap = buildSessionBootstrapPrompt({ workspacePath: '  ', lang: 'zh-CN' });
+    expect(bootstrap).not.toContain('## 项目文件夹');
+  });
+
   it('keeps full skill content out of per-turn runtime prompts', () => {
     const prompt = buildRuntimeUserPrompt({
       mode: 'agent',

@@ -1611,9 +1611,9 @@ export function buildModeSystemPrompt(options: BuildModeSystemPromptOptions): st
   return [
     ...intro,
     '',
-    labels.workspace,
-    options.workspacePath.trim() || labels.workspaceFallback,
-    '',
+    // 有工作区时绝对路径渲染在 Session Bootstrap 层（不进不可变前缀）；
+    // 这里只保留「未选择工作区」时的提醒文案。
+    ...(options.workspacePath?.trim() ? [] : [labels.workspaceFallback, '']),
     labels.constraints,
     ...COMMON_CONSTRAINTS[lang],
     ...toolConstraints,
@@ -1629,13 +1629,7 @@ export function buildRuntimeSystemPrompt(options: BuildRuntimeSystemPromptOption
       CORE_PRINCIPLES[lang].trim(),
       ...(options.extraSections ?? []).map((section) => section.trim()),
       (options.rulesSection ?? '').trim(),
-      [
-        labels.workspace,
-        options.workspacePath.trim() || labels.workspaceFallback,
-        '',
-        labels.constraints,
-        ...COMMON_CONSTRAINTS[lang],
-      ].join('\n'),
+      [labels.constraints, ...COMMON_CONSTRAINTS[lang]].join('\n'),
     ]
       .filter(Boolean)
       .join('\n\n');
@@ -1659,10 +1653,13 @@ export function buildSessionBootstrapPrompt(options: BuildSessionBootstrapPrompt
   const memorySection = options.memorySection?.trim();
   const customPromptSection = options.customPromptSection?.trim();
   const projectGraphSummary = options.projectGraphSummary?.trim();
+  const workspacePath = options.workspacePath?.trim();
 
   return [
     `# CodePapr ${lang === 'en' ? 'Session Context' : '会话上下文'}`,
-    '',
+    // 工作区绝对路径属于会话/工作区状态，不进 ImmutablePrefix（ADR-001 分层），
+    // 渲染在按会话冻结、按压缩 epoch 刷新的 Bootstrap 层。
+    ...(workspacePath ? ['', labels.workspace, workspacePath] : []),
     ...(skillsSection ? ['', skillsSection] : []),
     ...(pluginsSection ? ['', pluginsSection] : []),
     ...(memorySection

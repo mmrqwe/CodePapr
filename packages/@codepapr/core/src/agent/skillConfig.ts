@@ -137,6 +137,27 @@ function formatSkillCatalogLabel(skill: SkillDefinition): string {
     : `\`${catalogName}\``;
 }
 
+/**
+ * Skill 目录的缓存签名输入：只覆盖影响 Bootstrap 渲染的字段
+ * （目录名/展示名/描述/启用态/正文是否非空）。正文内容与 rootPath/sourcePath
+ * 故意排除——正文经 skill_load 按需读取，编辑正文不应拆掉会话前缀缓存，
+ * 绝对路径参与签名还会造成无谓的跨机器漂移。
+ */
+export function buildSkillCatalogSignature(skills: readonly SkillDefinition[]): string {
+  return skills
+    .map((skill) =>
+      [
+        resolveSkillCatalogName(skill),
+        skill.name.trim(),
+        skill.displayName?.trim() ?? '',
+        skill.description.trim(),
+        skill.enabled === false ? '0' : '1',
+        skill.prompt.trim() ? '1' : '0',
+      ].join('\u0000')
+    )
+    .join('\u0001');
+}
+
 export function parseSkillMarkdown(name: string, raw: string): SkillDefinition {
   const trimmedName = name.trim();
   if (!trimmedName) {

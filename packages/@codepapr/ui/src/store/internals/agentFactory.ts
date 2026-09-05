@@ -47,6 +47,7 @@ import { resolveProviderName } from './settingsNormalizer';
 import { modelSupportsVision, shouldExposeReadImage } from '../../utils/visionRouting';
 import { replaceImagesInToolResult } from '../../utils/visionOffload';
 import { loadMemoryBootstrapSection } from './memoryLedgerStore';
+import { primeSessionBootstrap } from './sessionBootstrapCache';
 import {
   buildAgentSessionBootstrapPrompt,
   createLogFromMessages,
@@ -99,13 +100,17 @@ function buildToolContextConfig(settings: Settings): ToolContextConfig {
 /**
  * Build a callback that re-renders session bootstrap from the memory ledger.
  * Used by mid-loop context compaction to refresh memory at epoch boundaries
- * (the epoch resets anyway, so no extra cache break).
+ * (the epoch resets anyway, so no extra cache break). The fresh bootstrap is
+ * also written back to the session bootstrap cache under the turn's signature,
+ * so later rebuilds (crash recovery / model switch) re-inject the REFRESHED
+ * snapshot instead of the one frozen at session start.
  * Returns null when no bootstrap can be produced.
  */
 function buildBootstrapRefresher(
   settings: Settings,
   workspacePath: string,
-  runtime: AgentRuntimeConfig
+  runtime: AgentRuntimeConfig,
+  sessionId: string | null
 ): () => Promise<string | null> {
   return async () => {
     const memorySection = await loadMemoryBootstrapSection(workspacePath);
@@ -116,8 +121,12 @@ function buildBootstrapRefresher(
       memorySection,
       undefined,
       runtime.mode ?? 'agent'
-    );
-    return bootstrap.trim() || null;
+    ).trim();
+    if (!bootstrap) return null;
+    if (runtime.sessionBootstrapSignature) {
+      primeSessionBootstrap(sessionId, runtime.sessionBootstrapSignature, bootstrap);
+    }
+    return bootstrap;
   };
 }
 
@@ -126,10 +135,13 @@ export interface AgentRuntimeConfig {
   rulesSection?: string;
   customPrompt?: string;
   memorySection?: string;
+  /** 仅供 explore/scout 子代理注入（主会话 Bootstrap 已不含 project-graph）。 */
   projectGraphSummary?: string;
   /** 已按 session 记忆化（冻结）的会话引导，含 skills/memory/character/custom。
    *  优先用它注入 log[0]，兑现账本记忆每次会话自动加载；缺省时回退到仅 skills+custom。 */
   sessionBootstrapPrompt?: string;
+  /** 本回合 Bootstrap 缓存签名；mid-loop 刷新后据此把新 Bootstrap 写回缓存。 */
+  sessionBootstrapSignature?: string;
   lang?: Lang;
   /** 当前工作模式：ask/plan 会在注册层屏蔽变更类工具。缺省 agent。 */
   mode?: PromptMode;
@@ -518,7 +530,7 @@ function _createLocalAgent(
       settings,
       parts.providerName,
       sessionId,
-      buildBootstrapRefresher(settings, workspacePath, runtime),
+      buildBootstrapRefresher(settings, workspacePath, runtime, sessionId),
       undefined,
       runtime.onMidLoopCompactionCommit
     ),
@@ -613,7 +625,7 @@ export function createAgent(
           onWorkspaceMutated,
         },
         onStreamSnapshot: runtime.onStreamSnapshot,
-        onRefreshBootstrap: buildBootstrapRefresher(settings, workspacePath, runtime),
+        onRefreshBootstrap: buildBootstrapRefresher(settings, workspacePath, runtime, sessionId),
         onMidLoopCompactionCommit: runtime.onMidLoopCompactionCommit,
         ...(shouldUseSidecarAgentRuntime()
           ? { transport: new SidecarTransport({ onWorkspaceMutated }) }

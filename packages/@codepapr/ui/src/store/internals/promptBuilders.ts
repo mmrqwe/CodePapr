@@ -23,7 +23,7 @@ import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
 import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
 import { SESSION_BOOTSTRAP_MESSAGE_ID } from '../../utils/contextSurface';
 import { shouldExposeReadImage } from '../../utils/visionRouting';
-import type { Settings, UIMessage } from './types';
+import type { Lang, Settings, UIMessage } from './types';
 import { getActiveCharacter } from '../charactersStore';
 import {
   buildCharacterSystemPrompt,
@@ -133,9 +133,18 @@ export function buildAgentRuntimeSystemPrompt(
   });
 }
 
+/**
+ * 目录树 + 符号摘要（供 explore/scout 子代理 Bootstrap 注入）。
+ * per-dir 条数与总量都有上限：主会话已不再注入 project-graph，子代理
+ * 每次 task 注入一份，超大仓库下不设总预算会把子代理上下文撑爆。
+ */
+export const PROJECT_GRAPH_SUMMARY_MAX_CHARS = 12_000;
+
 export function buildProjectGraphBootstrapSummary(
   graph: WorkspaceProjectGraphResult,
-  maxFilesPerDir: number = 12
+  maxFilesPerDir: number = 12,
+  maxTotalChars: number = PROJECT_GRAPH_SUMMARY_MAX_CHARS,
+  lang: Lang = 'zh-CN'
 ): string {
   const filesByDir = new Map<string, WorkspaceProjectGraphResult['files']>();
   for (const file of graph.files ?? []) {
@@ -155,29 +164,58 @@ export function buildProjectGraphBootstrapSummary(
   }
 
   const lines: string[] = [];
+  let usedChars = 0;
+  const pushLine = (line: string): boolean => {
+    if (usedChars + line.length + 1 > maxTotalChars) return false;
+    lines.push(line);
+    usedChars += line.length + 1;
+    return true;
+  };
   const sortedDirs = [...filesByDir.entries()].sort(([a], [b]) => {
     if (a === '.') return -1;
     if (b === '.') return 1;
     return a.localeCompare(b);
   });
+  let truncatedByBudget = false;
 
   for (const [dir, files] of sortedDirs) {
+    if (!pushLine(`- ${dir}/ (${files.length} file${files.length > 1 ? 's' : ''})`)) {
+      truncatedByBudget = true;
+      break;
+    }
     const displayFiles = files.slice(0, maxFilesPerDir);
-    lines.push(`- ${dir}/ (${files.length} file${files.length > 1 ? 's' : ''})`);
     for (const file of displayFiles) {
       const symbols = symbolNodesByPath.get(file.path) ?? [];
       const entry = file.entryPoint ? ' [entry]' : '';
       const symbolStr = symbols.length > 0 ? ` → ${symbols.slice(0, 5).join(', ')}` : '';
-      lines.push(`  - ${file.path}${entry}${symbolStr}`);
+      if (!pushLine(`  - ${file.path}${entry}${symbolStr}`)) {
+        truncatedByBudget = true;
+        break;
+      }
     }
+    if (truncatedByBudget) break;
     if (files.length > maxFilesPerDir) {
-      lines.push(`  ... +${files.length - maxFilesPerDir} more files`);
+      if (!pushLine(`  ... +${files.length - maxFilesPerDir} more files`)) {
+        truncatedByBudget = true;
+        break;
+      }
     }
   }
 
-  if (graph.summary) {
-    lines.push('');
-    lines.push(`Summary: ${graph.summary.files} files, ${graph.summary.symbols} symbols, ${graph.summary.imports} imports, ${graph.summary.reexports} re-exports, ${graph.summary.entryPoints} entry points${graph.summary.truncated ? ' (truncated)' : ''}`);
+  if (truncatedByBudget) {
+    // 提示行本身不参与预算（一行定长），否则恰好在预算边缘会被整体丢弃。
+    lines.push(
+      lang === 'en'
+        ? '  ... (structure summary truncated by budget; use list / graph tools for the full layout)'
+        : lang === 'zh-TW'
+          ? '  ...（結構概覽超出預算，已截斷；完整結構請用 list / graph 工具按需獲取）'
+          : '  ...（结构概览超出预算，已截断；完整结构请用 list / graph 工具按需获取）'
+    );
+  }
+
+  if (graph.summary && !truncatedByBudget) {
+    pushLine('');
+    pushLine(`Summary: ${graph.summary.files} files, ${graph.summary.symbols} symbols, ${graph.summary.imports} imports, ${graph.summary.reexports} re-exports, ${graph.summary.entryPoints} entry points${graph.summary.truncated ? ' (truncated)' : ''}`);
   }
 
   return lines.join('\n');

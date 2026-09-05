@@ -99,7 +99,8 @@ import {
 } from './internals/agentFactory';
 import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
-import { createSendMessage, invalidateAgentHandle, clearSessionBootstrapCache, resetSendMessageWorkspaceGuards } from './internals/sendMessage';
+import { createSendMessage, invalidateAgentHandle, resetSendMessageWorkspaceGuards } from './internals/sendMessage';
+import { clearSessionBootstrapCache } from './internals/sessionBootstrapCache';
 import { resetWorkspaceEphemeralState } from './internals/workspaceEphemeralReset';
 import { loadMemoryBootstrapSection } from './internals/memoryLedgerStore';
 import { buildPruneOptions } from '../agent/compactionHandler';
@@ -1104,7 +1105,12 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           if (cachedRaw) {
             const cacheData = JSON.parse(cachedRaw);
             if (cacheData?.projectGraph) {
-              projectGraphSummary = buildProjectGraphBootstrapSummary(cacheData.projectGraph);
+              projectGraphSummary = buildProjectGraphBootstrapSummary(
+                cacheData.projectGraph,
+                undefined,
+                undefined,
+                normalizedSettings.lang ?? 'zh-CN'
+              );
             }
           }
         } catch {

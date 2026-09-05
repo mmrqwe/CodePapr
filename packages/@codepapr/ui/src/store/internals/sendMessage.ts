@@ -20,6 +20,7 @@ import {
   serializeGoalState,
   GoalConditionParseError,
   renderTodoListDigest,
+  buildSkillCatalogSignature,
 } from '@codepapr/core';
 import type {
   IAgentResponse,
@@ -156,6 +157,11 @@ import {
   createMainThreadAgent,
   getAgentMessagesSince,
 } from './agentFactory';
+import {
+  invalidateSessionBootstrap,
+  primeSessionBootstrap,
+  resolveSessionBootstrap,
+} from './sessionBootstrapCache';
 import { shouldUseSidecarAgentRuntime } from './providerFactory';
 import { maybeGenerateContextCheckpoint } from './contextCheckpoint';
 import { handleWorkspaceMutation } from './backgroundDiagnostics';
@@ -178,7 +184,7 @@ function formatRetryCounter(attempt: number, maxRetries?: number): string {
   return maxRetries === undefined ? `${attempt}` : `${attempt}/${maxRetries}`;
 }
 
-// Guards cold-start memory.md bootstrap so concurrent sendMessage calls
+// Guards cold-start ledger bootstrap so concurrent sendMessage calls
 // don't trigger duplicate generation. Module-level on purpose: the guard
 // spans the whole session, not a single store snapshot.
 let memoryBootstrapInFlight = false;
@@ -222,52 +228,13 @@ function currentTodoDigest(sessionId: string | null): string | undefined {
   return renderTodoListDigest(ctx);
 }
 
-// Per-session cache of the session-bootstrap prompt. The bootstrap embeds
-// volatile disk state (memory.md, project-graph summary) that changes on file
-// edits; rebuilding the agent whenever that changes breaks DeepSeek's prefix
-// cache for the whole history. We freeze the bootstrap per (session × stable
-// signature) so volatile changes do NOT force a rebuild — memory/graph updates
-// take effect on the next session or when a stable input (mode/rules/lang/
-// skills/system prompt/character/publish-catalog) changes.
-const sessionBootstrapCache = new Map<string, { signature: string; bootstrap: string }>();
-// 有界缓存：每个条目是一整份 bootstrap 字符串（memory.md + skills + prompts），
-// 随会话数无限增长会长期占用内存。超过上限时按最旧（Map 插入序）逐出；
-// 被逐出的会话下次需要时只是重算一次，无正确性影响。
-const SESSION_BOOTSTRAP_CACHE_MAX = 64;
-
-function evictSessionBootstrapCache(): void {
-  while (sessionBootstrapCache.size > SESSION_BOOTSTRAP_CACHE_MAX) {
-    const oldest = sessionBootstrapCache.keys().next().value;
-    if (oldest === undefined) break;
-    sessionBootstrapCache.delete(oldest);
-  }
-}
-
-/** 切工作区：丢掉按 sessionId 索引的 bootstrap，避免把旧项目 memory 拼进新会话。 */
-export function clearSessionBootstrapCache(): void {
-  sessionBootstrapCache.clear();
-}
+// Session-bootstrap cache lives in sessionBootstrapCache.ts（sendMessage 与
+// agentFactory 的 mid-loop 刷新共享同一份状态，刷新点见该模块头注释）。
 
 /** 切工作区：放下在飞守卫。旧回合的 finally 也会再清一次，幂等。 */
 export function resetSendMessageWorkspaceGuards(): void {
   memoryBootstrapInFlight = false;
   compactCheckpointInFlight = false;
-}
-
-function resolveSessionBootstrap(
-  sessionId: string | null,
-  signature: string,
-  computeFresh: () => string
-): string {
-  if (!sessionId) return computeFresh();
-  const cached = sessionBootstrapCache.get(sessionId);
-  if (cached && cached.signature === signature) {
-    return cached.bootstrap;
-  }
-  const bootstrap = computeFresh();
-  sessionBootstrapCache.set(sessionId, { signature, bootstrap });
-  evictSessionBootstrapCache();
-  return bootstrap;
 }
 
 function extractFilePathsFromToolInvocations(
@@ -765,6 +732,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   const compactAgentOwner = get()._agentSessionId;
                   const compactTurnInFlight =
                     get().isLoading && get().loadingSessionId === compactSessionId;
+                  // 压缩即 epoch 变化：丢掉回合首冻结的 bootstrap 缓存条目，
+                  // 下一发送重算并带上当时账本里已确认的记忆（文档承诺
+                  // 「压缩 epoch 刷新」）。
+                  invalidateSessionBootstrap(compactSessionId);
                   if (compactAgent && compactAgentOwner === compactSessionId && !compactTurnInFlight) {
                     try {
                       // 可能在跑 app-agent（papr.agent.run，不占 isLoading）：
@@ -1203,7 +1174,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (cachedRaw) {
               const cacheData = JSON.parse(cachedRaw);
               if (cacheData?.projectGraph) {
-                projectGraphBootstrapSummary = buildProjectGraphBootstrapSummary(cacheData.projectGraph);
+                projectGraphBootstrapSummary = buildProjectGraphBootstrapSummary(
+                  cacheData.projectGraph,
+                  undefined,
+                  undefined,
+                  normalizedSettings.lang ?? 'zh-CN'
+                );
               }
             }
           } catch (err) {
@@ -1403,9 +1379,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               model: route.model,
             }
           );
-          // Signature of the STABLE bootstrap inputs. Volatile ledger memory
-          // (and project-graph summary) is deliberately excluded so its
-          // changes don't rebuild the agent and break the prefix cache.
+          // Signature of the STABLE bootstrap inputs. Volatile ledger memory is
+          // deliberately excluded so memory writes/forgets don't rebuild the
+          // agent and break the prefix cache; compaction epochs re-render and
+          // prime the cache instead (sessionBootstrapCache.ts).
           // Enabled-plugin inbox catalog is included (like skills): toggling a
           // publish target must refresh the session prefix on the next send.
           const publishTargets = collectPublishCatalogTargets(useAppRuntimeStore.getState());
@@ -1415,7 +1392,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           );
           const bootstrapSignature = [
             runtimeSystemPrompt,
-            JSON.stringify(skillDefinitions),
+            buildSkillCatalogSignature(skillDefinitions),
             normalizedSettings.systemPrompt ?? '',
             normalizedSettings.experimentalCharacters ? (getActiveCharacterPrompt(mode) ?? '') : '',
             publishCatalogSignature(publishTargets),
@@ -1439,6 +1416,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // (agentFactory.ts); without this the computed bootstrap above is used
           // only as a cache key and memory never reaches the primary agent.
           runtimeAgentConfig.sessionBootstrapPrompt = runtimeSessionBootstrapPrompt;
+          // mid-loop 压缩刷新 bootstrap 后按同一 signature 写回缓存
+          //（agentFactory.buildBootstrapRefresher），后续重建拿到的才是刷新版。
+          runtimeAgentConfig.sessionBootstrapSignature = bootstrapSignature;
           const runtimePromptKey = [
             runtimeSystemPrompt,
             runtimeSessionBootstrapPrompt,
@@ -1724,11 +1704,29 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 effectiveMaxContextTokens(normalizedSettings, resolveProviderName(normalizedSettings)) *
                   CONTEXT_COMPACTION_SOFT_BUDGET_RATIO
               );
+              // 真实上下文占用 = 文本 + 工具结果 + checkpoint 渲染文本 +
+              // reasoning。只按 content 估算会系统性低估（工具回合里
+              // content 往往为空），软预算紧张时仍会硬塞 Recall。
               const currentContextTokens = get()
                 .sessionMessages[activeSessionId]
                 ?.filter(isModelVisibleUiMessage)
                 .reduce(
-                  (sum, message) => sum + estimateTokens(message.content ?? ''),
+                  (sum, message) => {
+                    let tokens = estimateTokens(message.content ?? '');
+                    if (message.reasoningContent) {
+                      tokens += estimateTokens(message.reasoningContent);
+                    }
+                    for (const invocation of message.toolInvocations ?? []) {
+                      tokens += estimateTokens(
+                        invocation.contextContent ?? invocation.output ?? invocation.error ?? ''
+                      );
+                    }
+                    const checkpoint = message.contextCheckpoint;
+                    if (checkpoint && 'renderedContent' in checkpoint) {
+                      tokens += estimateTokens(checkpoint.renderedContent ?? '');
+                    }
+                    return sum + tokens;
+                  },
                   0
                 ) ?? 0;
               const recallBudget = resolveRecallBudget({
@@ -2652,6 +2650,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // Worker 运行时回到常态（若随后产生检查点，下面会以 Worker 重建）。
             set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
           }
+          // 回合结束：已验证命令 / 用户原话 → persist。必须在压缩评估之前
+          // await 完成：本回合新确认的记忆要能赶上压缩 epoch 的 Bootstrap
+          // 冻结（纯账本写入，无 LLM 调用，不显著延长回合）。
+          if (activeSessionId && get().workspacePath === workspacePath) {
+            try {
+              await refreshMemoryLedgerProjection(
+                workspacePath,
+                activeSessionId,
+                get().sessionMessages[activeSessionId] ?? []
+              );
+            } catch {
+              // Silent fail - don't disrupt the session
+            }
+          }
           // #15：checkpoint 计划基于该数组计算；压缩模型调用期间用户可能
           // reset/清空/追加消息，应用前必须校验（见 isSafeCheckpointInsert）。
           const checkpointBaseMessages = get().sessionMessages[activeSessionId] ?? [];
@@ -2712,6 +2724,31 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           } else if (checkpointResult && 'message' in checkpointResult) {
             const prevAgent = get()._agent;
             const prevAgentOwner = get()._agentSessionId;
+            // 压缩 = epoch 变化：Bootstrap 随 epoch 刷新（文档承诺「压缩 epoch
+            // 刷新」，此前只有 mid-loop 路径兑现）。重读账本（本回合抽取已在前
+            // 面 await 落库）重渲染，写回缓存并更新 config——就地重建与之后
+            // 任何 crash/换模型重建都拿到刷新版，而不是回合首冻结的旧快照。
+            let epochBootstrap = runtimeSessionBootstrapPrompt;
+            try {
+              const epochMemorySection = await loadMemoryBootstrapSection(workspacePath);
+              epochBootstrap = buildAgentSessionBootstrapPrompt(
+                normalizedSettings,
+                workspacePath,
+                skillDefinitions,
+                epochMemorySection,
+                pluginsSection,
+                mode,
+              );
+            } catch {
+              // 刷新失败非致命：本 epoch 沿用回合首冻结版。
+            }
+            if (epochBootstrap !== runtimeSessionBootstrapPrompt) {
+              primeSessionBootstrap(activeSessionId, bootstrapSignature, epochBootstrap);
+              runtimeAgentConfig.sessionBootstrapPrompt = epochBootstrap;
+            }
+            const epochPromptKey = [runtimeSystemPrompt, epochBootstrap]
+              .filter(Boolean)
+              .join('\n\n--- session-bootstrap ---\n\n');
             let checkpointApplied = false;
             let turnNextMessages: UIMessage[] | null = null;
             set((s) => {
@@ -2761,7 +2798,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       )
                     : null,
                 _agentModel: isCurrentSession ? route.model : null,
-                _agentPromptKey: isCurrentSession ? runtimePromptKey : null,
+                _agentPromptKey: isCurrentSession ? epochPromptKey : null,
                 _agentSessionId: isCurrentSession ? activeSessionId : null,
                 conversationStats:
                   checkpointResult.cacheStats && isCurrentSession
@@ -2819,21 +2856,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 checkpointMessageId: checkpointResult.message.id,
               });
             }
-          }
-          // 回合结束：已验证命令 / 用户原话 → persist。Bootstrap 仍冻结到下次会话或压缩。
-          if (get().workspacePath) {
-            const ws = get().workspacePath;
-            void (async () => {
-              try {
-                await refreshMemoryLedgerProjection(
-                  ws,
-                  activeSessionId,
-                  get().sessionMessages[activeSessionId] ?? []
-                );
-              } catch {
-                // Silent fail - don't disrupt the session
-              }
-            })();
           }
           // PR5（ADR-009 B3/第11条）：回合结束归档 Recall 与 re-recall 审计行
           // （request-only，不再随后续回合注入；审计记录保留在 memory_recalls）。

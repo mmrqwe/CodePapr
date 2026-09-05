@@ -9,7 +9,6 @@ import {
   BUILTIN_AGENTS,
   VERIFIER_PROMPT_OBJECTIVE,
   VERIFIER_PROMPT_SUBJECTIVE,
-  COMPACTOR_PROMPT,
   type AgentDefinition,
 } from '../src/agent/agentConfig';
 import type { IToolDefinition } from '@codepapr/types';
@@ -353,14 +352,8 @@ describe('agentConfig - BUILTIN_AGENTS', () => {
     expect(visible).toBeNull();
   });
 
-  it('compactor 提示词为三语 Record，且与运行时 prompt 一致', () => {
-    expect(typeof COMPACTOR_PROMPT['zh-CN']).toBe('string');
-    expect(typeof COMPACTOR_PROMPT['zh-TW']).toBe('string');
-    expect(typeof COMPACTOR_PROMPT.en).toBe('string');
-    expect(COMPACTOR_PROMPT['zh-CN']).toContain('userGoal');
-    expect(COMPACTOR_PROMPT['zh-CN']).toContain('pendingWork');
-    expect(COMPACTOR_PROMPT.en).toContain('checkpoint');
+  it('compactor 内置定义不携带静态提示词（v3 状态合并提示词由压缩管线运行时注入）', () => {
     const compactor = BUILTIN_AGENTS.find((a) => a.name === 'compactor')!;
-    expect(compactor.prompt).toBe(COMPACTOR_PROMPT);
+    expect(compactor.prompt).toBe('');
   });
 });

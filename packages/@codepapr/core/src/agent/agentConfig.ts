@@ -672,17 +672,6 @@ These strongly push toward NOT_MET:
 Complete your verification first, then output the JSON as your final reply. Output ONLY the JSON object. No markdown, no extra text.`,
 };
 
-/**
- * Compactor 内置代理提示词（上下文压缩检查点生成）。
- * 内部代理（internal: true）：不经 task 工具暴露，仅由运行时压缩管线调用。
- * 零工具纯推理——压缩输入（transcript）已含全部事实，无需回读工作区。
- */
-export const COMPACTOR_PROMPT: Record<'zh-CN' | 'zh-TW' | 'en', string> = {
-  'zh-CN': `你负责把长编程会话压缩成可恢复的上下文检查点。你必须合并已有检查点与较早原始对话，只保留后续继续工作真正需要的事实：用户目标、约束、已完成修改、重要文件/命令/错误、当前任务清单、尚未完成事项。对话中包含工具调用及其结果（标记为 TOOL），这些是事实的主要来源，务必从中提取任务清单状态和已完成的工作。不要杜撰，不要丢掉仍然有效的约束。输出必须是 JSON 对象，且只能包含 userGoal、constraints、completedWork、importantContext、todoList、pendingWork 这六个键，每个键的值都必须是字符串数组。`,
-  'zh-TW': `你負責把長編程會話壓縮成可恢復的上下文檢查點。你必須合併已有檢查點與較早原始對話，只保留後續繼續工作真正需要的事實：用戶目標、約束、已完成修改、重要文件/命令/錯誤、當前任務清單、尚未完成事項。對話中包含工具調用及其結果（標記為 TOOL），這些是事實的主要來源，務必從中提取任務清單狀態和已完成的工作。不要杜撰，不要丟掉仍然有效的約束。輸出必須是 JSON 物件，且只能包含 userGoal、constraints、completedWork、importantContext、todoList、pendingWork 這六個鍵，每個鍵的值都必須是字串陣列。`,
-  en: `Compress a long coding conversation into a recoverable checkpoint. Merge the existing checkpoint with the earlier raw transcript and keep only facts needed for future execution: user goals, constraints, completed work, important files/commands/errors, current task list, and remaining work. The transcript includes tool calls and their results (marked as TOOL); these are the primary source of facts - extract task list state and completed work from them. Do not invent details or drop still-valid constraints. Output JSON only with exactly six keys: userGoal, constraints, completedWork, importantContext, todoList, pendingWork. Every value must be an array of strings.`,
-};
-
 export const BUILTIN_AGENTS: AgentDefinition[] = [
   {
       name: 'explore',
@@ -923,6 +912,8 @@ Debugging / refactoring / performance optimization questions:
     model: 'fast',
     tools: {},
     internal: true,
-    prompt: COMPACTOR_PROMPT,
+    // v3 状态合并的系统提示词由压缩管线（contextCheckpoint.buildStateMergePrompt）
+    // 在运行时注入，这里不保留静态正文。
+    prompt: '',
   },
 ];

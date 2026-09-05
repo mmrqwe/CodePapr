@@ -728,8 +728,9 @@ async function _proxyChatRequest(
 const BOOTSTRAP_REFRESH_TIMEOUT_MS = 30_000;
 
 /**
- * Ask the main thread to rebuild the session bootstrap with fresh disk state
- * (memory.md). Mirrors the proxy-chat request/response pattern. Resolves to the
+ * Ask the main thread to rebuild the session bootstrap from the fresh memory
+ * ledger (the main-thread refresher also primes the session bootstrap cache).
+ * Mirrors the proxy-chat request/response pattern. Resolves to the
  * fresh bootstrap string, or null when main has no refresher / empty result.
  * Times out (resolving null) so a stalled refresh never wedges compaction.
  */
