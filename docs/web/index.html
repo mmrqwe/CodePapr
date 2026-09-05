@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CodePapr — 本地编程 Agent 工作台</title>
+<title>CodePapr — 本地优先的编码 Agent 运行时</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='320' y1='280' x2='720' y2='780'%3E%3Cstop stop-color='%23D9673E'/%3E%3Cstop offset='1' stop-color='%23B84E2A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3Cpath d='M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z' fill='%23F0D5B2'/%3E%3Cpath d='M392 350h244' stroke='url(%23a)' stroke-width='40' stroke-linecap='round'/%3E%3Cpath d='M392 450h156' stroke='url(%23a)' stroke-width='40' stroke-linecap='round' opacity='.86'/%3E%3Cpath d='m432 592-80 80 80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m592 592 80 80-80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M540 560 484 784' stroke='url(%23a)' stroke-width='42' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -366,9 +366,9 @@
 
 <section class="hero">
   <div class="container">
-    <div class="status"><span class="live"></span>开源 · Tauri 2 · 30 核心工具 · MCP 支持 · 角色定制 · 语音合成 · 缓存优化 · Code Review</div>
-    <h1>CodePapr — <span class="gradient">The coolest Coding Agent</span></h1>
-    <p>在本地工作区自主搜索代码、精准修改、执行命令与验证测试。深度适配 LLM 前缀缓存。</p>
+    <div class="status"><span class="live"></span>开源 · 本地优先 · Tauri 桌面 · codepapr-server 宿主 · 插件市场 · MCP · 前缀缓存</div>
+    <h1>CodePapr — <span class="gradient">本地优先的编码 Agent 运行时</span></h1>
+    <p>桌面工作台 + 本地 codepapr-server 宿主：搜索、修改、执行与验证都在本机完成。主 Agent 调度 Explore / Scout / Mentor，深度适配 LLM 前缀缓存。</p>
     <div class="hero-actions">
       <a href="#" onclick="showComingSoon(event)" class="btn btn-primary">
         <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -392,7 +392,7 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> 四种工作方式</div>
       <h2>同一个 Runtime，四种模式</h2>
-      <p>从理解到执行，再到可视化应用生成</p>
+      <p>Ask · Plan · Agent · App —— 同一个 Runtime，从解释到执行再到 .papr 应用</p>
     </div>
     <div class="modes">
       <div class="mode-card ask reveal">
@@ -404,7 +404,7 @@
       <div class="mode-card plan reveal">
         <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14h2M13 14h2M9 18h2M13 18h2"/></svg></div>
         <h3>Plan</h3>
-        <p>大改动前先出任务清单、影响文件和验证路径。复杂任务拆成清晰步骤再动手。</p>
+        <p>大改动前先出方案、任务清单与验证路径；可用 question 澄清歧义，确认后再落地。</p>
         <span class="tag">规划 · 拆解</span>
       </div>
       <div class="mode-card agent reveal">
@@ -416,8 +416,8 @@
       <div class="mode-card app reveal">
         <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
         <h3>App</h3>
-        <p>一句指令即生成交互式应用。数据库分析、关系图、仪表盘——Agent 即时开发可视化工具，渲染到内置面板。</p>
-        <span class="tag">可视化 · 应用生成</span>
+        <p>生成交互式 .papr 应用（图表、看板、面板），也可从官方市场安装到全局或项目作用域，独立 origin / CSP / SQLite。</p>
+        <span class="tag">可视化 · 市场安装</span>
       </div>
     </div>
   </div>
@@ -428,12 +428,12 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> 桌面工作台</div>
       <h2>不只是聊天窗口</h2>
-      <p>文件树 · Monaco 编辑器 · Git · 浏览器 · LSP — 全在一个界面</p>
+      <p>文件树 · Monaco · Git · 浏览器 · LSP · 插件市场 — 全在一个界面</p>
     </div>
     <div class="features">
       <div class="feature reveal">
         <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
-        <div><h4>项目文件树 + LSP</h4><p>完整的项目浏览，Monaco 代码高亮，真实 LSP hover、跳转和问题标记。</p></div>
+        <div><h4>项目文件树 + LSP</h4><p>完整的项目浏览，Monaco 高亮，LSP 优先（定义/引用/hover/调用层级），不可用时自动降级 AST 项目图。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 17"/><line x1="12" y1="17" x2="20" y2="17"/></svg></div>
@@ -441,7 +441,7 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
-        <div><h4>Agent 自主执行</h4><p>自动搜索 + 读写 + 跑命令 + 验证。执行循环在工作区 Host 里跑，界面始终流畅。</p></div>
+        <div><h4>Agent 自主执行</h4><p>自动搜索 + 读写 + 跑命令 + 验证。Agent 循环在桌面端 @codepapr/core，副作用经本地宿主执行，界面保持流畅。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-cyan"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
@@ -457,7 +457,7 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></div>
-        <div><h4>Goal 自主循环</h4><p><code>/goal exec:npm test</code>：Host 主 Agent 执行，Verifier 验收，直到条件通过。</p></div>
+        <div><h4>Goal 自主循环</h4><p><code>/goal</code>：主 Agent 执行，Verifier 验收，直到验证条件通过。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-cyan"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
@@ -469,19 +469,19 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4"/><path d="M9 3v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></div>
-        <div><h4>项目记忆（零审核）</h4><p>自动写入偏好、约束与已验证事实。短指令每次会话带着，踩坑经验这一轮再用，网页引用只进搜索。<a href="context-architecture.html">上下文怎么拼</a>。</p></div>
+        <div><h4>项目记忆（零审核）</h4><p>偏好、约束与已验证事实自动写入 SQLite 账本；面板是唯一给人看的面。短指令进 Bootstrap，踩坑经验按回合 Recall，网页引用只进搜索。<a href="context-architecture.html">上下文怎么拼</a>。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
-        <div><h4>可视化 Code Review</h4><p>Diff 审查、逐行评论、审批状态。</p></div>
+        <div><h4>App / 插件市场</h4><p>从官方注册表安装 .papr 到全局或项目；独立 origin、CSP 与私有 SQLite，支持 app_publish 推送。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
-        <div><h4>全局搜索</h4><p>对话和文件两个 Tab，键盘操作。</p></div>
+        <div><h4>多 Agent 协作</h4><p>主 Agent 经 task 调度 Explore（代码）、Scout（网页）、Mentor（架构）；另有 Verifier / Compactor。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
-        <div><h4>CLI、TUI 与 Host API</h4><p>统一工作区 Host（Source of Truth）。终端 <code>codepapr tui</code> / <code>agent</code> 与桌面共用模型与会话。JSON-RPC CQE 协议支持多端协同。<a href="tutorial.html#cli-host">教程</a></p></div>
+        <div><h4>桌面 + CLI 宿主</h4><p>桌面与 codepapr-cli 共用本地 codepapr-server（JSON-RPC）。领域能力在 codepapr-core，客户端只做瘦调用方。<a href="tutorial.html#cli-host">教程</a></p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
@@ -509,7 +509,7 @@
           <tr><td><code>/help</code> &nbsp; <code>/commands</code></td><td>列出所有可用命令及说明</td><td><span class="badge-model badge-local">本地</span></td></tr>
           <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文，Compactor 内部代理生成检查点（LLM 失败时降级为规则摘要）</td><td><span class="badge-model badge-primary">主 / 快速</span></td></tr>
           <tr><td><code>/undo</code></td><td>撤销上一次对话重置（恢复被截断的对话与代码快照）</td><td><span class="badge-model badge-local">本地</span></td></tr>
-          <tr><td><code>/goal</code></td><td>自主循环：Host 主 Agent 执行 + Verifier 验收，直到验证条件通过</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
+          <tr><td><code>/goal</code></td><td>自主循环：主 Agent 执行 + Verifier 验收，直到验证条件通过</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
           <tr><td><code>/review</code></td><td>审查改动或指定范围，优先报告 bug 和回归风险</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
           <tr><td><code>/fix</code></td><td>定位并修复问题，自动运行验证</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
           <tr><td><code>/test</code></td><td>为指定功能补测试或运行已有测试</td><td><span class="badge-model badge-primary">主模型</span></td></tr>
@@ -538,29 +538,29 @@
   <div class="container">
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> 系统架构</div>
-      <h2>一份 Host，多个 Client</h2>
-      <p>工作区 Host 是唯一执行后端。桌面 / TUI / CLI 只是 JSON-RPC 客户端；Tauri 是壳，不是 Agent。</p>
+      <h2>本地宿主，多个客户端</h2>
+      <p>领域副作用走 codepapr-server 宿主；Agent 循环与提示词在 TypeScript 客户端。Tauri 是壳，不是 Agent。</p>
     </div>
         <div class="arch">
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
-        <h4>Clients</h4><p>Desktop · TUI · CLI<br>同一套协议</p>
+        <h4>Clients</h4><p>Desktop · CLI<br>同一套 JSON-RPC</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
-        <h4>Workspace Host</h4><p>控制面 · 状态面 · 执行面<br>JSON-RPC <code>codepapr-host/1</code></p>
+        <h4>codepapr-server</h4><p>本地宿主守护进程 / 159+ RPC · 行分隔 JSON-RPC</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/></svg></div>
-        <h4>Core Agent</h4><p>缓存分区 · 工具 · 子代理<br>Goal · Compact · Recall</p>
+        <h4>@codepapr/core</h4><p>Agent 循环 · 缓存 · 工具 / Explore / Scout / Mentor</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg></div>
-        <h4>project.sqlite</h4><p>Archive · Surface · Memory<br>node:sqlite 权威库</p>
+        <h4>project.sqlite</h4><p>会话 · 记忆账本 · 插件 UI / 工作区权威库</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/></svg></div>
-        <h4>Desktop 壳</h4><p>Tauri 窗口 · Monaco<br>.papr · Stronghold</p>
+        <h4>Desktop 壳</h4><p>Tauri · Monaco · 浏览器 / .papr · Stronghold · TTS</p>
       </div>
     </div>
     <p class="reveal" style="text-align:center;margin-top:28px;color:var(--foreground-muted);font-size:0.95rem">想动手改或优化？读 <a href="host-architecture.html" style="color:var(--accent)">Host–Client 架构</a> 与 <a href="context-architecture.html" style="color:var(--accent)">上下文分层</a>。</p>
@@ -583,7 +583,7 @@
 
 <footer>
   <div class="container">
-    <p>CodePapr &mdash; 本地编程 Agent 工作台</p>
+    <p>CodePapr &mdash; 本地优先的编码 Agent 运行时</p>
   </div>
 </footer>
 

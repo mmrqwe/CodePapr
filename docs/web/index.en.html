@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CodePapr — Local Coding Agent Workbench</title>
+<title>CodePapr — Local-first Coding Agent Runtime</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='320' y1='280' x2='720' y2='780'%3E%3Cstop stop-color='%23D9673E'/%3E%3Cstop offset='1' stop-color='%23B84E2A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3Cpath d='M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z' fill='%23F0D5B2'/%3E%3Cpath d='M392 350h244' stroke='url(%23a)' stroke-width='40' stroke-linecap='round'/%3E%3Cpath d='M392 450h156' stroke='url(%23a)' stroke-width='40' stroke-linecap='round' opacity='.86'/%3E%3Cpath d='m432 592-80 80 80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m592 592 80 80-80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M540 560 484 784' stroke='url(%23a)' stroke-width='42' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -364,9 +364,9 @@
 
 <section class="hero">
   <div class="container">
-    <div class="status"><span class="live"></span>Open Source · Tauri 2 · 30 Core Tools · MCP · Character Customization · Voice Synthesis · Cache-Optimized · Code Review</div>
-    <h1>CodePapr — <span class="gradient">The coolest Coding Agent</span></h1>
-    <p>Autonomous code search, precise edits, command execution, and test verification in your local workspace. Deeply adapted for LLM prefix caching.</p>
+    <div class="status"><span class="live"></span>Open Source · Local-first · Tauri Desktop · codepapr-server Host · Plugin Market · MCP · Prefix Cache</div>
+    <h1>CodePapr — <span class="gradient">Local-first Coding Agent Runtime</span></h1>
+    <p>Desktop workbench + local codepapr-server host: search, edit, run, and verify on your machine. The main agent delegates Explore / Scout / Mentor, with deep LLM prefix-cache optimization.</p>
     <div class="hero-actions">
       <a href="#" onclick="showComingSoon(event)" class="btn btn-primary">
         <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -390,7 +390,7 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> Four Ways to Work</div>
       <h2>One Runtime, Four Modes</h2>
-      <p>From understanding to execution to interactive app generation</p>
+      <p>Ask · Plan · Agent · App — one runtime, from explanation to execution to .papr apps</p>
     </div>
     <div class="modes">
       <div class="mode-card ask reveal">
@@ -402,7 +402,7 @@
       <div class="mode-card plan reveal">
         <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14h2M13 14h2M9 18h2M13 18h2"/></svg></div>
         <h3>Plan</h3>
-        <p>Before big changes, produce task lists, affected files, and verification paths. Break complex tasks into clear steps before acting.</p>
+        <p>Before big changes, produce a plan, task list, and verification path; use question to clarify ambiguity, then execute after confirmation.</p>
         <span class="tag">Plan · Decompose</span>
       </div>
       <div class="mode-card agent reveal">
@@ -414,8 +414,8 @@
       <div class="mode-card app reveal">
         <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
         <h3>App</h3>
-        <p>One command to generate an interactive app. Database analysis, relationship diagrams, dashboards — the Agent builds visualization tools and renders them in a built-in panel.</p>
-        <span class="tag">Visualization · App Gen</span>
+        <p>Generate interactive .papr apps (charts, boards, panels), or install from the official market into global or project scope — isolated origin / CSP / SQLite.</p>
+        <span class="tag">Visualization · Market Install</span>
       </div>
     </div>
   </div>
@@ -426,12 +426,12 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> Desktop Workbench</div>
       <h2>More Than a Chat Window</h2>
-      <p>File Tree · Monaco Editor · Git · Browser · LSP — all in one interface</p>
+      <p>File Tree · Monaco · Git · Browser · LSP · Plugin Market — all in one interface</p>
     </div>
     <div class="features">
       <div class="feature reveal">
         <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
-        <div><h4>Project File Tree + LSP</h4><p>Full project browsing, Monaco syntax highlighting, real LSP hover, jump-to-definition, and diagnostics.</p></div>
+        <div><h4>Project File Tree + LSP</h4><p>Full project browsing, Monaco highlighting, LSP-first (definition/references/hover/call hierarchy), with automatic AST project-graph fallback when LSP is unavailable.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 17"/><line x1="12" y1="17" x2="20" y2="17"/></svg></div>
@@ -439,7 +439,7 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
-        <div><h4>Agent Autonomous Execution</h4><p>Auto search + read/write + run commands + verify. The loop runs on the workspace Host; UI stays responsive.</p></div>
+        <div><h4>Agent Autonomous Execution</h4><p>Auto search + read/write + run commands + verify. The agent loop runs in desktop @codepapr/core; side effects go through the local host so the UI stays responsive.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-cyan"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
@@ -455,7 +455,7 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></div>
-        <div><h4>Goal Autonomous Loop</h4><p><code>/goal exec:npm test</code>: Host main Agent runs, Verifier checks, until the condition passes.</p></div>
+        <div><h4>Goal Autonomous Loop</h4><p><code>/goal</code>: main Agent runs, Verifier checks, until the verification condition passes.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-cyan"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
@@ -467,19 +467,19 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4"/><path d="M9 3v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></div>
-        <div><h4>Project Memory (zero-review)</h4><p>Preferences, constraints, and verified facts save automatically. Short instructions every session, procedures this turn if useful, web citations in search only. <a href="context-architecture.en.html">How context is stacked</a>.</p></div>
+        <div><h4>Project Memory (zero-review)</h4><p>Preferences, constraints, and verified facts write automatically to the SQLite ledger; the panel is the only human-facing surface. Short instructions go into Bootstrap, procedures Recall per turn, web citations into search only. <a href="context-architecture.en.html">How context is stacked</a>.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
-        <div><h4>Visual Code Review</h4><p>Diff review, line comments, approval status.</p></div>
+        <div><h4>App / Plugin Market</h4><p>Install .papr from the official registry into global or project scope; isolated origin, CSP, and private SQLite, with app_publish push.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
-        <div><h4>Global Search</h4><p>Chat and Files tabs. Keyboard-driven.</p></div>
+        <div><h4>Multi-agent Collaboration</h4><p>Main agent schedules Explore (code), Scout (web), and Mentor (architecture) via task; plus Verifier / Compactor.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
-        <div><h4>CLI, TUI &amp; Host API</h4><p>Unified Workspace Host (Source of Truth). Terminal <code>codepapr tui</code> / <code>agent</code> shares settings and sessions. JSON-RPC CQE protocol for multi-client workflows. <a href="tutorial.en.html#cli-host">Tutorial</a></p></div>
+        <div><h4>Desktop + CLI Host</h4><p>Desktop and codepapr-cli share the local codepapr-server (JSON-RPC). Domain capability lives in codepapr-core; clients are thin callers. <a href="tutorial.en.html#cli-host">Tutorial</a></p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
@@ -507,7 +507,7 @@
           <tr><td><code>/help</code> &nbsp; <code>/commands</code></td><td>List all available commands and descriptions</td><td><span class="badge-model badge-local">Local</span></td></tr>
           <tr><td><code>/compact</code></td><td>Force-compress current session context; the internal Compactor agent generates the checkpoint (rule-based fallback on LLM failure)</td><td><span class="badge-model badge-primary">Primary / Fast</span></td></tr>
           <tr><td><code>/undo</code></td><td>Undo the last conversation reset (restore truncated messages and code snapshot)</td><td><span class="badge-model badge-local">Local</span></td></tr>
-          <tr><td><code>/goal</code></td><td>Autonomous loop: Host main Agent executes + Verifier audits, until condition passes</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/goal</code></td><td>Autonomous loop: main Agent executes + Verifier audits, until the verification condition passes</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
           <tr><td><code>/review</code></td><td>Review changes or specified scope, prioritize bugs and regression risks</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
           <tr><td><code>/fix</code></td><td>Locate and fix issues, auto-run verification</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
           <tr><td><code>/test</code></td><td>Add tests for specified feature or run existing tests</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
@@ -536,29 +536,29 @@
   <div class="container">
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> System Architecture</div>
-      <h2>One Host, many Clients</h2>
-      <p>The workspace Host is the only execution backend. Desktop / TUI / CLI are JSON-RPC clients; Tauri is the shell, not the Agent.</p>
+      <h2>Local host, many clients</h2>
+      <p>Domain side effects go through the codepapr-server host; the agent loop and prompts live in the TypeScript client. Tauri is the shell, not the Agent.</p>
     </div>
         <div class="arch">
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
-        <h4>Clients</h4><p>Desktop · TUI · CLI<br>One protocol</p>
+        <h4>Clients</h4><p>Desktop · CLI<br>Same JSON-RPC</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
-        <h4>Workspace Host</h4><p>Control · State · Execution<br>JSON-RPC <code>codepapr-host/1</code></p>
+        <h4>codepapr-server</h4><p>Local host daemon / 159+ RPC · newline-delimited JSON-RPC</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/></svg></div>
-        <h4>Core Agent</h4><p>Cache partitions · tools · subagents<br>Goal · Compact · Recall</p>
+        <h4>@codepapr/core</h4><p>Agent loop · cache · tools / Explore / Scout / Mentor</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg></div>
-        <h4>project.sqlite</h4><p>Archive · Surface · Memory<br>node:sqlite authority</p>
+        <h4>project.sqlite</h4><p>Sessions · memory ledger · plugin UI / workspace authority</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/></svg></div>
-        <h4>Desktop shell</h4><p>Tauri window · Monaco<br>.papr · Stronghold</p>
+        <h4>Desktop shell</h4><p>Tauri · Monaco · browser / .papr · Stronghold · TTS</p>
       </div>
     </div>
     <p class="reveal" style="text-align:center;margin-top:28px;color:var(--foreground-muted);font-size:0.95rem">To extend or optimize, read <a href="host-architecture.en.html" style="color:var(--accent)">Host–Client architecture</a> and <a href="context-architecture.en.html" style="color:var(--accent)">context layering</a>.</p>
@@ -581,7 +581,7 @@
 
 <footer>
   <div class="container">
-    <p>CodePapr &mdash; Local Coding Agent Workbench</p>
+    <p>CodePapr &mdash; Local-first Coding Agent Runtime</p>
   </div>
 </footer>
 
