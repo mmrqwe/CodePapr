@@ -3,170 +3,644 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CodePapr — A Local-First Coding Agent Runtime</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3C/svg%3E">
+<title>CodePapr — Local Coding Agent Workbench</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='320' y1='280' x2='720' y2='780'%3E%3Cstop stop-color='%23D9673E'/%3E%3Cstop offset='1' stop-color='%23B84E2A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z' fill='%23FFF8EF'/%3E%3Cpath d='M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z' fill='%23F0D5B2'/%3E%3Cpath d='M392 350h244' stroke='url(%23a)' stroke-width='40' stroke-linecap='round'/%3E%3Cpath d='M392 450h156' stroke='url(%23a)' stroke-width='40' stroke-linecap='round' opacity='.86'/%3E%3Cpath d='m432 592-80 80 80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='m592 592 80 80-80 80' stroke='url(%23a)' stroke-width='42' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M540 560 484 784' stroke='url(%23a)' stroke-width='42' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
-:root{--bg-deep:#06070a;--bg-card:rgba(15,18,26,.8);--surface:rgba(255,255,255,.04);--border:rgba(255,255,255,.07);--border-hover:rgba(99,102,241,.25);--foreground:#edeff5;--foreground-muted:#8b90a0;--foreground-dim:#5c6170;--accent:#6366f1;--green:#22c55e;--amber:#f59e0b;--orange:#d9673e;--radius:16px;--radius-sm:10px;--radius-xs:6px;--font-mono:'JetBrains Mono','SF Mono',monospace;--font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
-[data-theme="light"]{--bg-deep:#f7f4ef;--bg-card:rgba(245,241,236,.85);--surface:rgba(54,32,17,.05);--border:rgba(27,18,10,.08);--border-hover:rgba(217,103,62,.35);--foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;--accent:#d9673e;--green:#15803d;--amber:#a56a1d;--orange:#c25a35}
-@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg-deep:#f7f4ef;--bg-card:rgba(245,241,236,.85);--surface:rgba(54,32,17,.05);--border:rgba(27,18,10,.08);--border-hover:rgba(217,103,62,.35);--foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;--accent:#d9673e;--green:#15803d;--amber:#a56a1d;--orange:#c25a35}}
-body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.6;-webkit-font-smoothing:antialiased}
-code{font-family:var(--font-mono);font-size:.86em;color:var(--accent)}
-.container{max-width:1080px;margin:0 auto;padding:0 32px}
-@media(max-width:768px){.container{padding:0 20px}}
-nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,.82);backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border)}
-[data-theme="light"] nav{background:rgba(245,241,236,.88)}
-@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) nav{background:rgba(245,241,236,.88)}}
-nav .container{display:flex;align-items:center;justify-content:space-between;height:64px;max-width:1200px}
-.logo{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground)}
-.logo-icon{width:30px;height:30px;flex-shrink:0}.logo-icon svg{width:100%;height:100%}
-.nav-links{display:flex;gap:20px;list-style:none;flex-wrap:wrap}
-.nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:.85rem;font-weight:500}
-.nav-links a:hover{color:var(--foreground)}
-.nav-right{display:flex;align-items:center;gap:6px}
-.theme-toggle,.lang-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;text-decoration:none;font-size:.73rem;font-weight:700;font-family:var(--font-mono)}
-.theme-toggle:hover,.lang-toggle:hover{color:var(--foreground);border-color:var(--border-hover)}
-.theme-toggle svg{width:16px;height:16px}
-.theme-toggle .icon-sun{display:none}.theme-toggle .icon-moon{display:block}
-[data-theme="light"] .theme-toggle .icon-sun{display:block}[data-theme="light"] .theme-toggle .icon-moon{display:none}
-@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}:root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}}
-.nav-toggle{display:none;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;margin-left:8px}
-.nav-toggle svg{width:18px;height:18px}.nav-toggle .icon-close{display:none}
-body.nav-open .nav-toggle .icon-open{display:none}body.nav-open .nav-toggle .icon-close{display:block}
-@media(max-width:768px){.nav-toggle{display:inline-flex}nav .container{flex-wrap:wrap}.nav-links{display:none;order:10;width:100%;flex-direction:column;gap:0;padding:12px 0 8px;border-top:1px solid var(--border);margin-top:8px}body.nav-open .nav-links{display:flex}body.nav-open .nav-links a{display:block;padding:12px 4px;font-size:.95rem;border-bottom:1px solid var(--border)}}
-.hero{padding:120px 0 40px}
-.status{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:.72rem;color:var(--foreground-dim);letter-spacing:.03em;margin-bottom:18px;flex-wrap:wrap}
-.live{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
-.hero h1{font-size:clamp(2rem,4.4vw,3rem);font-weight:700;letter-spacing:-.03em;line-height:1.14;margin-bottom:16px}
-.hero .gradient{color:var(--accent)}
-.hero p{color:var(--foreground-muted);font-size:1.05rem;max-width:720px;margin-bottom:26px}
-.hero p strong{color:var(--foreground);font-weight:600}
-.cta{display:flex;gap:12px;flex-wrap:wrap}
-.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:var(--radius-sm);font-size:.88rem;font-weight:600;text-decoration:none;border:1px solid var(--border)}
-.btn-primary{background:var(--accent);color:#fff;border-color:transparent}
-.btn-ghost{color:var(--foreground);background:var(--surface)}
-.btn:hover{border-color:var(--border-hover)}
-.sec{padding:44px 0 8px}
-.sec h2{font-size:1.4rem;font-weight:700;letter-spacing:-.02em;margin-bottom:8px}
-.lead{color:var(--foreground-muted);margin-bottom:20px;max-width:720px;font-size:.95rem}
-.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}
-.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
-@media(max-width:860px){.grid4{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:640px){.grid2,.grid4{grid-template-columns:1fr}}
-.card{padding:18px 20px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card)}
-.card.top{border-top:3px solid var(--c,var(--accent))}
-.card .tag{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.1em;color:var(--c,var(--accent));font-weight:700}
-.card h3{font-size:1rem;margin:6px 0 8px}
-.card p{color:var(--foreground-muted);font-size:.85rem}
-pre{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;overflow-x:auto;font-family:var(--font-mono);font-size:.73rem;line-height:1.55;color:var(--foreground-muted);margin:14px 0}
-table{width:100%;border-collapse:collapse;font-size:.83rem}
-th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
-th{color:var(--foreground-dim);font-family:var(--font-mono);font-size:.68rem;letter-spacing:.05em}
-.tbl-wrap{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);padding:2px 14px;margin-bottom:14px}
-.note{margin-top:14px;padding:14px 16px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--foreground-muted);font-size:.85rem}
-.note strong{color:var(--foreground)}
-footer{border-top:1px solid var(--border);margin-top:50px;padding:26px 0 44px;color:var(--foreground-dim);font-size:.8rem}
-footer a{color:var(--foreground-muted);margin-right:14px}
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
+
+  :root{
+    --bg-deep:#06070a;--bg-base:#0a0c12;--bg-elevated:#0f121a;--bg-card:rgba(15,18,26,0.8);
+    --surface:rgba(255,255,255,0.04);--surface-hover:rgba(255,255,255,0.06);
+    --border:rgba(255,255,255,0.07);--border-hover:rgba(99,102,241,0.25);
+    --foreground:#edeff5;--foreground-muted:#8b90a0;--foreground-dim:#5c6170;
+    --accent:#6366f1;--accent-glow:rgba(99,102,241,0.18);--accent-soft:rgba(99,102,241,0.09);
+    --green:#22c55e;--green-glow:rgba(34,197,94,0.15);--amber:#f59e0b;
+    --radius:16px;--radius-sm:10px;--radius-xs:6px;
+    --font-mono:'JetBrains Mono','Cascadia Code','SF Mono',monospace;
+    --font-sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    --easing:cubic-bezier(0.16,1,0.3,1);
+    --texture-opacity:0;
+  }
+  [data-theme="light"] {
+    --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
+    --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
+    --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
+    --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
+    --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
+    --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;
+    --texture-opacity:1;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg-deep:#f7f4ef;--bg-base:#fffdf9;--bg-elevated:#f5f0e9;--bg-card:rgba(245,241,236,0.85);
+      --surface:rgba(54,32,17,0.05);--surface-hover:rgba(54,32,17,0.08);
+      --border:rgba(27,18,10,0.08);--border-hover:rgba(217,103,62,0.35);
+      --foreground:#1e1b18;--foreground-muted:#544d44;--foreground-dim:#6e665e;
+      --accent:#d9673e;--accent-glow:rgba(217,103,62,0.15);--accent-soft:rgba(217,103,62,0.1);
+      --green:#15803d;--green-glow:rgba(21,128,61,0.1);--amber:#a56a1d;
+      --texture-opacity:1;
+    }
+  }
+
+  body{font-family:var(--font-sans);background:var(--bg-deep);color:var(--foreground);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased;transition:background-color 0.4s,color 0.4s}
+  body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:calc(var(--texture-opacity) * 0.035);background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:256px 256px}
+
+  /* Ambient background */
+  .ambient{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+  .ambient::before{
+    content:'';position:absolute;inset:0;
+    background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(99,102,241,0.06) 0%,transparent 60%),
+               radial-gradient(ellipse 60% 50% at 70% 85%,rgba(34,197,94,0.04) 0%,transparent 60%),
+               radial-gradient(ellipse 70% 80% at 50% 50%,rgba(99,102,241,0.03) 0%,transparent 70%);
+  }
+  [data-theme="light"] .ambient::before{
+    background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),
+               radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%),
+               radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.04) 0%,transparent 70%);
+  }
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient::before{background:radial-gradient(ellipse 80% 60% at 30% 10%,rgba(217,103,62,0.06) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 70% 85%,rgba(21,128,61,0.04) 0%,transparent 60%),radial-gradient(ellipse 70% 80% at 50% 50%,rgba(217,103,62,0.04) 0%,transparent 70%)}}
+  .ambient .blob{position:absolute;border-radius:50%;filter:blur(120px);opacity:0.08;transition:opacity 0.4s}
+  [data-theme="light"] .ambient .blob{opacity:0.05}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ambient .blob{opacity:0.05}}
+  .blob-1{width:700px;height:700px;background:var(--accent);top:-15%;left:-10%;animation:drift 28s ease-in-out infinite}
+  .blob-2{width:500px;height:500px;background:var(--green);bottom:-10%;right:-8%;animation:drift 32s ease-in-out infinite reverse}
+  .blob-3{width:400px;height:400px;background:#8b5cf6;top:55%;left:55%;animation:drift 24s ease-in-out infinite}
+  @keyframes drift{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(50px,-30px) scale(1.08)}66%{transform:translate(-20px,40px) scale(0.94)}}
+
+  /* Grid overlay */
+  .grid-overlay{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0.3;transition:opacity 0.4s;
+    background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+    background-size:64px 64px;mask-image:radial-gradient(ellipse 60% 60% at 50% 50%,black 30%,transparent 70%)}
+  [data-theme="light"] .grid-overlay{opacity:0.6}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .grid-overlay{opacity:0.6}}
+
+  .container{max-width:1200px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
+  @media(max-width:768px){.container{padding:0 20px}}
+
+  /* Nav */
+  nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(6,7,10,0.82);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid var(--border);transition:background-color 0.4s}
+  [data-theme="light"] nav{background:rgba(245,241,236,0.88)}
+  @media (prefers-color-scheme: light) {:root:not([data-theme="dark"]) nav{background:rgba(245,241,236,0.88)}}
+  nav .container{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .logo{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:700;font-size:1.1rem;color:var(--foreground);letter-spacing:-0.01em}
+  .logo-icon{width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-xs)}
+  .logo-icon svg{width:100%;height:100%}
+  [data-theme="light"] .logo-icon{background:rgba(0,0,0,0.04);box-shadow:0 1px 3px rgba(0,0,0,0.05)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .logo-icon{background:rgba(0,0,0,0.04);box-shadow:0 1px 3px rgba(0,0,0,0.05)}}
+  .nav-links{display:flex;gap:36px;list-style:none}
+  .nav-links a{color:var(--foreground-muted);text-decoration:none;font-size:0.875rem;font-weight:500;transition:color 0.2s}
+  .nav-links a:hover{color:var(--foreground)}
+  .nav-cta{display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:var(--radius-xs);background:var(--accent);color:#fff;font-size:0.85rem;font-weight:600;text-decoration:none;transition:all 0.2s;box-shadow:0 2px 12px var(--accent-glow)}
+  .nav-cta:hover{box-shadow:0 4px 20px rgba(99,102,241,0.35);transform:translateY(-1px)}
+  [data-theme="light"] .nav-cta:hover{box-shadow:0 4px 20px rgba(217,103,62,0.35)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .nav-cta:hover{box-shadow:0 4px 20px rgba(217,103,62,0.35)}}
+  .theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;transition:all 0.2s;margin-left:8px;flex-shrink:0}
+  .theme-toggle:hover{border-color:var(--border-hover);color:var(--foreground)}
+  .theme-toggle svg{width:17px;height:17px}
+  .theme-toggle .icon-sun{display:none}
+  .theme-toggle .icon-moon{display:block}
+  [data-theme="light"] .theme-toggle .icon-sun{display:block}
+  [data-theme="light"] .theme-toggle .icon-moon{display:none}
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) .theme-toggle .icon-sun{display:block}
+    :root:not([data-theme="dark"]) .theme-toggle .icon-moon{display:none}
+  }
+  .lang-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;transition:all 0.2s;margin-left:4px;flex-shrink:0;font-size:0.8rem;font-weight:600;text-decoration:none;font-family:var(--font-sans)}
+  .lang-toggle:hover{border-color:var(--border-hover);color:var(--foreground)}
+  
+
+  /* Sections */
+  section{position:relative;z-index:1}
+  .section-label{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:100px;border:1px solid var(--border);font-size:0.78rem;color:var(--foreground-dim);font-weight:500;margin-bottom:20px;font-family:var(--font-mono)}
+  .section-label .dot{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+
+  /* Hero */
+  .hero{padding:180px 0 100px;text-align:center}
+  .hero .status{display:inline-flex;align-items:center;gap:8px;padding:5px 16px;border-radius:100px;border:1px solid rgba(34,197,94,0.25);background:var(--green-glow);font-size:0.8rem;color:#4ade80;margin-bottom:36px;font-family:var(--font-mono);font-weight:500}
+  .hero .status .live{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 6px var(--green)}50%{opacity:0.3;box-shadow:none}}
+
+  .hero h1{font-size:clamp(2.8rem,7vw,5rem);font-weight:800;line-height:1.08;letter-spacing:-0.03em;margin-bottom:28px;max-width:900px;margin-inline:auto}
+  .hero h1 .gradient{background:linear-gradient(135deg,#f0f2f8 0%,#c7ccf0 30%,var(--accent) 55%,#a78bfa 80%,var(--foreground) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+  [data-theme="light"] .hero h1 .gradient{background:linear-gradient(135deg,#1e1b18 0%,#d9673e 40%,#bf4f28 70%,#1e1b18 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .hero h1 .gradient{background:linear-gradient(135deg,#1e1b18 0%,#d9673e 40%,#bf4f28 70%,#1e1b18 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}}
+  .hero p{font-size:1.15rem;color:var(--foreground-muted);max-width:620px;margin:0 auto 48px;line-height:1.75;font-weight:350}
+  .hero-actions{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:10px;padding:15px 30px;border-radius:var(--radius-sm);font-size:0.95rem;font-weight:600;text-decoration:none;transition:all 0.25s var(--easing);cursor:pointer;border:none;font-family:var(--font-sans)}
+  .btn-primary{background:var(--accent);color:#fff;box-shadow:0 4px 24px var(--accent-glow)}
+  .btn-primary:hover{box-shadow:0 8px 32px rgba(99,102,241,0.4),0 0 0 1px rgba(99,102,241,0.35);transform:translateY(-2px)}
+  [data-theme="light"] .btn-primary:hover{box-shadow:0 8px 32px rgba(217,103,62,0.35),0 0 0 1px rgba(217,103,62,0.3)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .btn-primary:hover{box-shadow:0 8px 32px rgba(217,103,62,0.35),0 0 0 1px rgba(217,103,62,0.3)}}
+  .btn-secondary{border:1px solid var(--border);color:var(--foreground);background:var(--surface)}
+  .btn-secondary:hover{border-color:var(--border-hover);background:var(--surface-hover)}
+  .btn svg{width:18px;height:18px;flex-shrink:0}
+
+  /* Demo Window */
+  .demo-window{max-width:750px;margin:72px auto 0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--bg-base);box-shadow:0 30px 80px rgba(0,0,0,0.5),0 0 0 1px rgba(99,102,241,0.06);transition:box-shadow 0.4s}
+  [data-theme="light"] .demo-window{box-shadow:0 20px 60px rgba(0,0,0,0.08),0 0 0 1px rgba(99,102,241,0.08)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .demo-window{box-shadow:0 20px 60px rgba(0,0,0,0.08),0 0 0 1px rgba(99,102,241,0.08)}}
+  .demo-bar{display:flex;align-items:center;gap:8px;padding:13px 18px;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+  .demo-bar .dot{width:11px;height:11px;border-radius:50%}
+  .demo-bar .dot:nth-child(1){background:#ef4444}.demo-bar .dot:nth-child(2){background:var(--amber)}.demo-bar .dot:nth-child(3){background:var(--green)}
+  .demo-bar span{font-size:0.72rem;color:var(--foreground-dim);margin-left:10px;font-family:var(--font-mono)}
+  .demo-body{padding:24px 28px;font-family:var(--font-mono);font-size:0.84rem;line-height:1.9;color:var(--foreground-muted)}
+  .demo-img-dark{display:block}
+  .demo-img-light{display:none}
+  [data-theme="light"] .demo-img-dark{display:none}
+  [data-theme="light"] .demo-img-light{display:block}
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) .demo-img-dark{display:none}
+    :root:not([data-theme="dark"]) .demo-img-light{display:block}
+  }
+  .demo-body .cmd{color:#818cf8}.demo-body .arg{color:var(--foreground-dim)}.demo-body .output{color:var(--foreground-muted)}
+  .demo-body .green{color:#4ade80}.demo-body .cursor{display:inline-block;width:7px;height:15px;background:#818cf8;animation:blink 0.9s step-end infinite;vertical-align:text-bottom}
+  [data-theme="light"] .demo-body .cmd{color:#bf4f28}
+  [data-theme="light"] .demo-body .cursor{background:#bf4f28}
+  [data-theme="light"] .demo-body .green{color:#166534}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .demo-body .cmd{color:#bf4f28}:root:not([data-theme="dark"]) .demo-body .cursor{background:#bf4f28}:root:not([data-theme="dark"]) .demo-body .green{color:#166534}}
+  @keyframes blink{50%{opacity:0}}
+  .demo-dropdown{background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:8px 0;margin:6px 0 16px}
+  .demo-dropdown div{padding:6px 16px;font-size:0.8rem;display:flex;align-items:center;gap:12px}
+  .demo-dropdown .highlight{background:rgba(99,102,241,0.12);color:var(--foreground)}
+  [data-theme="light"] .demo-dropdown .highlight{background:rgba(217,103,62,0.12)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .demo-dropdown .highlight{background:rgba(217,103,62,0.12)}}
+  .demo-dropdown .cmd-name{color:#818cf8}.demo-dropdown .cmd-desc{color:var(--foreground-dim)}
+  [data-theme="light"] .demo-dropdown .cmd-name{color:#bf4f28}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .demo-dropdown .cmd-name{color:#bf4f28}}
+
+  /* Section */
+  .section{padding:120px 0}
+  .section-header{text-align:center;margin-bottom:72px}
+  .section-header h2{font-size:2.2rem;font-weight:700;color:var(--foreground);letter-spacing:-0.02em;margin-bottom:16px}
+  .section-header p{color:var(--foreground-muted);font-size:1.05rem;max-width:540px;margin:0 auto}
+
+  /* Mode Cards */
+  .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px}
+  .mode-card{position:relative;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:40px 32px 36px;transition:all 0.35s var(--easing);overflow:hidden}
+  .mode-card:hover{border-color:rgba(255,255,255,0.12);transform:translateY(-4px);box-shadow:0 24px 60px rgba(0,0,0,0.45)}
+  [data-theme="light"] .mode-card:hover{box-shadow:0 16px 40px rgba(0,0,0,0.06)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .mode-card:hover{box-shadow:0 16px 40px rgba(0,0,0,0.06)}}
+  .mode-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;transition:opacity 0.3s}
+  .mode-card:hover::before{opacity:1!important}
+  .mode-card.ask::before{background:linear-gradient(90deg,var(--green),#10b981);opacity:0.5}
+  .mode-card.plan::before{background:linear-gradient(90deg,var(--amber),#fbbf24);opacity:0.5}
+  .mode-card.agent::before{background:linear-gradient(90deg,var(--accent),#8b5cf6);opacity:0.5}
+  [data-theme="light"] .mode-card.agent::before{background:linear-gradient(90deg,var(--accent),#bf4f28)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .mode-card.agent::before{background:linear-gradient(90deg,var(--accent),#bf4f28)}}
+  .mode-card .icon-wrap{width:44px;height:44px;border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;margin-bottom:20px}
+  .mode-card.ask .icon-wrap{background:var(--green-glow);color:var(--green)}
+  .mode-card.plan .icon-wrap{background:rgba(245,158,11,0.12);color:var(--amber)}
+  .mode-card.agent .icon-wrap{background:var(--accent-glow);color:var(--accent)}
+  .mode-card h3{font-size:1.15rem;font-weight:700;color:var(--foreground);margin-bottom:8px}
+  .mode-card p{font-size:0.9rem;color:var(--foreground-muted);line-height:1.65}
+  .mode-card .tag{display:inline-block;margin-top:18px;padding:3px 10px;border-radius:100px;font-size:0.72rem;font-weight:600;font-family:var(--font-mono)}
+  .mode-card.ask .tag{background:var(--green-glow);color:var(--green)}
+  .mode-card.plan .tag{background:rgba(245,158,11,0.1);color:var(--amber)}
+  .mode-card.agent .tag{background:var(--accent-soft);color:#a5b4fc}
+  [data-theme="light"] .mode-card.agent .tag{color:#bf4f28}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .mode-card.agent .tag{color:#bf4f28}}
+  .mode-card.app::before{background:linear-gradient(90deg,#2dd4bf,#06b6d4);opacity:0.5}
+  .mode-card.app .icon-wrap{background:rgba(45,212,191,0.12);color:#2dd4bf}
+  .mode-card.app .tag{background:rgba(45,212,191,0.1);color:#2dd4bf}
+
+  /* Features */
+  .features{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+  .feature{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:32px;transition:border-color 0.3s;display:flex;gap:20px;align-items:flex-start}
+  .feature:hover{border-color:rgba(255,255,255,0.1)}
+  .feature .ficon{width:44px;height:44px;border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .feature .ficon svg{width:20px;height:20px}
+  .ficon-indigo{background:var(--accent-soft);color:#a5b4fc}
+  [data-theme="light"] .ficon-indigo{color:#bf4f28}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .ficon-indigo{color:#bf4f28}}
+  .ficon-green{background:var(--green-glow);color:var(--green)}
+  .ficon-amber{background:rgba(245,158,11,0.1);color:var(--amber)}
+  .ficon-cyan{background:rgba(6,182,212,0.1);color:#22d3ee}
+  .ficon-rose{background:rgba(244,63,94,0.1);color:#fb7185}
+  .ficon-violet{background:rgba(139,92,246,0.1);color:#a78bfa}
+  .feature h4{font-size:1rem;font-weight:600;color:var(--foreground);margin-bottom:4px}
+  .feature p{font-size:0.875rem;color:var(--foreground-muted);line-height:1.55}
+  .feature p a{color:var(--accent);text-decoration:none}
+  .feature p a:hover{text-decoration:underline}
+
+  /* Command Table */
+  .cmd-table-wrap{border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;background:var(--bg-card)}
+  .cmd-table{width:100%;border-collapse:collapse;font-size:0.9rem}
+  .cmd-table th{text-align:left;padding:14px 24px;font-size:0.72rem;font-weight:600;color:var(--foreground-dim);text-transform:uppercase;letter-spacing:0.08em;border-bottom:1px solid var(--border);font-family:var(--font-mono);background:rgba(6,7,10,0.3)}
+  .cmd-table td{padding:13px 24px;border-bottom:1px solid rgba(255,255,255,0.04)}
+  .cmd-table tr:last-child td{border-bottom:none}
+  .cmd-table tr:hover{background:rgba(255,255,255,0.015)}
+  .cmd-table code{font-family:var(--font-mono);font-size:0.82rem;color:#818cf8;background:var(--accent-soft);padding:3px 8px;border-radius:4px}
+  [data-theme="light"] .cmd-table code{color:#bf4f28}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .cmd-table code{color:#bf4f28}}
+  .badge-model{font-size:0.7rem;font-weight:600;padding:3px 10px;border-radius:100px;font-family:var(--font-mono);display:inline-block}
+  .badge-primary{background:var(--accent-soft);color:#a5b4fc}
+  .badge-local{background:rgba(34,197,94,0.08);color:var(--green)}
+  .badge-fast{background:rgba(245,158,11,0.10);color:#fbbf24}
+  [data-theme="light"] .badge-primary{color:#bf4f28}
+  [data-theme="light"] .badge-fast{color:#b45309}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .badge-primary{color:#bf4f28}}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .badge-fast{color:#b45309}}
+
+  /* Architecture */
+  .arch{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
+  .arch-node{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:32px 20px;text-align:center;transition:all 0.3s var(--easing)}
+  .arch-node:hover{border-color:var(--border-hover);box-shadow:0 12px 40px rgba(99,102,241,0.08)}
+  [data-theme="light"] .arch-node:hover{box-shadow:0 10px 30px rgba(99,102,241,0.06)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .arch-node:hover{box-shadow:0 10px 30px rgba(99,102,241,0.06)}}
+  .arch-node .aicon{display:inline-flex;width:48px;height:48px;border-radius:var(--radius-xs);background:var(--accent-soft);align-items:center;justify-content:center;margin-bottom:16px}
+  .arch-node .aicon svg{width:22px;height:22px;color:#a5b4fc}
+  [data-theme="light"] .arch-node .aicon svg{color:#bf4f28}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .arch-node .aicon svg{color:#bf4f28}}
+  .arch-node h4{font-size:0.95rem;font-weight:600;color:var(--foreground);margin-bottom:6px}
+  .arch-node p{font-size:0.8rem;color:var(--foreground-dim);line-height:1.5}
+
+  /* CTA */
+  .cta-section{text-align:center;padding:100px 0 140px}
+  .cta-section h2{font-size:2rem;font-weight:700;color:var(--foreground);margin-bottom:20px}
+  .cta-section p{color:var(--foreground-muted);margin-bottom:36px;font-size:1.05rem}
+  .cta-actions{display:flex;gap:16px;justify-content:center}
+
+  /* Scroll reveals */
+  .reveal{opacity:0;transform:translateY(30px);transition:opacity 0.7s var(--easing),transform 0.7s var(--easing)}
+  .reveal.visible{opacity:1;transform:translateY(0)}
+
+  /* Footer */
+  footer{padding:56px 0;border-top:1px solid var(--border);text-align:center;color:var(--foreground-dim);font-size:0.85rem}
+  footer a{color:var(--accent);text-decoration:none;transition:color 0.2s}
+  footer a:hover{color:#a5b4fc}
+  [data-theme="light"] footer a:hover{color:#bf4f28}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) footer a:hover{color:#bf4f28}}
+
+  @media(max-width:768px){
+    .hero{padding:140px 0 60px}.hero h1{font-size:2.2rem}
+    .modes,.features{grid-template-columns:1fr}.arch{grid-template-columns:repeat(2,1fr)}
+    .section{padding:70px 0}.section-header h2{font-size:1.6rem}
+    .cmd-table td,.cmd-table th{padding:10px 14px;font-size:0.78rem}
+  }
+
+  .modal-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.6);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.3s var(--easing)}
+  .modal-overlay.open{opacity:1;pointer-events:auto}
+  .modal-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:48px 40px;text-align:center;max-width:420px;width:90%;transform:translateY(20px) scale(0.96);transition:transform 0.35s var(--easing);box-shadow:0 24px 80px rgba(0,0,0,0.6)}
+  [data-theme="light"] .modal-card{box-shadow:0 16px 60px rgba(0,0,0,0.1)}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .modal-card{box-shadow:0 16px 60px rgba(0,0,0,0.1)}}
+  .modal-overlay.open .modal-card{transform:translateY(0) scale(1)}
+  .modal-icon{display:inline-flex;width:56px;height:56px;border-radius:50%;align-items:center;justify-content:center;margin-bottom:20px;font-size:1.5rem;background:linear-gradient(135deg,var(--accent-glow),rgba(99,102,241,0.05))}
+  .modal-card h2{font-size:1.3rem;font-weight:700;color:var(--foreground);margin-bottom:10px;letter-spacing:-0.01em}
+  .modal-card p{font-size:0.9rem;color:var(--foreground-muted);line-height:1.65;margin-bottom:24px}
+  .modal-close{display:inline-block;padding:10px 28px;border-radius:var(--radius-xs);background:var(--accent);color:#fff;font-size:0.88rem;font-weight:600;cursor:pointer;border:none;transition:all 0.2s;font-family:var(--font-sans)}
+  .modal-close:hover{box-shadow:0 4px 20px var(--accent-glow);transform:translateY(-1px)}
+
+
+  .nav-toggle{display:none;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-xs);border:1px solid var(--border);background:var(--surface);color:var(--foreground-muted);cursor:pointer;margin-left:8px;flex-shrink:0}
+  .nav-toggle:hover{border-color:var(--border-hover);color:var(--foreground)}
+  .nav-toggle svg{width:18px;height:18px}
+  .nav-toggle .icon-close{display:none}
+  body.nav-open .nav-toggle .icon-open{display:none}
+  body.nav-open .nav-toggle .icon-close{display:block}
+  @media(max-width:768px){
+    .nav-toggle{display:inline-flex}
+    nav .container{flex-wrap:wrap}
+    .nav-links{display:none;order:10;width:100%;flex-direction:column;gap:0;padding:12px 0 8px;border-top:1px solid var(--border);margin-top:8px}
+    body.nav-open .nav-links{display:flex}
+    body.nav-open .nav-links a{display:block;padding:12px 4px;font-size:0.95rem;border-bottom:1px solid var(--border)}
+    .nav-cta{display:none}
+    body.nav-open .nav-cta{display:inline-flex;order:11;width:100%;justify-content:center;margin:12px 0 8px}
+    .lang-toggle{display:none}
+    body.nav-open .lang-toggle{display:inline-flex}
+  }
+
 </style>
+<script>
+(function(){
+  var LANG_KEY = 'codepapr-lang';
+  var stored = localStorage.getItem(LANG_KEY);
+  if (stored) return;
+  var lang = (navigator.language || '').toLowerCase();
+  if (lang.startsWith('zh')) {
+    localStorage.setItem(LANG_KEY, 'zh');
+    location.replace('index.html');
+  }
+})();
+</script>
 </head>
 <body>
+
+<div class="ambient"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
+<div class="grid-overlay"></div>
+
 <nav>
-<div class="container">
-<a href="index.en.html" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
-<ul class="nav-links" id="primary-nav">
-<li><a href="#architecture">Architecture</a></li>
-<li><a href="#modes">Modes</a></li>
-<li><a href="#features">Features</a></li>
-<li><a href="#marketplace">Marketplace</a></li>
-<li><a href="context-architecture.en.html">System architecture</a></li>
-<li><a href="tutorial.en.html">Tutorial</a></li>
-<li><a href="tool-inventory.en.html">Tool inventory</a></li>
-</ul>
-<div class="nav-right">
-<button type="button" class="nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="primary-nav" onclick="toggleMobileNav()"><svg class="icon-open" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg><svg class="icon-close" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-<button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"><svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg><svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
-<a href="index.html" class="lang-toggle">中</a>
-</div>
-</div>
+  <div class="container">
+    <a href="#" class="logo"><span class="logo-icon"><svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="lip" x1="164" y1="120" x2="876" y2="940"><stop stop-color="#FFF1E0"/><stop offset=".52" stop-color="#F6C58B"/><stop offset="1" stop-color="#E79057"/></linearGradient><linearGradient id="lip2" x1="230" y1="160" x2="790" y2="860"><stop stop-color="#FFF8EF"/><stop offset="1" stop-color="#F3E5D0"/></linearGradient><linearGradient id="lip3" x1="320" y1="280" x2="720" y2="780"><stop stop-color="#D9673E"/><stop offset="1" stop-color="#B84E2A"/></linearGradient></defs><rect x="96" y="96" width="832" height="832" rx="208" fill="url(#lip)"/><rect x="96" y="96" width="832" height="832" rx="208" stroke="#FFF7EF" stroke-opacity=".52" stroke-width="12"/><path d="M280 170c0-22.1 17.9-40 40-40h292l132 132v552c0 22.1-17.9 40-40 40H320c-22.1 0-40-17.9-40-40V170Z" fill="url(#lip2)"/><path d="M612 130 744 262H642c-16.6 0-30-13.4-30-30V130Z" fill="#F0D5B2"/><path d="M392 350h244" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round"/><path d="M392 450h156" stroke="url(#lip3)" stroke-width="40" stroke-linecap="round" opacity=".86"/><path d="m432 592-80 80 80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="m592 592 80 80-80 80" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/><path d="M540 560 484 784" stroke="url(#lip3)" stroke-width="42" stroke-linecap="round"/></svg></span>CodePapr</a>
+    <ul class="nav-links" id="primary-nav">
+      <li><a href="#modes">Modes</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#commands">Commands</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="tutorial.en.html">Tutorial</a></li>
+      <li><a href="host-architecture.en.html">Host</a></li>
+      <li><a href="context-architecture.en.html">Context</a></li>
+      <li><a href="tool-inventory.en.html">Tools</a></li>
+    </ul>
+    <a href="#" onclick="showComingSoon(event)" class="nav-cta">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      Coming Soon
+    </a>
+        <button type="button" class="nav-toggle" aria-label="Open menu" data-label-open="Open menu" data-label-close="Close menu" aria-expanded="false" aria-controls="primary-nav" onclick="toggleMobileNav()">
+      <svg class="icon-open" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      <svg class="icon-close" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+      <svg class="icon-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      <svg class="icon-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+    <a href="index.html" class="lang-toggle" title="切换到中文" onclick="localStorage.setItem('codepapr-lang','zh')">中</a>
+  </div>
 </nav>
+
 <section class="hero">
-<div class="container">
-<div class="status"><span class="live"></span>Open Source · Host/Client Split · JSON-RPC · App Marketplace · MCP · LLM Prefix Cache · LSP+AST</div>
-<h1>CodePapr — a <span class="gradient">local-first</span> coding agent runtime</h1>
-<p>A Tauri desktop workbench and a CLI, both speaking <strong>JSON-RPC</strong> to the same local <code>codepapr-server</code> host. The main agent dispatches the Explore/Scout/Mentor sub-agents and supports custom extensions; file I/O, Git, shell, and LSP all run locally.</p>
-<div class="cta">
-<a href="#architecture" class="btn btn-primary">See the architecture</a>
-<a href="context-architecture.en.html" class="btn btn-ghost">Deep dive: system architecture</a>
-<a href="tutorial.en.html" class="btn btn-ghost">Read the tutorial</a>
-</div>
-</div>
+  <div class="container">
+    <div class="status"><span class="live"></span>Open Source · Tauri 2 · 30 Core Tools · MCP · Character Customization · Voice Synthesis · Cache-Optimized · Code Review</div>
+    <h1>CodePapr — <span class="gradient">The coolest Coding Agent</span></h1>
+    <p>Autonomous code search, precise edits, command execution, and test verification in your local workspace. Deeply adapted for LLM prefix caching.</p>
+    <div class="hero-actions">
+      <a href="#" onclick="showComingSoon(event)" class="btn btn-primary">
+        <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        Coming Soon
+      </a>
+      <a href="#modes" class="btn btn-secondary">Learn More &rarr;</a>
+    </div>
+
+    <div class="demo-window">
+      <div class="demo-bar"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>CodePapr Desktop Workbench</span></div>
+      <div class="demo-body" style="padding:0;overflow:hidden">
+        <img src="Dark_en.png" alt="CodePapr Desktop Workbench Screenshot (Dark Theme)" class="demo-img-dark" style="width:100%" />
+        <img src="CodePaprEn.png" alt="CodePapr Desktop Workbench Screenshot" class="demo-img-light" style="width:100%" />
+      </div>
+    </div>
+  </div>
 </section>
-<div class="container">
-<section class="sec" id="architecture">
-<h2>Architecture: a host daemon plus thin clients</h2>
-<p class="lead">CodePapr is <strong>not</strong> a monolithic Tauri app. Rust domain logic lives in the shared crate <code>codepapr-core</code>, served by the standalone <code>codepapr-server</code> daemon; the desktop app and CLI are both line-delimited JSON-RPC callers (TCP 127.0.0.1 or stdio).</p>
-<pre>Desktop client (codepapr)      codepapr-cli
-        │   JSON-RPC · TCP/stdio  │
-        └──────────┬──────────────┘
-                    ▼
-     codepapr-server — handler.rs → 159 RPC methods
-                    ▼
-     codepapr-core — fs·git·shell·lsp·db·snapshot·mcp·web·agent</pre>
-<p class="lead">The desktop client keeps only GUI-only capabilities (<code>codepapr-app://</code> protocol, embedded/headless browser, TTS, Stronghold vault, app install and port probing); everything else is an RPC proxy in <code>src-tauri/src/commands.rs</code>. <a href="context-architecture.en.html">Full topology, RPC surface, data flow, and persistence ownership → System architecture</a>.</p>
+
+<section class="section" id="modes">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="section-label"><span class="dot"></span> Four Ways to Work</div>
+      <h2>One Runtime, Four Modes</h2>
+      <p>From understanding to execution to interactive app generation</p>
+    </div>
+    <div class="modes">
+      <div class="mode-card ask reveal">
+        <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></div>
+        <h3>Ask</h3>
+        <p>Explain architecture, trace responsibilities, analyze error causes. Read-only by default — no file changes or commands.</p>
+        <span class="tag">Read-Only · Explain</span>
+      </div>
+      <div class="mode-card plan reveal">
+        <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14h2M13 14h2M9 18h2M13 18h2"/></svg></div>
+        <h3>Plan</h3>
+        <p>Before big changes, produce task lists, affected files, and verification paths. Break complex tasks into clear steps before acting.</p>
+        <span class="tag">Plan · Decompose</span>
+      </div>
+      <div class="mode-card agent reveal">
+        <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
+        <h3>Agent</h3>
+        <p>Fully autonomous: search project, read/write files, run commands, verify. Fix bugs and implement features in one go.</p>
+        <span class="tag">Execute · Read/Write</span>
+      </div>
+      <div class="mode-card app reveal">
+        <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
+        <h3>App</h3>
+        <p>One command to generate an interactive app. Database analysis, relationship diagrams, dashboards — the Agent builds visualization tools and renders them in a built-in panel.</p>
+        <span class="tag">Visualization · App Gen</span>
+      </div>
+    </div>
+  </div>
 </section>
-<section class="sec" id="modes">
-<h2>Four work modes</h2>
-<div class="tbl-wrap"><table><tr><th>Mode</th><th>Best for</th><th>Behavior</th></tr>
-<tr><td>Ask</td><td>Explanation, analysis</td><td>Read-only — no edits or commands</td></tr>
-<tr><td>Plan</td><td>Complex task breakdown</td><td>Proposes a plan, executes on confirmation</td></tr>
-<tr><td>Agent</td><td>Bug fixes, features</td><td>Autonomous: search → modify → verify</td></tr>
-<tr><td>App</td><td>Data visualization</td><td>Generates interactive apps; renders D3/ECharts/Mermaid</td></tr>
-</table></div>
+
+<section class="section" id="features">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="section-label"><span class="dot"></span> Desktop Workbench</div>
+      <h2>More Than a Chat Window</h2>
+      <p>File Tree · Monaco Editor · Git · Browser · LSP — all in one interface</p>
+    </div>
+    <div class="features">
+      <div class="feature reveal">
+        <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+        <div><h4>Project File Tree + LSP</h4><p>Full project browsing, Monaco syntax highlighting, real LSP hover, jump-to-definition, and diagnostics.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 17"/><line x1="12" y1="17" x2="20" y2="17"/></svg></div>
+        <div><h4>Slash Command Palette</h4><p>Type <code>/</code> for commands. Keyboard navigation.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+        <div><h4>Agent Autonomous Execution</h4><p>Auto search + read/write + run commands + verify. The loop runs on the workspace Host; UI stays responsive.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-cyan"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
+        <div><h4>Deep Git Integration</h4><p>Diff, commit, branch switch, safe rollback. Agent handles analysis; human gates high-risk operations.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+        <div><h4>Browser Integration</h4><p>Launch preview, page interactions, screenshots. Frontend debugging in one window.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg></div>
+        <div><h4>TodoList Task Planning</h4><p>Auto-create checklist for complex tasks, track progress in real-time, auto-collapse on completion. Auto-retry on failure.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></div>
+        <div><h4>Goal Autonomous Loop</h4><p><code>/goal exec:npm test</code>: Host main Agent runs, Verifier checks, until the condition passes.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-cyan"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+        <div><h4>Conversation Reset (Git)</h4><p>Auto-commit before each user message. Reset --hard from any message; code and chat roll back together.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></div>
+        <div><h4>Round Navigation</h4><p>Right-side round bar. Click to jump.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4"/><path d="M9 3v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></div>
+        <div><h4>Project Memory (zero-review)</h4><p>Preferences, constraints, and verified facts save automatically. Short instructions every session, procedures this turn if useful, web citations in search only. <a href="context-architecture.en.html">How context is stacked</a>.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
+        <div><h4>Visual Code Review</h4><p>Diff review, line comments, approval status.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+        <div><h4>Global Search</h4><p>Chat and Files tabs. Keyboard-driven.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+        <div><h4>CLI, TUI &amp; Host API</h4><p>Unified Workspace Host (Source of Truth). Terminal <code>codepapr tui</code> / <code>agent</code> shares settings and sessions. JSON-RPC CQE protocol for multi-client workflows. <a href="tutorial.en.html#cli-host">Tutorial</a></p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
+        <div><h4>Character Roleplay</h4><p>Create or import cards (PNG/JSON). Talk in that voice when enabled.</p></div>
+      </div>
+      <div class="feature reveal">
+        <div class="ficon ficon-violet"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></div>
+        <div><h4>Local Voice Synthesis (TTS)</h4><p>GPT-SoVITS-based voice synthesis from reference audio. Streaming WebSocket output with multilingual support.</p></div>
+      </div>
+    </div>
+  </div>
 </section>
-<section class="sec" id="features">
-<h2>Core capabilities</h2>
-<div class="grid4">
-<div class="card"><h3>Host-client split</h3><p>Desktop, CLI, and future clients all speak JSON-RPC to the same local <code>codepapr-server</code>.</p></div>
-<div class="card"><h3>Multi-agent collaboration</h3><p>The main agent dispatches Explore/Scout/Mentor and custom sub-agents via the <code>task</code> tool.</p></div>
-<div class="card"><h3>TodoList planning</h3><p>Agents auto-create and track task lists with progress reporting and re-planning.</p></div>
-<div class="card"><h3>Project memory</h3><p>Preferences and verified facts save automatically to a SQLite ledger; the panel is the only human surface.</p></div>
-<div class="card"><h3>Code intelligence</h3><p>9 LSP navigation actions, LSP-first with automatic AST project-graph fallback (source/confidence tagged).</p></div>
-<div class="card"><h3>LLM prefix cache</h3><p>Three-layer prompt injection strategy to maximize cache hits.</p></div>
-<div class="card"><h3>MCP protocol support</h3><p>stdio / SSE / Streamable HTTP; one-click MCP marketplace install; per-server permission modes.</p></div>
-<div class="card"><h3>Deep Git integration</h3><p>8 Git actions + diff panel + safe rollback with backup ref and undo.</p></div>
-</div>
+
+<section class="section" id="commands">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="section-label"><span class="dot"></span> Built-in Commands</div>
+      <h2>Type <code>/</code> to Invoke</h2>
+      <p>19 built-in commands, auto-routed to primary or fast model by task complexity; <code>/help</code> <code>/commands</code> <code>/undo</code> bypass models, zero token cost</p>
+    </div>
+    <div class="cmd-table-wrap reveal">
+      <table class="cmd-table">
+        <thead><tr><th>Command</th><th>Purpose</th><th>Model</th></tr></thead>
+        <tbody>
+          <tr><td><code>/help</code> &nbsp; <code>/commands</code></td><td>List all available commands and descriptions</td><td><span class="badge-model badge-local">Local</span></td></tr>
+          <tr><td><code>/compact</code></td><td>Force-compress current session context; the internal Compactor agent generates the checkpoint (rule-based fallback on LLM failure)</td><td><span class="badge-model badge-primary">Primary / Fast</span></td></tr>
+          <tr><td><code>/undo</code></td><td>Undo the last conversation reset (restore truncated messages and code snapshot)</td><td><span class="badge-model badge-local">Local</span></td></tr>
+          <tr><td><code>/goal</code></td><td>Autonomous loop: Host main Agent executes + Verifier audits, until condition passes</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/review</code></td><td>Review changes or specified scope, prioritize bugs and regression risks</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/fix</code></td><td>Locate and fix issues, auto-run verification</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/test</code></td><td>Add tests for specified feature or run existing tests</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/explain</code></td><td>Explain file, function, symbol, or error implementation approach</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/diagnose</code></td><td>Diagnose errors, slow operations, or abnormal behavior root causes</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/refactor</code></td><td>Safe refactoring, preserving behavior</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/doc</code></td><td>Write or update documentation (.md extension only)</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/new</code></td><td>Create new file, component, or feature from description</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/optimize</code></td><td>Analyze and fix performance bottlenecks, reduce complexity or resource usage</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/build</code></td><td>Build project and diagnose/fix build errors</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
+          <tr><td><code>/search</code></td><td>Search codebase for patterns, usage, definitions, or references</td><td><span class="badge-model badge-fast">Fast</span></td></tr>
+          <tr><td><code>/lint</code></td><td>Run linter and fix violations</td><td><span class="badge-model badge-fast">Fast</span></td></tr>
+          <tr><td><code>/clean</code></td><td>Clean dead code, unused imports, and leftover debug statements</td><td><span class="badge-model badge-fast">Fast</span></td></tr>
+          <tr><td><code>/commit</code></td><td>Stage changes and generate standardized commit message</td><td><span class="badge-model badge-fast">Fast</span></td></tr>
+          <tr><td><code>/summary</code></td><td>High-level overview of file, module, or entire project</td><td><span class="badge-model badge-fast">Fast</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top: 1.5rem; text-align: center; color: var(--fg-muted, #888); font-size: 0.88rem;">
+      💡 Define custom slash commands in <code>.CodePapr/commands/&lt;name&gt;.md</code> or Project Config with <code>$ARGUMENTS</code>, <code>@path</code> file embedding, and <code>!`cmd`</code> inline outputs. <a href="tutorial.en.html#commands" style="color: var(--accent, #6366f1); margin-left: 0.5rem; text-decoration: none;">Read Tutorial &rarr;</a>
+    </div>
+  </div>
 </section>
-<section class="sec" id="marketplace">
-<h2>App / plugin marketplace</h2>
-<p class="lead">.papr apps install from the official registry; each app gets its own origin, CSP, and SQLite storage.</p>
-<div class="grid2">
-<div class="card top" style="--c:var(--accent)"><div class="tag">GLOBAL</div><h3><code>~/.codepapr/apps/&lt;appId&gt;/</code></h3><p>Cross-project tools.</p></div>
-<div class="card top" style="--c:var(--orange)"><div class="tag">WORKSPACE</div><h3><code>&lt;workspace&gt;/.CodePapr/apps/&lt;appId&gt;/</code></h3><p>Project-specific, shippable with the repo; overrides the global install on a matching appId.</p></div>
-</div>
-<p class="note">Permissions are a two-axis model — local access × network — with global defaults plus per-app overrides under Settings → App. See <a href="context-architecture.en.html#market">System architecture · App marketplace and scope</a>.</p>
+
+<section class="section" id="architecture">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="section-label"><span class="dot"></span> System Architecture</div>
+      <h2>One Host, many Clients</h2>
+      <p>The workspace Host is the only execution backend. Desktop / TUI / CLI are JSON-RPC clients; Tauri is the shell, not the Agent.</p>
+    </div>
+        <div class="arch">
+      <div class="arch-node reveal">
+        <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+        <h4>Clients</h4><p>Desktop · TUI · CLI<br>One protocol</p>
+      </div>
+      <div class="arch-node reveal">
+        <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+        <h4>Workspace Host</h4><p>Control · State · Execution<br>JSON-RPC <code>codepapr-host/1</code></p>
+      </div>
+      <div class="arch-node reveal">
+        <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/></svg></div>
+        <h4>Core Agent</h4><p>Cache partitions · tools · subagents<br>Goal · Compact · Recall</p>
+      </div>
+      <div class="arch-node reveal">
+        <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg></div>
+        <h4>project.sqlite</h4><p>Archive · Surface · Memory<br>node:sqlite authority</p>
+      </div>
+      <div class="arch-node reveal">
+        <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/></svg></div>
+        <h4>Desktop shell</h4><p>Tauri window · Monaco<br>.papr · Stronghold</p>
+      </div>
+    </div>
+    <p class="reveal" style="text-align:center;margin-top:28px;color:var(--foreground-muted);font-size:0.95rem">To extend or optimize, read <a href="host-architecture.en.html" style="color:var(--accent)">Host–Client architecture</a> and <a href="context-architecture.en.html" style="color:var(--accent)">context layering</a>.</p>
+  </div>
 </section>
-</div>
-<footer><div class="container"><a href="https://codepapr.com/">codepapr.com</a><a href="context-architecture.en.html">System architecture</a><a href="tutorial.en.html">Tutorial</a><a href="tool-inventory.en.html">Tool inventory</a></div></footer>
+
+<section class="cta-section">
+  <div class="container reveal">
+    <h2>Run Locally</h2>
+    <p>Open source · Local-first · Desktop workbench</p>
+    <div class="cta-actions">
+      <a href="#" onclick="showComingSoon(event)" class="btn btn-primary">
+        <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        Coming Soon
+      </a>
+      <a href="tutorial.en.html" class="btn btn-secondary">Read Full Tutorial &rarr;</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>CodePapr &mdash; Local Coding Agent Workbench</p>
+  </div>
+</footer>
+
 <script>
 (function(){
-const html=document.documentElement;
-const stored=localStorage.getItem('codepapr-theme');
-if(stored==='light') html.setAttribute('data-theme','light');
-else if(stored==='dark') html.setAttribute('data-theme','dark');
-window.toggleTheme=function(){const cur=html.getAttribute('data-theme');const next=(!cur||cur==='dark')?'light':'dark';html.setAttribute('data-theme',next);localStorage.setItem('codepapr-theme',next);};
+  const html=document.documentElement;
+  const stored=localStorage.getItem('codepapr-theme');
+  if(stored==='light'){html.setAttribute('data-theme','light')}
+  else if(stored==='dark'){html.setAttribute('data-theme','dark')}
+  window.toggleTheme=function(){
+    const cur=html.getAttribute('data-theme');
+    const next=(!cur||cur==='dark')?'light':'dark';
+    html.setAttribute('data-theme',next);
+    localStorage.setItem('codepapr-theme',next);
+  };
+
+  const observer=new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}})
+  },{threshold:0.1,rootMargin:'0px 0px -40px 0px'});
+  document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
 })();
+
+  window.showComingSoon=function(e){
+    e&&e.preventDefault();
+    document.getElementById('comingSoonModal').classList.add('open');
+  };
+  window.closeComingSoon=function(e){
+    if(e&&e.target!==e.currentTarget)return;
+    document.getElementById('comingSoonModal').classList.remove('open');
+  };
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeComingSoon()});
+
 </script>
+
+<div class="modal-overlay" id="comingSoonModal" onclick="closeComingSoon(event)">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-icon">🚀</div>
+    <h2>Coming Soon</h2>
+    <p>CodePapr is currently in active development and will be released soon. Thanks for your interest!</p>
+    <button class="modal-close" onclick="closeComingSoon()">Got it</button>
+  </div>
+</div>
+
+
 <script>
 (function(){
-function setOpen(open){document.body.classList.toggle('nav-open', open);var btn=document.querySelector('.nav-toggle');if(btn){btn.setAttribute('aria-expanded', open?'true':'false');}}
-window.toggleMobileNav=function(){ setOpen(!document.body.classList.contains('nav-open')); };
-document.addEventListener('click', function(e){var a=e.target.closest && e.target.closest('.nav-links a');if(a) setOpen(false);});
-document.addEventListener('keydown', function(e){ if(e.key==='Escape') setOpen(false); });
+  function setOpen(open){
+    document.body.classList.toggle('nav-open', open);
+    var btn=document.querySelector('.nav-toggle');
+    if(btn){btn.setAttribute('aria-expanded', open?'true':'false'); btn.setAttribute('aria-label', open?(btn.getAttribute('data-label-close')||'Close menu'):(btn.getAttribute('data-label-open')||'Open menu'));}
+  }
+  window.toggleMobileNav=function(){ setOpen(!document.body.classList.contains('nav-open')); };
+  document.addEventListener('click', function(e){
+    var a=e.target.closest && e.target.closest('.nav-links a');
+    if(a) setOpen(false);
+  });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') setOpen(false); });
 })();
 </script>
+
 </body>
 </html>
