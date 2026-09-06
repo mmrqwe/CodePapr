@@ -1051,7 +1051,11 @@ function createRegistry(
     }
   }
 
-  if (includeTaskTool && (payload.runtime.agentDefinitions?.length ?? 0) > 0) {
+  if (
+    includeTaskTool
+    && payload.settings.agentToolProfile !== 'minimal'
+    && (payload.runtime.agentDefinitions?.length ?? 0) > 0
+  ) {
     const definition = buildTaskToolDefinition(payload.runtime.agentDefinitions ?? [], payload.runtime.lang);
     if (!definition) {
       return registry;

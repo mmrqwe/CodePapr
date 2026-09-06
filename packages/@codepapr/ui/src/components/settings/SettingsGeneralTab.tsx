@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { MINIMAL_AGENT_TOOLS } from '@codepapr/core';
 import { LicenseModal } from '../LicenseModal';
 import type { Lang } from '../../utils/i18n';
 import { FieldCard, ToggleField } from '../forms';
@@ -24,6 +25,34 @@ export function SettingsGeneralTab({ local, update, t, currentLang }: SettingsTa
           <option value="zh-TW">繁體中文 (Traditional Chinese)</option>
           <option value="en">English</option>
         </select>
+      </FieldCard>
+
+      <FieldCard>
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+          {t.agentToolProfile}
+        </label>
+        <select
+          value={local.agentToolProfile}
+          onChange={(e) => update({ agentToolProfile: e.target.value as 'default' | 'minimal' })}
+          title={t.agentToolProfile}
+          className="w-full cursor-pointer rounded-xl border border-line bg-base px-4 py-3 text-sm text-fg focus:border-accent-soft focus:outline-none"
+        >
+          <option value="default">{t.agentToolProfileDefault}</option>
+          <option value="minimal">{t.agentToolProfileMinimal}</option>
+        </select>
+        <p className="mt-2 text-xs leading-relaxed text-fg-muted">{t.agentToolProfileDesc}</p>
+        {local.agentToolProfile === 'minimal' && (
+          <>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {MINIMAL_AGENT_TOOLS.map((name) => (
+                <code key={name} className="rounded-md border border-line bg-base px-2 py-0.5 text-[10px] font-mono text-fg-muted">
+                  {name}
+                </code>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-fg-muted">{t.agentToolProfileAppHint}</p>
+          </>
+        )}
       </FieldCard>
 
       <div className="space-y-3">

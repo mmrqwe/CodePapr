@@ -22,6 +22,7 @@
 import {
   allowToolForReadOnlyMode,
   buildSessionBootstrapPrompt,
+  buildMinimalToolSurfaceSection,
   buildSkillsSection,
   createEmptyTodoListContext,
   DEFAULT_TODO_MAX_RETRIES,
@@ -150,6 +151,7 @@ export function createHarnessMediator(deps: HarnessMediatorDeps): HarnessMediato
         resolveWorkerMultimodalEnabled(workerSettings, workerSettings.model)
         || shouldExposeReadImage(settings, settings.model),
       mcpSearchEnabled: hasEnabledMcpSearch(settings.mcp),
+      toolProfile: settings.agentToolProfile ?? 'default',
     });
     const systemPrompt = buildAgentRuntimeSystemPrompt(
       settings,
@@ -162,6 +164,9 @@ export function createHarnessMediator(deps: HarnessMediatorDeps): HarnessMediato
       lang,
       skillsSection: buildSkillsSection([], lang),
       customPromptSection: (settings.systemPrompt ?? '').trim() || undefined,
+      toolSurfaceSection: settings.agentToolProfile === 'minimal'
+        ? buildMinimalToolSurfaceSection(lang)
+        : undefined,
     });
 
     assembled = {

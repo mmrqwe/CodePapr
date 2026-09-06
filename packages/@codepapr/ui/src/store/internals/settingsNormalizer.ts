@@ -450,6 +450,10 @@ export function normalizeSettings(
     typeof input.experimentalVoice === 'boolean'
       ? input.experimentalVoice
       : DEFAULT_SETTINGS.experimentalVoice;
+  const agentToolProfile =
+    input.agentToolProfile === 'minimal' || input.agentToolProfile === 'default'
+      ? input.agentToolProfile
+      : DEFAULT_SETTINGS.agentToolProfile;
   const lang: Lang =
     input.lang === 'zh-CN' || input.lang === 'zh-TW' || input.lang === 'en'
       ? input.lang
@@ -1037,6 +1041,7 @@ export function normalizeSettings(
     chatBordersEnabled,
     experimentalCharacters,
     experimentalVoice,
+    agentToolProfile,
     temperature: effectiveTemperature,
     topP: effectiveTopP,
     multimodalEnabled: effectiveMultimodalEnabled,

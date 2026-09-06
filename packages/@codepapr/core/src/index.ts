@@ -275,8 +275,8 @@ export type {
   ProjectVerifyCommands,
   DetectProjectVerifyCommandsInput,
 } from './agent/projectVerifyCommands';
-export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, isPromptToolVisible, isReadOnlyMode, MUTATING_TOOL_NAMES, PARALLEL_SAFE_TOOL_NAMES, APP_ONLY_TOOL_NAMES, PLAN_ONLY_TOOL_NAMES, GIT_READ_ONLY_ACTIONS, allowToolForReadOnlyMode, readOnlyModeBlockMessage, buildTaskToolDefinition, listDelegableAgents, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, VERIFIER_PROMPT_OBJECTIVE, VERIFIER_PROMPT_SUBJECTIVE, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
-export type { AgentDefinition, AgentMode } from './agent/agentConfig';
+export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, filterToolsForProfile, MINIMAL_AGENT_TOOLS, isMinimalAgentToolName, applyMinimalToolProfile, isPromptToolVisible, isReadOnlyMode, MUTATING_TOOL_NAMES, PARALLEL_SAFE_TOOL_NAMES, APP_ONLY_TOOL_NAMES, PLAN_ONLY_TOOL_NAMES, GIT_READ_ONLY_ACTIONS, allowToolForReadOnlyMode, readOnlyModeBlockMessage, buildTaskToolDefinition, listDelegableAgents, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, VERIFIER_PROMPT_OBJECTIVE, VERIFIER_PROMPT_SUBJECTIVE, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
+export type { AgentDefinition, AgentMode, AgentToolProfile, MinimalAgentToolName } from './agent/agentConfig';
 export {
   TODO_TOOL_NAME,
   DEFAULT_TODO_MAX_RETRIES,
@@ -329,6 +329,7 @@ export {
   USER_PROMPT_SECTION_ORDER,
   buildModeSystemPrompt,
   buildSessionBootstrapPrompt,
+  buildMinimalToolSurfaceSection,
   buildRuntimeSystemPrompt,
   buildRuntimeUserPrompt,
   buildStructuredUserPrompt,

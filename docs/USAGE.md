@@ -197,12 +197,14 @@ LLM 可通过 4 个工具管理 app（仅 App 模式）：
 
 ### 设置面板
 
-- **通用**：语言、调试、许可证
+- **通用**：语言、Agent 工具面（默认/极简）、实验性功能、许可证
 - **LLM**：模型、采样、思考模式
 - **搜索**：SearXNG；失败则回落到内置聚合
 - **子Agent**：Explore / Scout / Mentor
 - **高级**：压缩、Goal、ProjectGraph、工具上下文
 - **App**：未声明 app 的默认权限
+
+**Agent 工具面**（设置 → 通用）：「默认」= 现有桌面全量工具（仍按 Ask/Plan/Agent/App 模式过滤）；「极简」= 仅暴露 7 个工具 `read / edit / write / grep / bash / websearch / webfetch`——更少工具、更接近极简 coding harness（注意：bash 仍可执行任意命令，极简≠沙箱）。组合按 mode ∩ profile 取交集（极简+Ask 会再砍掉写/bash；极简下 App 专属工具不可用，App 模式需默认工具面）。开启 MCP 搜索时 `websearch`/`webfetch` 照旧由 MCP 工具替代。保存后于下一条消息生效，不打断当前流式回合。CLI 侧对应 `codepapr run --tools-preset minimal`，与 UI 极简共用同一 allowlist（`MINIMAL_AGENT_TOOLS`）。
 
 语音在角色面板。完整参数见 `packages/@codepapr/core/docs/CONFIGURATION.md`。
 

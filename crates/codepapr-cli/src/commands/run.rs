@@ -61,6 +61,9 @@ pub struct RunArgs {
     #[arg(long, help = "Plan-mode question policy: answer with the provided JSON map or the first option")]
     pub question_auto: bool,
 
+    #[arg(long, value_parser = ["default", "minimal"], help = "Agent tool surface: default = full desktop tool set (mode-filtered), minimal = 7 core tools (read/edit/write/grep/bash/websearch/webfetch). Overrides the saved desktop setting when given")]
+    pub tools_preset: Option<String>,
+
     #[arg(long, help = "JSON object mapping question text to answers (implies --question-auto)")]
     pub question_answers: Option<PathBuf>,
 
@@ -229,7 +232,8 @@ async fn drive(
     }
 
     let saved = load_saved_settings(client).await;
-    let settings_override = harness_settings_override(&config, saved.as_ref());
+    let settings_override =
+        apply_tools_preset(harness_settings_override(&config, saved.as_ref()), args.tools_preset.as_deref());
     let mut policy = json!({});
     if args.question_auto || question_answers.is_some() {
         let mut question = json!({ "mode": "auto-default" });
@@ -509,6 +513,15 @@ fn harness_settings_override(config: &ResolvedLlmConfig, saved: Option<&Value>) 
     Value::Object(base)
 }
 
+/// CLI explicit `--tools-preset` wins over the saved desktop `agentToolProfile`
+/// (evaluation convenience); when omitted the saved/default value flows through.
+fn apply_tools_preset(mut override_: Value, preset: Option<&str>) -> Value {
+    if let Some(preset) = preset {
+        override_["agentToolProfile"] = json!(preset);
+    }
+    override_
+}
+
 fn resolve_prompt(arg: Option<&str>) -> Option<String> {
     if let Some(arg) = arg {
         return Some(arg.to_string());
@@ -630,6 +643,22 @@ mod tests {
     }
 
     #[test]
+    fn tools_preset_overrides_saved_and_default_profile_passes_through() {
+        // No flag: saved agentToolProfile flows through untouched.
+        let saved = json!({ "agentToolProfile": "minimal" });
+        let passthrough = apply_tools_preset(saved.clone(), None);
+        assert_eq!(passthrough["agentToolProfile"], "minimal");
+
+        // Explicit flag wins over the saved value (evaluation convenience).
+        let overridden = apply_tools_preset(saved.clone(), Some("default"));
+        assert_eq!(overridden["agentToolProfile"], "default");
+
+        // Saved default stays default when no flag given.
+        let none_saved = json!({ "agentToolProfile": "default" });
+        assert_eq!(apply_tools_preset(none_saved, None)["agentToolProfile"], "default");
+    }
+
+    #[test]
     fn saved_settings_are_the_base_and_flags_win() {
         let saved = json!({
             "thinkingEnabled": false,
@@ -680,6 +709,7 @@ mod tests {
             permission: None,
             question_auto: false,
             question_answers: None,
+            tools_preset: None,
             timeout_ms: None,
             session_id: None,
             events_jsonl: None,

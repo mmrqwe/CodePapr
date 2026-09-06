@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   parseAgentMarkdown,
   filterToolsForAgent,
   filterToolsForMode,
+  filterToolsForProfile,
+  MINIMAL_AGENT_TOOLS,
+  applyMinimalToolProfile,
   allowToolForReadOnlyMode,
   readOnlyModeBlockMessage,
   buildTaskToolDefinition,
@@ -11,6 +14,8 @@ import {
   VERIFIER_PROMPT_SUBJECTIVE,
   type AgentDefinition,
 } from '../src/agent/agentConfig';
+import { ToolRegistry } from '../src/tool/ToolRegistry';
+import { NEW_TOOL_DEFINITIONS } from '../src/tool/workspace/mergeToolDefs';
 import type { IToolDefinition } from '@codepapr/types';
 
 const tool = (name: string): IToolDefinition => ({
@@ -240,6 +245,128 @@ describe('agentConfig - filterToolsForMode', () => {
     expect(names).toContain('app_list');
     expect(names).toContain('task');
     expect(names).not.toContain('question');
+  });
+});
+
+describe('agentConfig - filterToolsForProfile', () => {
+  const registry = [
+    tool('read'),
+    tool('edit'),
+    tool('write'),
+    tool('grep'),
+    tool('bash'),
+    tool('websearch'),
+    tool('webfetch'),
+    tool('glob'),
+    tool('list'),
+    tool('patch'),
+    tool('graph'),
+    tool('lsp'),
+    tool('lsp_edit'),
+    tool('diagnostics'),
+    tool('git'),
+    tool('browser'),
+    tool('skill'),
+    tool('read_image'),
+    tool('question'),
+    tool('task'),
+    tool('todo'),
+    tool('memory_write'),
+    tool('memory_search'),
+    tool('memory_forget'),
+    tool('memory_list'),
+    tool('app_render'),
+    tool('app_publish'),
+    tool('app_list'),
+    tool('mcp__search__web'),
+  ];
+
+  it('default / undefined：noop，与全量一致', () => {
+    expect(filterToolsForProfile(registry, 'default')).toBe(registry);
+    expect(filterToolsForProfile(registry, undefined)).toBe(registry);
+  });
+
+  it('minimal：仅 7 项 allowlist，无 memory/skill/git/lsp/app/mcp/todo/task', () => {
+    expect(filterToolsForProfile(registry, 'minimal').map((t) => t.name)).toEqual([
+      'read',
+      'edit',
+      'write',
+      'grep',
+      'bash',
+      'websearch',
+      'webfetch',
+    ]);
+  });
+
+  it('mode ∩ profile：极简+Ask 无 write/edit/bash（mode 先砍），只剩读与网页', () => {
+    const names = filterToolsForProfile(filterToolsForMode(registry, 'ask'), 'minimal').map((t) => t.name);
+    expect(names).toEqual(['read', 'grep', 'websearch', 'webfetch']);
+  });
+
+  it('mode ∩ profile：极简+Plan 无 question（不在 allowlist）', () => {
+    const names = filterToolsForProfile(filterToolsForMode(registry, 'plan'), 'minimal').map((t) => t.name);
+    expect(names).toContain('bash');
+    expect(names).not.toContain('question');
+  });
+
+  it('mode ∩ profile：极简+App 无 app_* 工具（等同弱化 App）', () => {
+    const names = filterToolsForProfile(filterToolsForMode(registry, 'app'), 'minimal').map((t) => t.name);
+    expect(names).not.toContain('app_render');
+    expect(names).not.toContain('app_publish');
+    expect(names).not.toContain('app_list');
+  });
+
+  it('allowlist 与 core 注册表真实 name 一致（改名漏映射则此测试红；websearch 定义在 ui，由 parity 测试覆盖）', () => {
+    const coreNames = new Set(NEW_TOOL_DEFINITIONS.map((t) => t.name));
+    const uiOnlyNames: readonly string[] = ['websearch'];
+    for (const name of MINIMAL_AGENT_TOOLS) {
+      expect(coreNames.has(name) || uiOnlyNames.includes(name), `MINIMAL_AGENT_TOOLS 条目 "${name}" 不在注册表`).toBe(true);
+    }
+  });
+
+  it('极简结果为空时告警（防改名后静默空集）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(filterToolsForProfile([tool('renamed_search'), tool('renamed_shell')], 'minimal')).toEqual([]);
+      expect(warn).toHaveBeenCalled();
+      // 入参本来就空：无需告警（无改名迹象）。
+      warn.mockClear();
+      expect(filterToolsForProfile([], 'minimal')).toEqual([]);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('applyMinimalToolProfile：顶层非 allowlist 工具物理移除（定义+handler），内部隐藏工具保留', async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool('read'), async () => 'ok');
+    registry.register(tool('edit'), async () => 'ok');
+    registry.register(tool('write'), async () => 'ok');
+    registry.register(tool('grep'), async () => 'ok');
+    registry.register(tool('bash'), async () => 'ok');
+    registry.register(tool('git'), async () => 'ok');
+    registry.register(tool('task'), async () => 'ok');
+    registry.register(tool('memory_write'), async () => 'ok');
+    registry.register(tool('mcp__a__b'), async () => 'ok');
+    registry.register(tool('workspace_edit_file'), async () => 'ok');
+    registry.hideFromLlm('workspace_edit_file');
+    registry.register(tool('graph'), async () => 'ok');
+    registry.softHideFromLlm('graph');
+
+    applyMinimalToolProfile(registry, 'default');
+    expect(registry.getLlmTools().map((t) => t.name)).toContain('git');
+
+    applyMinimalToolProfile(registry, 'minimal');
+    expect(registry.getLlmTools().map((t) => t.name)).toEqual(['read', 'edit', 'write', 'grep', 'bash']);
+    // 幻觉调用被裁掉的顶层工具：unknown tool（No handler）。
+    await expect(registry.execute('git', { action: 'status' })).rejects.toThrow('No handler for tool: git');
+    await expect(registry.execute('task', {})).rejects.toThrow('No handler for tool: task');
+    // 内部（hideFromLlm）工具保留 handler——合并工具 dispatcher 依赖它。
+    await expect(registry.execute('workspace_edit_file', {})).resolves.toBe('ok');
+    // 软隐藏工具保留 handler、不进 LLM 集。
+    expect(registry.getLlmTools().map((t) => t.name)).not.toContain('graph');
+    await expect(registry.execute('graph', {})).resolves.toBe('ok');
   });
 });
 

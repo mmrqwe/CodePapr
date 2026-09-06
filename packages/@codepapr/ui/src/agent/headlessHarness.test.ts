@@ -110,6 +110,74 @@ describe('harness mediator handshake', () => {
   });
 });
 
+describe('harness tool profile (default | minimal)', () => {
+  const initToolNames = (harness: Harness): string[] => {
+    const initFrame = harness.toLoop.find((m) => m.type === 'init');
+    if (initFrame?.type !== 'init') throw new Error('no init frame');
+    return initFrame.payload.toolDefinitions.map((t) => t.name);
+  };
+
+  it('minimal + agent：恰好 7 项 allowlist，无 git/todo/lsp/memory/app', () => {
+    const harness = createHarness();
+    harness.init({
+      ...BASE_INIT,
+      mode: 'agent',
+      settingsOverride: { ...BASE_INIT.settingsOverride, agentToolProfile: 'minimal' },
+    });
+    expect([...initToolNames(harness)].sort()).toEqual(
+      ['bash', 'edit', 'grep', 'read', 'webfetch', 'websearch', 'write']
+    );
+    const ready = harness.emitted.find((m) => m.type === 'harness-ready');
+    if (ready?.type !== 'harness-ready') throw new Error('no harness-ready');
+    expect([...ready.toolNames].sort()).toEqual(
+      ['bash', 'edit', 'grep', 'read', 'webfetch', 'websearch', 'write']
+    );
+  });
+
+  it('minimal + ask：mode 先砍写/bash，schema 只剩读与网页（无 write/edit/bash）', () => {
+    const harness = createHarness();
+    harness.init({
+      ...BASE_INIT,
+      mode: 'ask',
+      settingsOverride: { ...BASE_INIT.settingsOverride, agentToolProfile: 'minimal' },
+    });
+    const names = initToolNames(harness);
+    expect([...names].sort()).toEqual(['grep', 'read', 'webfetch', 'websearch']);
+  });
+
+  it('未指定 profile：与今天一致（全量，含 git/todo/lsp）', () => {
+    const harness = createHarness();
+    harness.init({ ...BASE_INIT, mode: 'agent' });
+    const names = initToolNames(harness);
+    expect(names).toContain('git');
+    expect(names).toContain('todo');
+    expect(names).toContain('lsp');
+  });
+
+  it('minimal 的 chat bootstrap 含极简工具面说明，且默认档不含该说明', () => {
+    const minimal = createHarness();
+    minimal.init({
+      ...BASE_INIT,
+      mode: 'agent',
+      settingsOverride: { ...BASE_INIT.settingsOverride, agentToolProfile: 'minimal' },
+    });
+    minimal.run({ requestId: 'r1', sessionId: 's1', prompt: 'hi' });
+    const chat = minimal.toLoop.find((m) => m.type === 'chat');
+    if (chat?.type !== 'chat') throw new Error('no chat frame');
+    const bootstrap = chat.payload.messages.find((m) => m.id === SESSION_BOOTSTRAP_MESSAGE_ID);
+    expect(bootstrap?.content).toMatch(/极简|極簡|Minimal/);
+    expect(bootstrap?.content).toContain('read / edit / write / grep / bash / websearch / webfetch');
+
+    const dflt = createHarness();
+    dflt.init({ ...BASE_INIT, mode: 'agent' });
+    dflt.run({ requestId: 'r1', sessionId: 's1', prompt: 'hi' });
+    const dfltChat = dflt.toLoop.find((m) => m.type === 'chat');
+    if (dfltChat?.type !== 'chat') throw new Error('no chat frame');
+    const dfltBootstrap = dfltChat.payload.messages.find((m) => m.id === SESSION_BOOTSTRAP_MESSAGE_ID);
+    expect(dfltBootstrap?.content).not.toMatch(/极简工具面|極簡工具面|Minimal tool surface/);
+  });
+});
+
 describe('harness run frame assembly', () => {
   it('run feeds the loop a chat frame with bootstrap + accumulated history', () => {
     const harness = createHarness();

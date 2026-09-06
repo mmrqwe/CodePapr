@@ -102,6 +102,18 @@ export class ToolRegistry {
   }
 
   /**
+   * 彻底移除：定义与 handler 都删除（LLM 既看不到也调不动）。用于极简工具面
+   * 对顶层可见工具的物理裁剪——与 hideFromLlm（保留 handler 供内部 dispatch）
+   * 不同，被移除工具的幻觉调用会在 execute 处报 unknown tool。
+   */
+  unregister(name: string): void {
+    if (this.frozen) throw new CacheConsistencyError(`Cannot unregister tool "${name}" after registry is frozen`);
+    this.tools.delete(name);
+    this.handlers.delete(name);
+    this.llmHiddenTools.delete(name);
+  }
+
+  /**
    * 软隐藏：工具定义与 handler 均保留（getAll()/execute() 仍可用，供子代理白名单选取与执行），
    * 但从主代理的 getLlmTools() 中排除。用于 graph——主代理不可见，子代理（如 Explore）可选取。
    */

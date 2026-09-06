@@ -155,6 +155,7 @@ export const DEFAULT_SETTINGS: Settings = {
   chatBordersEnabled: true,
   experimentalCharacters: false,
   experimentalVoice: false,
+  agentToolProfile: 'default',
   temperature: 0.7,
   topP: 0.9,
   maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,

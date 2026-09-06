@@ -9,6 +9,7 @@
 import {
   buildRuntimeSystemPrompt,
   DEFAULT_PROMPT_TOOL_NAMES,
+  isMinimalAgentToolName,
   isPromptToolVisible,
   listDelegableAgents,
   resolveAgentDescription,
@@ -30,9 +31,10 @@ export function buildAgentRuntimeSystemPrompt(
   const multimodalEnabled = shouldExposeReadImage(settings, effectiveModel);
   const mcpSearchEnabled = hasEnabledMcpSearch(settings.mcp);
   // 与工具注册层（registerWorkspaceTools / FilteringToolRegistry）的可见性条件保持对齐，
-  // 避免系统提示词提及模型实际不可用的工具。
+  // 避免系统提示词提及模型实际不可用的工具。mode ∩ profile：极简工具面只列举 allowlist。
   const toolNames = DEFAULT_PROMPT_TOOL_NAMES.filter((name) =>
-    isPromptToolVisible(name, mode, { multimodalEnabled, mcpSearchEnabled }));
+    isPromptToolVisible(name, mode, { multimodalEnabled, mcpSearchEnabled }))
+    .filter((name) => settings.agentToolProfile !== 'minimal' || isMinimalAgentToolName(name));
 
   const delegableAgents = listDelegableAgents(runtime?.agentDefinitions ?? [])
     .filter((agent) => agent.model !== 'mentor' || settings.mentorEnabled)

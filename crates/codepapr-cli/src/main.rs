@@ -250,4 +250,24 @@ mod tests {
             _ => panic!("Expected Git Branch command"),
         }
     }
+
+    #[test]
+    fn test_cli_parse_run_tools_preset() {
+        let cli = Cli::try_parse_from(["codepapr", "run", "--tools-preset", "minimal", "hi"]).unwrap();
+        match cli.command {
+            Some(Commands::Run(args)) => {
+                assert_eq!(args.tools_preset.as_deref(), Some("minimal"));
+                assert_eq!(args.prompt.as_deref(), Some("hi"));
+            }
+            _ => panic!("Expected Run command"),
+        }
+        // Invalid preset value rejected by value_parser.
+        assert!(Cli::try_parse_from(["codepapr", "run", "--tools-preset", "sandbox", "hi"]).is_err());
+        // Omitted → None (saved desktop profile flows through).
+        let cli = Cli::try_parse_from(["codepapr", "run", "hi"]).unwrap();
+        match cli.command {
+            Some(Commands::Run(args)) => assert_eq!(args.tools_preset, None),
+            _ => panic!("Expected Run command"),
+        }
+    }
 }

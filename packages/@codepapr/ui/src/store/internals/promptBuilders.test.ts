@@ -54,6 +54,24 @@ describe('buildAgentSessionBootstrapPrompt', () => {
     expect(bootstrap).toContain('some memory');
   });
 
+  it('minimal profile: adds the tool-surface note and drops memory/skills enumerations', () => {
+    const settings = makeSettings({
+      systemPrompt: '',
+      agentToolProfile: 'minimal',
+    });
+    const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'MEMORY_MARKER');
+    expect(bootstrap).toContain('工具面');
+    expect(bootstrap).toContain('read / edit / write / grep / bash / websearch / webfetch');
+    expect(bootstrap).not.toContain('MEMORY_MARKER');
+  });
+
+  it('default profile: bootstrap keeps memory section and has no tool-surface note', () => {
+    const settings = makeSettings({ systemPrompt: '' });
+    const bootstrap = buildAgentSessionBootstrapPrompt(settings, '/tmp/ws', [], 'MEMORY_MARKER');
+    expect(bootstrap).toContain('MEMORY_MARKER');
+    expect(bootstrap).not.toContain('工具面（极简）');
+  });
+
   it('injects the active character description into the bootstrap, not the prefix', () => {
     const character = makeCharacter();
     useCharactersStore.setState({
@@ -170,6 +188,25 @@ describe('buildAgentRuntimeSystemPrompt', () => {
     const settings = makeRuntimeSettings({ multimodalEnabled: false });
     const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
     expect(prompt).not.toContain('read_image');
+  });
+
+  it('default profile enumerates lsp/git/list tool hints', () => {
+    const prompt = buildAgentRuntimeSystemPrompt(makeRuntimeSettings(), 'agent', '/tmp/ws');
+    expect(prompt).toContain('[lsp]');
+    expect(prompt).toContain('[git]');
+    expect(prompt).toContain('[list]');
+  });
+
+  it('minimal profile drops hints for tools outside the 7-tool allowlist', () => {
+    const settings = makeRuntimeSettings({ agentToolProfile: 'minimal' });
+    const prompt = buildAgentRuntimeSystemPrompt(settings, 'agent', '/tmp/ws');
+    expect(prompt).not.toContain('[lsp]');
+    expect(prompt).not.toContain('[git]');
+    expect(prompt).not.toContain('[list]');
+    expect(prompt).not.toContain('[browser]');
+    // allowlist 内的提示保留。
+    expect(prompt).toContain('[read]');
+    expect(prompt).toContain('[bash]');
   });
 
   it('includes the read_image hint when multimodal is enabled', () => {

@@ -1,3 +1,5 @@
+import { MINIMAL_AGENT_TOOLS } from './agentConfig';
+
 export type PromptMode = 'ask' | 'plan' | 'agent' | 'app';
 export type PromptLang = 'zh-CN' | 'zh-TW' | 'en';
 
@@ -45,6 +47,8 @@ export interface BuildSessionBootstrapPromptOptions {
   memorySection?: string;
   customPromptSection?: string;
   projectGraphSummary?: string;
+  /** 工具面说明（极简工具面时替代 skills/plugins/memory 枚举的一段话）。 */
+  toolSurfaceSection?: string;
 }
 
 export type UserPromptSectionKey =
@@ -1645,6 +1649,22 @@ export function buildRuntimeSystemPrompt(options: BuildRuntimeSystemPromptOption
     .join('\n\n');
 }
 
+/**
+ * 极简工具面说明段（Bootstrap 层）：替代 skills/plugins/memory 枚举，
+ * 明确告知模型只有所列工具，防止幻觉调用被裁掉的 tool。
+ */
+export function buildMinimalToolSurfaceSection(lang?: PromptLang): string {
+  const l = normalizeLang(lang);
+  const tools = MINIMAL_AGENT_TOOLS.join(' / ');
+  if (l === 'en') {
+    return `## Tool Surface (Minimal)\nThis session uses the minimal tool surface: only ${tools} are available. Memory, skills, plugins, MCP, git, LSP, task/todo and all other tools are removed — never call them.`;
+  }
+  if (l === 'zh-TW') {
+    return `## 工具面（極簡）\n本次會話使用極簡工具面：僅 ${tools} 可用。記憶、技能、外掛、MCP、Git、LSP、task/todo 等其餘工具均已移除，請勿嘗試調用。`;
+  }
+  return `## 工具面（极简）\n本次会话使用极简工具面：仅 ${tools} 可用。记忆、技能、插件、MCP、Git、LSP、task/todo 等其余工具均已移除，请勿尝试调用。`;
+}
+
 export function buildSessionBootstrapPrompt(options: BuildSessionBootstrapPromptOptions): string {
   const lang = normalizeLang(options.lang);
   const labels = SECTION_LABELS[lang];
@@ -1654,12 +1674,14 @@ export function buildSessionBootstrapPrompt(options: BuildSessionBootstrapPrompt
   const customPromptSection = options.customPromptSection?.trim();
   const projectGraphSummary = options.projectGraphSummary?.trim();
   const workspacePath = options.workspacePath?.trim();
+  const toolSurfaceSection = options.toolSurfaceSection?.trim();
 
   return [
     `# CodePapr ${lang === 'en' ? 'Session Context' : '会话上下文'}`,
     // 工作区绝对路径属于会话/工作区状态，不进 ImmutablePrefix（ADR-001 分层），
     // 渲染在按会话冻结、按压缩 epoch 刷新的 Bootstrap 层。
     ...(workspacePath ? ['', labels.workspace, workspacePath] : []),
+    ...(toolSurfaceSection ? ['', toolSurfaceSection] : []),
     ...(skillsSection ? ['', skillsSection] : []),
     ...(pluginsSection ? ['', pluginsSection] : []),
     ...(memorySection

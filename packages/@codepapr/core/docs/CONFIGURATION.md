@@ -20,6 +20,7 @@
 | `maxTokens` | 数字 | `200000` | `100` - `200000` | 单次响应最大输出 token 数。实际下发前按服务商输出上限自动钳制：DeepSeek 200K、Claude 64K、OpenAI 32K（超出会被供应商拒绝为 400，故请求层自动收敛） |
 | `maxToolRounds` | 数字 | `500` | `1` - `∞` | 单次对话中 Agent 连续调用工具的最大轮数 |
 | `systemPrompt` | 字符串 | `''` | — | 自定义系统提示词。留空则使用内置默认 |
+| `agentToolProfile` | 枚举 | `default` | `default` / `minimal` | Agent 工具面档位。`default`= 全量工具（仍按模式过滤）；`minimal`= 仅暴露 7 项核心工具 `read/edit/write/grep/bash/websearch/webfetch`（mode ∩ profile；极简≠沙箱，bash 仍可任意执行；App 模式需 `default`）。单源常量 `MINIMAL_AGENT_TOOLS`，CLI `--tools-preset` 可覆盖 |
 
 ## 上下文压缩设置
 

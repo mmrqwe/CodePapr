@@ -1,4 +1,4 @@
-import type { AgentDefinition, SkillDefinition } from '@codepapr/core';
+import type { AgentDefinition, AgentToolProfile, SkillDefinition } from '@codepapr/core';
 import type { McpSettings } from '../utils/mcpTypes';
 import type {
   ContextCompactionIntent,
@@ -26,6 +26,8 @@ export interface WorkerAgentSettings {
   baseURL: string;
   apiKey: string;
   model: string;
+  /** Agent 工具面档位（极简时 worker 不补建 task 工具）。 */
+  agentToolProfile?: AgentToolProfile;
   fastModelEnabled: boolean;
   fastModel: string;
   temperature: number;

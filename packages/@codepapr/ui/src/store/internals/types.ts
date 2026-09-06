@@ -4,7 +4,7 @@ import type { TaskModelRoute } from '../../utils/modelRouting';
 import type { ContextCheckpointPayload } from '../../utils/contextCompaction';
 import type { ContextCheckpointPayloadV3 } from '../../utils/contextCheckpointState';
 import type { McpSettings } from '../../utils/mcpTypes';
-import type { AgentDefinition, EditHistory, SkillDefinition } from '@codepapr/core';
+import type { AgentDefinition, AgentToolProfile, EditHistory, SkillDefinition } from '@codepapr/core';
 import type { CacheValidator, RequestBuilder } from '@codepapr/api';
 import type { AgentRuntimeHandle } from '../../agent/WorkerBackedAgent';
 import type { ProjectDiagnosticsReport } from '../../utils/projectDiagnostics';
@@ -79,6 +79,8 @@ export interface Settings {
   experimentalCharacters: boolean;
   /** 实验性：主界面显示语音朗读。默认关闭。 */
   experimentalVoice: boolean;
+  /** Agent 工具面：default=全量工具（仍按 mode 过滤）；minimal=仅 7 项核心工具。 */
+  agentToolProfile: AgentToolProfile;
   temperature: number;
   topP: number;
   maxTokens: number;

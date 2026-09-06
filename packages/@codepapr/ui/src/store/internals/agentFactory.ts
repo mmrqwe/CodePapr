@@ -8,6 +8,7 @@ import {
   allowToolForReadOnlyMode,
   readOnlyModeBlockMessage,
   isReadOnlyMode,
+  applyMinimalToolProfile,
   generateToolOutputFilename,
   resolveToolContextOverrides,
   type AgentDefinition,
@@ -435,17 +436,26 @@ export function buildAgentSessionParts(
   };
 
   // TodoList 工具：主 Agent 的"短期工作记忆"，与 task 工具正交协作
-  registerTodoListTools(toolRegistry, sessionId, '', settings.todoMaxRetries);
+  // 极简工具面：todo/memory/MCP 不在 allowlist，直接不注册（handler 物理缺失，
+  // 幻觉调用报 unknown tool；prompt 层由 buildMinimalToolSurfaceSection 说明）。
+  const minimalSurface = settings.agentToolProfile === 'minimal';
+  if (!minimalSurface) {
+    registerTodoListTools(toolRegistry, sessionId, '', settings.todoMaxRetries);
 
-  // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
-  registerMemoryTools(toolRegistry, workspacePath, sessionId);
+    // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
+    registerMemoryTools(toolRegistry, workspacePath, sessionId);
 
-  registerMcpTools(toolRegistry, settings.mcp, runtime.mcpToolDefinitions ?? [], runtime.mcpToolMappings);
+    registerMcpTools(toolRegistry, settings.mcp, runtime.mcpToolDefinitions ?? [], runtime.mcpToolMappings);
+  }
 
   const uiTaskToolContext = buildUiTaskToolContext(settings, workspacePath, runtime, overrides, sessionId);
-  if (uiTaskToolContext) {
+  if (uiTaskToolContext && !minimalSurface) {
     registerUiTaskTool(toolRegistry, uiTaskToolContext);
   }
+
+  // mode 过滤（registerWorkspaceTools 内 hideFromLlm + ask 的 FilteringToolRegistry）
+  // 已生效；此处叠加 profile → 最终 mode ∩ profile（顺序：先 mode 再 profile）。
+  applyMinimalToolProfile(toolRegistry, settings.agentToolProfile);
 
   const baseModel = currentModel;
   const provider = buildProviderInstance(settings);

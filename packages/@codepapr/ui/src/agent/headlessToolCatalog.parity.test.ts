@@ -12,6 +12,8 @@ import {
   allowToolForReadOnlyMode,
   readOnlyModeBlockMessage,
   isReadOnlyMode,
+  applyMinimalToolProfile,
+  MINIMAL_AGENT_TOOLS,
 } from '@codepapr/core';
 
 const { invokeMock } = vi.hoisted(() => ({
@@ -79,6 +81,24 @@ function catalogNames(testCase: Case): string[] {
     .sort();
 }
 
+/** 桌面极简路径的镜像：registerWorkspaceTools（含 mode 过滤）→ 跳过
+ *  todo/memory（与 WorkerBackedAgent/agentFactory 一致）→ applyMinimalToolProfile。 */
+function desktopMinimalNames(testCase: Case): string[] {
+  const inner: ToolRegistry = isReadOnlyMode(testCase.mode)
+    ? new FilteringToolRegistry(allowToolForReadOnlyMode, readOnlyModeBlockMessage)
+    : new ToolRegistry();
+  registerWorkspaceTools(inner, '/tmp/ws', undefined, undefined, {
+    mode: testCase.mode,
+    multimodalEnabled: testCase.multimodalEnabled,
+    disableWebSearchTools: testCase.mcpSearchEnabled,
+  });
+  applyMinimalToolProfile(inner, 'minimal');
+  return inner
+    .getLlmTools()
+    .map((tool) => tool.name)
+    .sort();
+}
+
 describe('headlessToolCatalog ↔ desktop registry parity', () => {
   for (const testCase of CASES) {
     it(`mode=${testCase.mode} mm=${testCase.multimodalEnabled} mcpSearch=${testCase.mcpSearchEnabled}`, () => {
@@ -108,6 +128,40 @@ describe('headlessToolCatalog ↔ desktop registry parity', () => {
         expect(names).not.toContain(excluded);
       }
     }
+  });
+
+  it('极简工具面 parity：desktop registry（applyMinimalToolProfile）与 catalog（toolProfile=minimal）逐 mode 一致', () => {
+    for (const testCase of CASES) {
+      const desktop = desktopMinimalNames(testCase);
+      const catalog = buildHeadlessToolDefinitions({ ...testCase, toolProfile: 'minimal' })
+        .map((tool) => tool.name)
+        .sort();
+      expect(catalog).toEqual(desktop);
+      // 差异只允许是已登记的 UI-bound 排除项（headless 本就不含 memory/app/browser）。
+      const omitted = desktop.filter((name) => !catalog.includes(name));
+      expect(omitted.every((name) => HEADLESS_UI_BOUND_OMISSION_UNIVERSE.has(name))).toBe(true);
+    }
+  });
+
+  it('极简 + Agent（无 MCP 搜索）= 恰好 7 项 allowlist，无 memory/skill/git/lsp/app/todo', () => {
+    const names = buildHeadlessToolDefinitions({
+      mode: 'agent',
+      multimodalEnabled: false,
+      mcpSearchEnabled: false,
+      toolProfile: 'minimal',
+    }).map((tool) => tool.name).sort();
+    expect(names).toEqual([...MINIMAL_AGENT_TOOLS].sort());
+  });
+
+  it('default profile 与极简互不影响：default = 非极简的补集语义（含 git/lsp/todo 等）', () => {
+    const defaultNames = buildHeadlessToolDefinitions({
+      mode: 'agent',
+      multimodalEnabled: false,
+      mcpSearchEnabled: false,
+    }).map((tool) => tool.name);
+    expect(defaultNames).toContain('git');
+    expect(defaultNames).toContain('todo');
+    expect(defaultNames).toContain('lsp');
   });
 });
 

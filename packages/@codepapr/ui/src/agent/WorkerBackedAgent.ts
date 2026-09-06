@@ -5,6 +5,7 @@ import {
   allowToolForReadOnlyMode,
   readOnlyModeBlockMessage,
   isReadOnlyMode,
+  applyMinimalToolProfile,
   Serializer,
   type EditHistory,
   type PromptMode,
@@ -240,12 +241,20 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
   );
 
   // TodoList 工具：handler 改主线程的 store，由 Worker 通过 tool-request 桥回执行
-  registerTodoListTools(registry, config.sessionId, '');
+  // 极简工具面：todo/memory/MCP 不在 allowlist，不注册（worker 收到的
+  // toolDefinitions 同步缺位，幻觉调用在 worker 侧报 unknown tool）。
+  const minimalSurface = config.settings.agentToolProfile === 'minimal';
+  if (!minimalSurface) {
+    registerTodoListTools(registry, config.sessionId, '');
 
-  // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
-  registerMemoryTools(registry, config.workspacePath, config.sessionId);
+    // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
+    registerMemoryTools(registry, config.workspacePath, config.sessionId);
 
-  registerMcpTools(registry, config.settings.mcp, config.runtime.mcpToolDefinitions ?? [], config.runtime.mcpToolMappings);
+    registerMcpTools(registry, config.settings.mcp, config.runtime.mcpToolDefinitions ?? [], config.runtime.mcpToolMappings);
+  }
+
+  // mode 过滤（hideFromLlm / FilteringToolRegistry）之上叠加 profile → mode ∩ profile。
+  applyMinimalToolProfile(registry, config.settings.agentToolProfile);
 
   // Send only the LLM-visible tools to the worker. getAll() would also include
   // hideFromLlm/softHideFromLlm tools (e.g. read_image when multimodal is off,

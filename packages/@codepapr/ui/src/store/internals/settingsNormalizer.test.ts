@@ -198,6 +198,16 @@ describe('normalizeSettings 实验性功能', () => {
   });
 });
 
+describe('normalizeSettings Agent 工具面', () => {
+  it('默认 default；仅接受 default/minimal；非法值回退默认（重启持久化）', () => {
+    expect(normalizeSettings({}).agentToolProfile).toBe('default');
+    expect(normalizeSettings({ agentToolProfile: 'minimal' }).agentToolProfile).toBe('minimal');
+    expect(normalizeSettings({ agentToolProfile: 'default' }).agentToolProfile).toBe('default');
+    expect(normalizeSettings({ agentToolProfile: 'sandbox' as never }).agentToolProfile).toBe('default');
+    expect(normalizeSettings({ agentToolProfile: 7 as never }).agentToolProfile).toBe('default');
+  });
+});
+
 describe('normalizeSettings LSP families', () => {
   it('defaults to all families enabled', () => {
     expect(normalizeSettings({}).lspDisabledFamilies).toEqual([]);

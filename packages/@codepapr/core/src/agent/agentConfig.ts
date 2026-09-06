@@ -391,6 +391,69 @@ export function filterToolsForMode<T extends IToolDefinition>(
   });
 }
 
+/** Agent 工具面档位：default=现有全量工具；minimal=仅 7 项核心工具。 */
+export type AgentToolProfile = 'default' | 'minimal';
+
+/**
+ * 极简工具面 allowlist（单源）。必须与注册表真实 name 一致
+ * （core mergeToolDefs / ui workspaceToolDefinitions）；改名后此处漏映射
+ * 会由 filterToolsForProfile 的告警与单测暴露，而不是静默产出空工具集。
+ */
+export const MINIMAL_AGENT_TOOLS = [
+  'read',
+  'edit',
+  'write',
+  'grep',
+  'bash',
+  'websearch',
+  'webfetch',
+] as const;
+
+export type MinimalAgentToolName = typeof MINIMAL_AGENT_TOOLS[number];
+
+/** 名字是否在极简 allowlist 内（prompt 层与 defs 过滤共用同一名单）。 */
+export function isMinimalAgentToolName(name: string): boolean {
+  return (MINIMAL_AGENT_TOOLS as readonly string[]).includes(name);
+}
+
+/**
+ * 按工具面档位过滤（在 filterToolsForMode 之后调用，最终为 mode ∩ profile）：
+ * - default：noop；
+ * - minimal：allowlist 交集。入参非空而结果为空说明工具改名后 allowlist
+ *   未同步，开发期告警（防极简静默空集）。
+ */
+export function filterToolsForProfile<T extends IToolDefinition>(
+  tools: T[],
+  profile: AgentToolProfile | undefined
+): T[] {
+  if (!profile || profile === 'default') return tools;
+  const result = tools.filter((tool) => isMinimalAgentToolName(tool.name));
+  if (tools.length > 0 && result.length === 0) {
+    console.warn(
+      `[agentConfig] filterToolsForProfile('minimal') produced an empty set from ${tools.length} tool(s): `
+      + `${tools.map((tool) => tool.name).join(', ')}. Check MINIMAL_AGENT_TOOLS against the registry.`
+    );
+  }
+  return result;
+}
+
+/**
+ * 对注册表应用极简工具面：仅对「当前 LLM 可见」的顶层工具做物理裁剪
+ * （unregister：定义+handler 同删，幻觉调用报 unknown tool）。已被
+ * hideFromLlm/softHideFromLlm 的内部细粒度工具（workspace_*、graph 等）
+ * 保持原样——合并工具的 dispatcher 仍需要它们。
+ * 必须在全部注册（workspace/todo/memory/mcp 等）完成、frozen 之前调用。
+ */
+export function applyMinimalToolProfile(
+  registry: { getLlmTools(): IToolDefinition[]; unregister(name: string): void },
+  profile: AgentToolProfile | undefined
+): void {
+  if (profile !== 'minimal') return;
+  for (const tool of registry.getLlmTools()) {
+    if (!isMinimalAgentToolName(tool.name)) registry.unregister(tool.name);
+  }
+}
+
 /**
  * 单个工具名对 LLM 的可见性判定（prompt 层与 headless 工具目录共用）。
  * 在 filterToolsForMode 的模式规则之上叠加条件可见性：

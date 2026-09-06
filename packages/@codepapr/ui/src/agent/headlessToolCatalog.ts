@@ -13,7 +13,9 @@
 import {
   buildTodoToolDefinition,
   DEFAULT_PROMPT_TOOL_NAMES,
+  isMinimalAgentToolName,
   isPromptToolVisible,
+  type AgentToolProfile,
   type PromptMode,
 } from '@codepapr/core';
 import type { IToolDefinition } from '@codepapr/types';
@@ -45,17 +47,21 @@ export interface HeadlessToolCatalogOptions {
   mcpSearchEnabled: boolean;
   /** task 工具依赖子代理定义；P0 harness 不加载自定义 agents，缺省不暴露。 */
   agentDefinitionsCount?: number;
+  /** 工具面档位：与桌面共用 MINIMAL_AGENT_TOOLS 单源（mode ∩ profile）。 */
+  toolProfile?: AgentToolProfile;
 }
 
 export function buildHeadlessToolDefinitions(
   options: HeadlessToolCatalogOptions
 ): IToolDefinition[] {
-  const { mode, multimodalEnabled, mcpSearchEnabled, agentDefinitionsCount = 0 } = options;
+  const { mode, multimodalEnabled, mcpSearchEnabled, agentDefinitionsCount = 0, toolProfile = 'default' } = options;
+  const minimal = toolProfile === 'minimal';
   const definitions: IToolDefinition[] = [];
   for (const name of DEFAULT_PROMPT_TOOL_NAMES) {
     if (HEADLESS_UI_BOUND_EXCLUDED.has(name)) continue;
     if (name === 'task' && agentDefinitionsCount === 0) continue;
     if (!isPromptToolVisible(name, mode, { multimodalEnabled, mcpSearchEnabled })) continue;
+    if (minimal && !isMinimalAgentToolName(name)) continue;
     definitions.push(resolveToolDefinition(name));
   }
   return definitions;

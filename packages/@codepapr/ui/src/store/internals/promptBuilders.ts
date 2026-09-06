@@ -1,6 +1,7 @@
 import {
   AppendOnlyLog,
   buildSessionBootstrapPrompt,
+  buildMinimalToolSurfaceSection,
   buildSkillsSection,
   buildRuntimeUserPrompt,
   Serializer,
@@ -182,8 +183,12 @@ export function buildAgentSessionBootstrapPrompt(
 ): string {
   const lang = settings.lang ?? 'zh-CN';
   const customPromptSection = (settings.systemPrompt ?? '').trim();
-  const resolvedPluginsSection =
-    pluginsSection !== undefined
+  // 极简工具面：memory/skill/MCP/Git/LSP 等工具已被裁掉，Bootstrap 不再枚举
+  // 「已启用插件 / 技能 / 记忆」大段，换成一句工具面说明，避免模型幻觉调用。
+  const minimalSurface = settings.agentToolProfile === 'minimal';
+  const resolvedPluginsSection = minimalSurface
+    ? undefined
+    : pluginsSection !== undefined
       ? pluginsSection
       : buildPublishCatalogSection(
           collectPublishCatalogTargets(useAppRuntimeStore.getState()),
@@ -192,10 +197,11 @@ export function buildAgentSessionBootstrapPrompt(
   const bootstrap = buildSessionBootstrapPrompt({
     workspacePath,
     lang,
-    skillsSection: buildSkillsSection(skillDefinitions, lang),
+    skillsSection: minimalSurface ? '' : buildSkillsSection(skillDefinitions, lang),
     pluginsSection: resolvedPluginsSection || undefined,
-    memorySection,
+    memorySection: minimalSurface ? undefined : memorySection,
     customPromptSection: customPromptSection || undefined,
+    toolSurfaceSection: minimalSurface ? buildMinimalToolSurfaceSection(lang) : undefined,
   });
   const activeCharacter = settings.experimentalCharacters ? getActiveCharacter() : null;
   if (!activeCharacter) return bootstrap;

@@ -197,12 +197,14 @@ LLM manages apps via 4 tools (App mode only):
 
 ### Settings
 
-- **General**: language, debug, license
+- **General**: language, agent tools (Default/Minimal), experimental features, license
 - **LLM**: models, sampling, thinking
 - **Search**: SearXNG; falls back to built-in aggregation
 - **Sub-agents**: Explore / Scout / Mentor
 - **Advanced**: compaction, Goal, ProjectGraph, tool context
 - **App**: default access for undeclared apps
+
+**Agent tools** (Settings → General): "Default" = the current full desktop tool set (still filtered by Ask/Plan/Agent/App mode); "Minimal" = only 7 tools exposed — `read / edit / write / grep / bash / websearch / webfetch` — fewer tools, closer to a minimal coding harness (note: bash can still run arbitrary commands; minimal ≠ sandbox). Combinations take mode ∩ profile (Minimal+Ask also drops write/bash; app-specific tools are gone under Minimal, so App mode needs the Default profile). With MCP search enabled, `websearch`/`webfetch` are still replaced by MCP tools as before. Takes effect on the next message after saving; does not interrupt the running stream. On the CLI, `codepapr run --tools-preset minimal` shares one allowlist (`MINIMAL_AGENT_TOOLS`) with the UI.
 
 Voice lives on the character panel. Full parameter list: `packages/@codepapr/core/docs/CONFIGURATION.md`.
 
