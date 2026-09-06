@@ -392,6 +392,27 @@ export function filterToolsForMode<T extends IToolDefinition>(
 }
 
 /**
+ * 单个工具名对 LLM 的可见性判定（prompt 层与 headless 工具目录共用）。
+ * 在 filterToolsForMode 的模式规则之上叠加条件可见性：
+ * - read_image 需要多模态开启；
+ * - mcp 搜索启用时隐藏 websearch/webfetch（避免与 MCP 搜索工具重复竞争）；
+ * - ask 只读模式下 MUTATING 全隐（git 例外：定义层保留、执行层按
+ *   GIT_READ_ONLY_ACTIONS 拦截）。
+ */
+export function isPromptToolVisible(
+  name: string,
+  mode: PromptMode,
+  opts: { multimodalEnabled: boolean; mcpSearchEnabled: boolean }
+): boolean {
+  if (name === 'read_image') return opts.multimodalEnabled;
+  if (APP_ONLY_TOOL_NAMES.has(name)) return mode === 'app';
+  if (PLAN_ONLY_TOOL_NAMES.has(name)) return mode === 'plan';
+  if (MUTATING_TOOL_NAMES.has(name)) return name === 'git' || !isReadOnlyMode(mode);
+  if (name === 'websearch' || name === 'webfetch') return !opts.mcpSearchEnabled;
+  return true;
+}
+
+/**
  * Verifier 内置代理提示词（客观模式：有 exec: 机器验证条件）。
  * 三语 Record，运行时按语言解析；主观模式使用 VERIFIER_PROMPT_SUBJECTIVE。
  */

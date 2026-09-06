@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 
 mod commands;
+mod harness;
 mod rpc_client;
 
 #[derive(Parser, Debug)]
@@ -75,11 +76,14 @@ enum Commands {
         cmd: commands::server::ServerCommand,
     },
 
-    #[command(about = "Interact with the AI Coding Agent (single prompt or interactive REPL)")]
+    #[command(
+        about = "Interact with the AI Coding Agent (single prompt or interactive REPL)",
+        after_help = "DEPRECATED for automation: this REPL uses a legacy bypass payload (fixed tool table, agent mode only). External harnesses must use `codepapr run`."
+    )]
     Chat(commands::chat::ChatArgs),
 
-    #[command(about = "Alias for chat")]
-    Run(commands::chat::ChatArgs),
+    #[command(about = "Run one task through the desktop Agent runtime (external harness entrypoint)")]
+    Run(commands::run::RunArgs),
 }
 
 fn normalize_workspace_path(path_str: String) -> String {
@@ -91,7 +95,17 @@ fn normalize_workspace_path(path_str: String) -> String {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::process::ExitCode {
+    match main_inner().await {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("Error: {err}");
+            std::process::ExitCode::from(1)
+        }
+    }
+}
+
+async fn main_inner() -> Result<std::process::ExitCode, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     let raw_workspace = match cli.workspace {
@@ -112,18 +126,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Special case: start server directly
     if let Some(Commands::Server { cmd: commands::server::ServerCommand::Start { port } }) = cli.command {
-        return commands::server::run_start(port, Some(workspace)).await;
+        commands::server::run_start(port, Some(workspace)).await?;
+        return Ok(std::process::ExitCode::SUCCESS);
     }
 
     // Set up notifications channel
-    let (event_tx, event_rx) = mpsc::unbounded_channel::<JsonRpcNotification>();
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<JsonRpcNotification>();
 
     // Connect to server (or auto-spawn stdio daemon)
     let client_res = RpcClient::connect(cli.server.as_deref(), Some(&workspace), Some(event_tx), cli.verbose).await;
 
     // Doctor can run even if server connection failed
     if let Some(Commands::Doctor) = cli.command {
-        return commands::doctor::run(client_res.as_ref().ok(), &workspace, cli.json).await;
+        commands::doctor::run(client_res.as_ref().ok(), &workspace, cli.json).await?;
+        return Ok(std::process::ExitCode::SUCCESS);
     }
 
     let client = client_res?;
@@ -152,8 +168,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::server::run_info(&client, cli.json).await?;
         }
         Some(Commands::Server { cmd: commands::server::ServerCommand::Start { .. } }) => unreachable!(),
-        Some(Commands::Chat(args)) | Some(Commands::Run(args)) => {
+        Some(Commands::Chat(args)) => {
             commands::chat::run(&client, &workspace, args, event_rx, cli.json).await?;
+        }
+        Some(Commands::Run(args)) => {
+            let code =
+                commands::run::run(&client, &workspace, args, &mut event_rx, cli.json).await;
+            return Ok(std::process::ExitCode::from(code as u8));
         }
         None => {
             // Default: start chat session
@@ -171,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    Ok(())
+    Ok(std::process::ExitCode::SUCCESS)
 }
 
 #[cfg(test)]

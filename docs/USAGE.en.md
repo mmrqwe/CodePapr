@@ -580,6 +580,112 @@ If the Agent goes off track, hover the previous correct user message and click "
 | `~/.codepapr/voices` | Character reference audio files |
 | `~/.codepapr/gpt-sovits` | GPT-SoVITS installation and models |
 
+## External Harness (`codepapr run`)
+
+External eval scripts / CI harnesses run tasks through the **same Agent runtime** as
+the desktop: the same Node sidecar (`@codepapr/ui/dist-sidecar/agent-runtime.mjs`,
+produced by `npm run build:sidecar`), the same agent loop and context pipeline, and
+the same Rust tool host (fs/shell/git/lsp/web). The CLI itself only does argv,
+event persistence and process lifecycle — it never maintains a second tool table
+or prompt.
+
+### Prerequisite builds
+
+```bash
+cargo build -p codepapr-cli -p codepapr-server   # CLI + host daemon
+npm run build:sidecar -w @codepapr/ui            # shared agent runtime (sidecar)
+```
+
+Without `--server` the CLI auto-spawns `codepapr-server` in stdio mode (lookup:
+`CODEPAPR_SERVER_BIN` → next to the CLI binary → `target/{debug,release}` → PATH).
+
+### Usage
+
+```bash
+codepapr-cli -C /path/to/workspace run \
+  --mode agent \
+  -m deepseek-chat -p deepseek --api-key "$DEEPSEEK_API_KEY" \
+  --yolo --timeout-ms 300000 \
+  --events-jsonl ./run.jsonl --result-json ./out.json \
+  "add unit tests for src/util.ts"
+```
+
+`chat` is the legacy REPL path (kept, but not a harness interface; `chat --json`
+is deprecated and emits only the `{response, user}` subset). Harness flows use `run`.
+
+### Exit codes
+
+| code | meaning |
+|---|---|
+| 0 | finished normally (exitReason=completed) |
+| 1 | agent/runtime error (including an old sidecar lacking harness frames — hard failure, no fallback) |
+| 2 | `--timeout-ms` exceeded (started tools still get end/cancel events) |
+| 3 | permission not approved (no `--yolo` and no allowlist match) |
+| 130 | interrupted by signal |
+
+### Key flags
+
+- `--mode ask|plan|agent`: desktop-parity mode filtering (same core `isPromptToolVisible` /
+  `MUTATING / PLAN_ONLY / APP_ONLY` sources). Under `ask`, `write/edit/patch/bash` never
+  appear in the tool surface; `git` stays but is execution-gated to
+  `GIT_READ_ONLY_ACTIONS` (matching the desktop `FilteringToolRegistry`).
+- `--yolo` / `--permission allowlist.json`: unattended permission policy. The allowlist
+  is a JSON array of rules (`tool` / `operation` / `pathGlob` / `pathContains`); a rule
+  matches only when every field it sets matches. Otherwise deny → exit 3 (secure
+  default; only external-path access triggers permission requests, same as the host
+  path policy).
+- `--question-auto` / `--question-answers answers.json`: plan-mode question policy.
+  Default `skip`: the question tool fails fast and a `question.skipped` event is
+  recorded — answers are never silently fabricated.
+- `--session-id <id>`: multi-turn (resend `run` against the same sidecar to accumulate history).
+- `--events-jsonl` / `--result-json`: machine-readable outputs below.
+
+### Event line protocol (`--events-jsonl`, v1)
+
+One JSON object per line with common fields `{"v":1,"ts":<epoch ms>,"sessionId":"...","type":...}`:
+
+| type | extra fields |
+|---|---|
+| `run.start` | `mode,model,provider,workspace` |
+| `tool.start` | `toolCallId,toolName,arguments` |
+| `tool.end` | `toolCallId,toolName,success,errorPreview?,outputPreview?` (truncated to 2048 chars) |
+| `message.delta` | `channel:"content"|"reasoning",delta` |
+| `message.end` | `round,hasToolCalls,contentChars` |
+| `permission` | `operation,toolName?,path,approved` |
+| `harness` | `name:"question.answered"|"question.skipped"|"tool.unsupported"|"tool.blocked"|"todo.updated",payload` |
+| `error` | `error` |
+| `run.end` | `exitReason,exitCode` |
+
+### Result document (`--result-json`)
+
+```json
+{
+  "v": 1, "sessionId": "...", "mode": "agent", "model": "...", "provider": "...",
+  "workspace": "...", "finalText": "...",
+  "toolCalls": [{ "name": "read", "ok": true, "ms": 8 }],
+  "usage": { "newInputTokens": 0, "cacheReadTokens": 0, "outputTokens": 0 },
+  "exitReason": "completed|error|timeout|denied|cancelled"
+}
+```
+
+### Headless boundary (P0)
+
+These UI-bound capabilities are **explicitly unavailable** in the harness (fail fast +
+`tool.unsupported` event, never left to hang on the IPC timeout; also absent from the
+tool surface so the model cannot see them): the memory admission panel, app
+lifecycle/overlay (`app_render/app_publish/...`), project graph, and the WebView
+browser. `todo` (in-memory) and `question` (policy-driven) are the only locally
+answered interactive tools.
+Concurrency note: `agent/start` reuses the server's single live runtime — one server
+supports one active run at a time (until eval / multi-runtime lands, run one server
+per concurrent task).
+
+### Smoke verification
+
+```bash
+node scripts/harness-smoke.mjs   # drives completed / ask-cannot-write / permission-denied / timeout acceptance via a mock provider
+```
+
 ## FAQ
 
 ### No API key on startup

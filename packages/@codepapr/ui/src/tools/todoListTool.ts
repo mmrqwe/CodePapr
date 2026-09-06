@@ -16,13 +16,14 @@
 import {
   buildTodoToolDefinition,
   createEmptyTodoListContext,
+  parseTodoGoal,
+  parseTodoUpdatePatches,
   renderTodoListDigest,
   updateTodoList,
   writeTodoList,
   type ToolRegistry,
-  type TodoUpdatePatch,
 } from '@codepapr/core';
-import type { AgentTask, IToolDefinition, TodoListContext } from '@codepapr/types';
+import type { IToolDefinition, TodoListContext } from '@codepapr/types';
 import { useAgentStore } from '../store/agentStore';
 import {
   commitTodoListContext,
@@ -46,21 +47,6 @@ interface ToolReturn {
 
 function buildReturn(ctx: TodoListContext): ToolReturn {
   return { todoList: ctx, digest: renderTodoListDigest(ctx) };
-}
-
-function toPatches(rawUpdates: Array<Record<string, unknown>>): TodoUpdatePatch[] {
-  return rawUpdates
-    .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
-    .map((item) => ({
-      id: typeof item.id === 'string' ? item.id.trim() : '',
-      status: typeof item.status === 'string' ? (item.status as AgentTask['status']) : undefined,
-      summary: typeof item.summary === 'string' ? item.summary : undefined,
-      errorLog: typeof item.errorLog === 'string' ? item.errorLog : undefined,
-      touchedArtifacts: Array.isArray(item.touchedArtifacts)
-        ? (item.touchedArtifacts.filter((p): p is string => typeof p === 'string'))
-        : undefined,
-    }))
-    .filter((patch) => patch.id);
 }
 
 /**
@@ -87,7 +73,7 @@ export function registerTodoListTools(
   registry.register(definition, async (args) => {
     const hasTasks = Array.isArray(args.tasks);
     const hasUpdates = Array.isArray(args.updates);
-    const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal.trim() : defaultGoal;
+    const goal = parseTodoGoal(args.goal, defaultGoal);
 
     if (hasTasks) {
       // ── 全量覆盖模式 ──
@@ -110,7 +96,7 @@ export function registerTodoListTools(
       }
 
       const rawUpdates = hasUpdates ? (args.updates as Array<Record<string, unknown>>) : [];
-      const patches = toPatches(rawUpdates);
+      const patches = parseTodoUpdatePatches(rawUpdates);
       if (patches.length === 0) {
         return buildReturn(emptyCtx);
       }
@@ -129,7 +115,7 @@ export function registerTodoListTools(
     }
 
     const rawUpdates = (args.updates as Array<Record<string, unknown>>);
-    const patches = toPatches(rawUpdates);
+    const patches = parseTodoUpdatePatches(rawUpdates);
     if (patches.length === 0) {
       return buildReturn(previous);
     }

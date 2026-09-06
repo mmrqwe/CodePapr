@@ -33,6 +33,9 @@ pub async fn handle_request(ctx: &Arc<ServerContext>, method: &str, params: Valu
             "capabilities": {
                 "fs": true, "git": true, "shell": true, "lsp": true,
                 "agent": true, "db": true, "snapshot": true, "mcp": true, "web": true,
+                // headless harness 帧通道（harness/ping 握手是权威判定；
+                // 此处仅为信息位，随 sidecar 一起构建）。
+                "harness": 1,
             },
             "workspace": ctx.default_workspace,
         })),

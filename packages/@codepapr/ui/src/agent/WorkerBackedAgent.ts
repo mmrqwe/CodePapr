@@ -44,15 +44,7 @@ import {
 import type { AgentRuntimeTransport } from './agentRuntimeHost';
 import { WorkerTransport } from './workerTransport';
 
-function resolveWorkerMultimodalEnabled(settings: WorkerAgentSettings, currentModel: string): boolean {
-  if (!settings.multimodalEnabled) return false;
-  if (settings.multimodalModelTier === 'all') return true;
-  const fastModel = settings.fastModel.trim();
-  const isFastModel = settings.fastModelEnabled && fastModel.length > 0 && currentModel === fastModel;
-  if (settings.multimodalModelTier === 'primary' && !isFastModel) return true;
-  if (settings.multimodalModelTier === 'fast' && isFastModel) return true;
-  return false;
-}
+import { resolveWorkerMultimodalEnabled } from '../store/internals/providerFactory';
 
 interface PendingToolCall {
   toolCallId: string;
@@ -880,6 +872,15 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   }
 
   private readonly handleRuntimeMessage = (message: AgentWorkerToMainMessage) => {
+    // harness/* 出站帧仅存在于 CLI headless 路径（Rust 侧消费），桌面/
+    // worker/sidecar 交互永远不会产生；防御性忽略。
+    if (
+      message.type === 'harness-pong'
+      || message.type === 'harness-ready'
+      || message.type === 'harness-event'
+    ) {
+      return;
+    }
 
     // 取消 ACK 等待期间 worker 仍在响应（任何消息都算活着）：重新武装
     // 终止宽限窗口。大上下文同步会阻塞事件循环，worker 只是"慢"而非死。

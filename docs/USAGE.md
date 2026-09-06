@@ -619,6 +619,106 @@ macOS 上 `bash` 工具、Shell 会话与 app 后端进程都通过 `sandbox-exe
 | `~/.codepapr/voices` | 角色参考音频文件 |
 | `~/.codepapr/gpt-sovits` | GPT-SoVITS 安装与模型 |
 
+## 外部 Harness（`codepapr run`）
+
+外部评测脚本 / CI harness 用 `codepapr run` 以与桌面**同一套 Agent 运行时**跑任务：
+同一个 Node sidecar（`@codepapr/ui/dist-sidecar/agent-runtime.mjs`，`npm run build:sidecar`
+产出）、同一 Agent 循环与上下文管线、同一 Rust 工具宿主（fs/shell/git/lsp/web）。
+CLI 本身只做参数解析、事件落盘与进程生命周期，不维护第二套工具表或提示词。
+
+### 前置构建
+
+```bash
+cargo build -p codepapr-cli -p codepapr-server   # CLI 与宿主
+npm run build:sidecar -w @codepapr/ui            # 共享 Agent 运行时（sidecar）
+```
+
+CLI 未指定 `--server` 时会自动拉起 stdio 模式的 `codepapr-server`（找二进制顺序：
+`CODEPAPR_SERVER_BIN` → CLI 同目录 → `target/{debug,release}` → PATH）。
+
+### 用法
+
+```bash
+codepapr-cli -C /path/to/workspace run \
+  --mode agent \
+  -m deepseek-chat -p deepseek --api-key "$DEEPSEEK_API_KEY" \
+  --yolo --timeout-ms 300000 \
+  --events-jsonl ./run.jsonl --result-json ./out.json \
+  "为 src/util.ts 补单元测试"
+```
+
+`chat` 是旧的 REPL 路径（保留但不作为 harness 接口；`chat --json` 已弃用，仅输出
+`{response, user}` 子集）。harness 路径一律走 `run`。
+
+### 退出码
+
+| 码 | 含义 |
+|---|---|
+| 0 | 正常结束（exitReason=completed） |
+| 1 | Agent/runtime 错误（含 sidecar 过旧、缺 harness 能力的硬失败） |
+| 2 | `--timeout-ms` 超时（已发出的工具会补 end/cancel 事件） |
+| 3 | 权限未批准（非 yolo 且 allowlist 未命中；文件已回滚不落地） |
+| 130 | Ctrl-C 信号中断 |
+
+### 主要 flag
+
+- `--mode ask|plan|agent`：与桌面同源的 mode 过滤（core `isPromptToolVisible` /
+  `MUTATING / PLAN_ONLY / APP_ONLY` 同一事实源）。`ask` 下 `write/edit/patch/bash` 等
+  根本不会出现在工具定义里，`git` 保留但执行期只放行 `GIT_READ_ONLY_ACTIONS`（与桌面
+  `FilteringToolRegistry` 语义一致）。
+- `--yolo` / `--permission allowlist.json`：无人值守权限策略。allowlist 为规则数组，
+  字段 `tool` / `operation` / `pathGlob` / `pathContains`，任一规则全字段命中才放行；
+  无 `--yolo` 且未命中 → 拒绝并 exit 3（安全默认，外部路径请求才会触发权限事件，
+  与宿主路径策略一致）。
+- `--question-auto` / `--question-answers answers.json`：plan 模式 question 策略。
+  缺省为 `skip`：question 工具立即返回错误并在事件流记 `question.skipped`，
+  **不会**静默伪造回答。
+- `--session-id <id>`：多轮（对同一 sidecar 重发 `run` 时累积会话历史）。
+- `--events-jsonl` / `--result-json`：机读产物，见下。
+
+### 事件行协议（`--events-jsonl`，v1）
+
+每行一个 JSON 对象，公共字段 `{"v":1,"ts":<epoch ms>,"sessionId":"...","type":...}`：
+
+| type | 附加字段 |
+|---|---|
+| `run.start` | `mode,model,provider,workspace` |
+| `tool.start` | `toolCallId,toolName,arguments` |
+| `tool.end` | `toolCallId,toolName,success,errorPreview?,outputPreview?`（截断 2048 字符） |
+| `message.delta` | `channel:"content"|"reasoning",delta` |
+| `message.end` | `round,hasToolCalls,contentChars` |
+| `permission` | `operation,toolName?,path,approved` |
+| `harness` | `name:"question.answered"|"question.skipped"|"tool.unsupported"|"tool.blocked"|"todo.updated",payload` |
+| `error` | `error` |
+| `run.end` | `exitReason,exitCode` |
+
+### 结果文档（`--result-json`）
+
+```json
+{
+  "v": 1, "sessionId": "...", "mode": "agent", "model": "...", "provider": "...",
+  "workspace": "...", "finalText": "...",
+  "toolCalls": [{ "name": "read", "ok": true, "ms": 8 }],
+  "usage": { "newInputTokens": 0, "cacheReadTokens": 0, "outputTokens": 0 },
+  "exitReason": "completed|error|timeout|denied|cancelled"
+}
+```
+
+### Headless 边界（P0）
+
+以下 UI-bound 能力在 harness 中**显式不可用**（立即失败 + `tool.unsupported` 事件，
+绝不挂到 IPC 超时；且不进入工具定义面，模型侧不可见）：memory 准入面板、
+app 生命周期/overlay（`app_render/app_publish/...`）、project graph、WebView browser。
+`todo`（内存）与 `question`（按策略）是仅有的两个本地应答交互工具。
+评测并发注意：`agent/start` 复用服务端唯一存活 runtime——一个 server 同一时刻
+只支持一个活跃 run（多任务并发在 eval/多 runtime 方案落地前，请每任务独立 server）。
+
+### 冒烟验证
+
+```bash
+node scripts/harness-smoke.mjs   # 用 mock provider 跑完 completed/ask拒写/权限拒绝/超时 四类验收
+```
+
 ## 常见问题
 
 ### 启动后提示没有 API key

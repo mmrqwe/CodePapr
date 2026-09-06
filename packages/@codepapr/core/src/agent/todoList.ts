@@ -180,6 +180,30 @@ export interface TodoUpdatePatch {
 }
 
 /**
+ * 解析 LLM 传入的 todo 工具参数（桌面 handler 与 headless harness 共用）。
+ * 语义与 todoListTool 的旧内联实现一致：仅接受非空 id 的 patch。
+ */
+export function parseTodoUpdatePatches(rawUpdates: unknown): TodoUpdatePatch[] {
+  if (!Array.isArray(rawUpdates)) return [];
+  return rawUpdates
+    .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+    .map((item) => ({
+      id: typeof item.id === 'string' ? item.id.trim() : '',
+      status: typeof item.status === 'string' ? (item.status as TaskStatus) : undefined,
+      summary: typeof item.summary === 'string' ? item.summary : undefined,
+      errorLog: typeof item.errorLog === 'string' ? item.errorLog : undefined,
+      touchedArtifacts: Array.isArray(item.touchedArtifacts)
+        ? (item.touchedArtifacts.filter((p): p is string => typeof p === 'string'))
+        : undefined,
+    }))
+    .filter((patch) => patch.id);
+}
+
+export function parseTodoGoal(rawGoal: unknown, defaultGoal: string): string {
+  return typeof rawGoal === 'string' && rawGoal.trim() ? rawGoal.trim() : defaultGoal;
+}
+
+/**
  * 部分更新若干任务，标记 completed 时自动推进到下一个可执行任务。
  */
 export function updateTodoList(

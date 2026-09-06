@@ -20,6 +20,7 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "node ./scripts/run-workspace-tests.mjs",
+    "harness:smoke": "node ./scripts/harness-smoke.mjs",
     "test:coverage": "node ./scripts/run-workspace-tests.mjs --run --coverage",
     "test:e2e:ui": "npm run test:e2e:ui --workspace=@codepapr/ui",
     "test:e2e:ui:install": "npm run test:e2e:ui:install --workspace=@codepapr/ui",

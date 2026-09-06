@@ -1709,6 +1709,16 @@ function reportDiagnostic(message: string, detail?: string): void {
 }
 
 function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
+  // harness/* 帧由 sidecar mediator 消费，绝不应到达循环；防御性忽略，
+  // 避免未知类型落入尾部的 chat 分支。
+  if (
+    message.type === 'harness/ping'
+    || message.type === 'harness/init'
+    || message.type === 'harness/run'
+  ) {
+    return;
+  }
+
   if (message.type === 'ping') {
     postMessageToMain({ type: 'pong' });
     return;

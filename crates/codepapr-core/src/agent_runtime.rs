@@ -277,7 +277,7 @@ fn note_outbound_message(runtime_id: &str, line: &str) {
     };
     let ty = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
     let workspace = match ty {
-        "init" | "chat" => value
+        "init" | "chat" | "harness/init" => value
             .pointer("/payload/workspacePath")
             .and_then(|v| v.as_str())
             .map(str::to_string),
@@ -292,6 +292,11 @@ fn note_outbound_message(runtime_id: &str, line: &str) {
             .pointer("/payload/runtime/mode")
             .and_then(|v| v.as_str())
             .map(str::to_string),
+        // harness 模式：init 帧带顶层 mode；run 帧无 mode，沿用 init 登记的。
+        "harness/init" => value
+            .pointer("/payload/mode")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
         "run-app-agent" => value
             .pointer("/payload/mode")
             .or_else(|| value.pointer("/payload/runtime/mode"))
@@ -302,6 +307,9 @@ fn note_outbound_message(runtime_id: &str, line: &str) {
     let searxng = match ty {
         "init" | "chat" | "run-app-agent" => value
             .pointer("/payload/settings")
+            .map(parse_searxng_settings),
+        "harness/init" => value
+            .pointer("/payload/settingsOverride")
             .map(parse_searxng_settings),
         _ => None,
     };

@@ -6,9 +6,8 @@ import {
   OpenAIProvider,
   ResponseProvider,
 } from '@codepapr/api';
-import type { WorkerAgentSettings } from '../../agent/agentWorkerProtocol';
 import { resolveProviderName } from './settingsNormalizer';
-import type { ApiFormat, ApiMode, ModelProfile, Settings } from './types';
+import type { ApiFormat, ApiMode, ModelProfile } from './types';
 
 export function buildProviderInstance(
   s: { apiMode: ApiMode; apiFormat: ApiFormat; apiKey: string; baseURL: string; streamIdleTimeoutMs?: number }
@@ -51,83 +50,7 @@ export function buildProviderForProfile(
   });
 }
 
-export function toWorkerAgentSettings(settings: Settings): WorkerAgentSettings {
-  return {
-    apiMode: settings.apiMode,
-    apiFormat: settings.apiFormat,
-    provider: resolveProviderName(settings),
-    baseURL: settings.baseURL,
-    apiKey: settings.apiKey,
-    model: settings.model,
-    temperature: settings.temperature,
-    maxTokens: settings.maxTokens,
-    maxToolRounds: settings.maxToolRounds,
-    thinkingEnabled: settings.thinkingEnabled,
-    thinkingEffort: settings.thinkingEffort,
-    thinkingBudgetTokens: settings.thinkingBudgetTokens,
-    thinkingPayload: settings.thinkingPayload,
-    lang: settings.lang,
-    fastModelEnabled: settings.fastModelEnabled,
-    fastModel: settings.fastModel,
-    mentorEnabled: settings.mentorEnabled,
-    mentorModel: settings.mentorModel,
-    mentorBaseURL: settings.mentorBaseURL,
-    mentorApiKey: settings.mentorApiKey,
-    mentorApiFormat: settings.mentorApiFormat,
-    mentorMaxTokens: settings.mentorMaxTokens,
-    mentorThinkingEnabled: settings.mentorThinkingEnabled,
-    mentorThinkingEffort: settings.mentorThinkingEffort,
-    mentorThinkingBudgetTokens: settings.mentorThinkingBudgetTokens,
-    mentorThinkingPayload: settings.mentorThinkingPayload,
-    exploreTopP: settings.exploreTopP,
-    exploreMaxTokens: settings.exploreMaxTokens,
-    exploreThinkingEnabled: settings.exploreThinkingEnabled,
-    exploreTemperature: settings.exploreTemperature,
-    exploreMaxToolRounds: settings.exploreMaxToolRounds,
-    exploreMaxDepth: settings.exploreMaxDepth,
-    exploreModelTier: settings.exploreModelTier,
-    scoutTopP: settings.scoutTopP,
-    scoutMaxTokens: settings.scoutMaxTokens,
-    scoutThinkingEnabled: settings.scoutThinkingEnabled,
-    scoutTemperature: settings.scoutTemperature,
-    scoutMaxToolRounds: settings.scoutMaxToolRounds,
-    scoutMaxDepth: settings.scoutMaxDepth,
-  scoutModelTier: settings.scoutModelTier,
-  appSubAgentModelTier: settings.appSubAgentModelTier,
-  appSubAgentThinkingEnabled: settings.appSubAgentThinkingEnabled,
-  appSubAgentMaxToolRounds: settings.appSubAgentMaxToolRounds,
-  mcp: settings.mcp,
-  graphToolTimeoutMs: settings.graphToolTimeoutMs,
-  toolIpcTimeoutMs: settings.toolIpcTimeoutMs,
-  streamIdleTimeoutMs: settings.streamIdleTimeoutMs,
-  multimodalEnabled: settings.multimodalEnabled,
-  multimodalModelTier: settings.multimodalModelTier,
-  toolOutputInterceptChars: settings.toolOutputInterceptChars,
-  toolOutputOffloadChars: settings.toolOutputOffloadChars,
-  toolOutputCeilingChars: settings.toolOutputCeilingChars,
-  toolOutputPreviewChars: settings.toolOutputPreviewChars,
-  toolOutputMiddleKeepChars: settings.toolOutputMiddleKeepChars,
-  pruneOldToolResults: settings.pruneOldToolResults,
-  pruneProtectRounds: settings.pruneProtectRounds,
-  pruneMinChars: settings.pruneMinChars,
-  toolContextDefaultMode: settings.toolContextDefaultMode,
-  toolContextOverrides: settings.toolContextOverrides,
-  toolContextSummaryMaxChars: settings.toolContextSummaryMaxChars,
-  toolContextAutoThresholdChars: settings.toolContextAutoThresholdChars,
-  maxContextTokens: settings.maxContextTokens,
-  maxConversationRounds: settings.maxConversationRounds,
-  compactionModel: settings.compactionModel,
-  compactionMaxTokens: settings.compactionMaxTokens,
-  compactionTemperature: settings.compactionTemperature,
-  searxngEnabled: settings.searxngEnabled,
-  searxngBaseUrl: settings.searxngBaseUrl,
-  searxngCategories: settings.searxngCategories,
-  searxngTimeRange: settings.searxngTimeRange,
-  searxngLanguage: settings.searxngLanguage,
-  searxngSafeSearch: settings.searxngSafeSearch,
-  searxngEngines: settings.searxngEngines,
-};
-}
+export { toWorkerAgentSettings, resolveWorkerMultimodalEnabled } from './workerSettings';
 
 export function shouldUseWorkerAgentRuntime(): boolean {
   if (typeof Worker === 'undefined') {

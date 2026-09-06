@@ -181,6 +181,59 @@ export interface AgentWorkerToolResponse {
   reRecallInsertion?: RequestContextInsertion;
 }
 
+// ── Harness（外部 CLI / 评测机）协议 ────────────────────────────────
+// 桌面路径（init/chat）保持不变；harness/* 帧仅在 sidecar 的 mediator
+// 里消费，mediator 再把这些请求翻译成与桌面逐字节同构的 init/chat 帧喂
+// 给同一个 Agent 循环。协议版本化，缺帧能力时 CLI 侧硬失败（不降级）。
+
+export const HARNESS_PROTOCOL_VERSION = 1 as const;
+
+export interface HeadlessQuestionPolicy {
+  /** auto-default：question 工具即时以默认项应答（options[0].label 或
+   *  answers 预置值）；skip：返回工具错误并记 question.skipped 事件。 */
+  mode: 'auto-default' | 'skip';
+  /** 可选答案表（CLI 侧解析 --question-answers 后传入）：
+   *  key 为 question 文本，value 为应答文本。未命中回落 options[0]。 */
+  answers?: Record<string, string>;
+}
+
+export interface HarnessInitPayload {
+  requestId: string;
+  workspacePath: string;
+  mode: 'ask' | 'plan' | 'agent';
+  /** 完整 WorkerAgentSettings 的部分覆盖，装配基于桌面 DEFAULT_SETTINGS。 */
+  settingsOverride?: Partial<WorkerAgentSettings>;
+  /** 覆盖自定义系统提示词段（bootstrap 的 customPromptSection）。 */
+  systemPromptOverride?: string;
+  rulesSection?: string;
+  policy?: {
+    question?: HeadlessQuestionPolicy;
+  };
+}
+
+export interface HarnessRunPayload {
+  requestId: string;
+  sessionId: string;
+  prompt: string;
+  userMessageId?: string;
+}
+
+export type HarnessEventName =
+  | 'run.ready'
+  | 'question.answered'
+  | 'question.skipped'
+  | 'tool.unsupported'
+  | 'tool.blocked'
+  | 'todo.updated';
+
+export interface HarnessEventFrame {
+  type: 'harness-event';
+  requestId: string;
+  sessionId: string;
+  name: HarnessEventName;
+  payload: Record<string, unknown>;
+}
+
 /**
  * 压缩提交协议（ADR-005）：worker mid-loop 产出 intent，主线程校验并
  * 单事务持久化后应答。worker 仅在 success 后 replaceLog。
@@ -307,6 +360,17 @@ export type MainToAgentWorkerMessage =
       requestId: string;
     }
   | {
+      type: 'harness/ping';
+    }
+  | {
+      type: 'harness/init';
+      payload: HarnessInitPayload;
+    }
+  | {
+      type: 'harness/run';
+      payload: HarnessRunPayload;
+    }
+  | {
       type: 'run-app-agent';
       requestId: string;
       payload: AppAgentPayload;
@@ -372,6 +436,18 @@ export type AgentWorkerToMainMessage =
       requestId: string;
       event: IChatStreamEvent;
     }
+  | {
+      type: 'harness-pong';
+      protocolVersion: typeof HARNESS_PROTOCOL_VERSION;
+    }
+  | {
+      type: 'harness-ready';
+      requestId: string;
+      protocolVersion: typeof HARNESS_PROTOCOL_VERSION;
+      mode: 'ask' | 'plan' | 'agent';
+      toolNames: string[];
+    }
+  | HarnessEventFrame
   | {
       type: 'tool-request';
       requestId: string;

@@ -172,6 +172,7 @@ struct PermissionRequestEvent {
     request_id: String,
     path: String,
     operation: String,
+    tool_name: String,
     workspace_path: String,
     exists: bool,
     allow_file: bool,
@@ -1490,6 +1491,7 @@ fn ensure_external_allowed(
                 path.to_string()
             },
             operation: operation.to_string(),
+            tool_name: req.tool_name.clone(),
             workspace_path: ctx.workspace_path.clone(),
             exists: check.exists,
             allow_file: check.exists,

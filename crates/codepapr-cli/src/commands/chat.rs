@@ -52,7 +52,14 @@ pub async fn run(
     json_mode: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Resolve LLM Configuration
-    let config = resolve_llm_config(client, &args).await?;
+    let config = resolve_llm_config(
+        client,
+        args.provider.as_deref(),
+        args.api_key.as_deref(),
+        args.base_url.as_deref(),
+        args.model.as_deref(),
+    )
+    .await?;
 
     // 2. Start the Agent Sidecar Runtime
     let start_res = client.call("agent/start", json!({})).await?;
@@ -412,9 +419,12 @@ async fn execute_turn(
     Ok(())
 }
 
-async fn resolve_llm_config(
+pub(crate) async fn resolve_llm_config(
     client: &RpcClient,
-    args: &ChatArgs,
+    provider_arg: Option<&str>,
+    api_key_arg: Option<&str>,
+    base_url_arg: Option<&str>,
+    model_arg: Option<&str>,
 ) -> Result<ResolvedLlmConfig, Box<dyn std::error::Error>> {
     // 1. Try to load saved settings from CodePapr DB
     let db_settings = match client.call("db/loadSettings", json!({})).await {
@@ -423,10 +433,10 @@ async fn resolve_llm_config(
     };
 
     // 2. Resolve provider and API key
-    let mut provider = args.provider.clone().unwrap_or_default();
-    let mut api_key = args.api_key.clone().unwrap_or_default();
-    let mut base_url = args.base_url.clone().unwrap_or_default();
-    let mut model = args.model.clone().unwrap_or_default();
+    let mut provider = provider_arg.unwrap_or_default().to_string();
+    let mut api_key = api_key_arg.unwrap_or_default().to_string();
+    let mut base_url = base_url_arg.unwrap_or_default().to_string();
+    let mut model = model_arg.unwrap_or_default().to_string();
 
     // From env vars
     if api_key.is_empty() {

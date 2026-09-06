@@ -4,6 +4,7 @@ pub mod fs;
 pub mod git;
 pub mod lsp;
 pub mod ping;
+pub mod run;
 pub mod server;
 pub mod shell;
 pub mod status;

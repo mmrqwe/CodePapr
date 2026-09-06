@@ -1,28 +1,18 @@
 import {
   AppendOnlyLog,
-  APP_ONLY_TOOL_NAMES,
   buildSessionBootstrapPrompt,
   buildSkillsSection,
-  DEFAULT_PROMPT_TOOL_NAMES,
-  buildRuntimeSystemPrompt,
   buildRuntimeUserPrompt,
-  isReadOnlyMode,
-  MUTATING_TOOL_NAMES,
-  PLAN_ONLY_TOOL_NAMES,
-  listDelegableAgents,
-  resolveAgentDescription,
   Serializer,
-  type AgentDefinition,
   type PruneOptions,
   type SkillDefinition,
   type WorkspaceProjectGraphResult,
 } from '@codepapr/core';
 import type { IMessage } from '@codepapr/types';
 import type { WorkMode } from '../../utils/agentPrompts';
-import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
 import { buildEffectiveContextMessages } from '../../utils/contextCompaction';
 import { SESSION_BOOTSTRAP_MESSAGE_ID } from '../../utils/contextSurface';
-import { shouldExposeReadImage } from '../../utils/visionRouting';
+export { buildAgentRuntimeSystemPrompt } from '../../utils/runtimeSystemPrompt';
 import type { Lang, Settings, UIMessage } from './types';
 import { getActiveCharacter } from '../charactersStore';
 import {
@@ -92,45 +82,6 @@ export function createLogFromMessages(
     ),
   });
   return log;
-}
-
-export function buildAgentRuntimeSystemPrompt(
-  settings: Settings,
-  mode: WorkMode,
-  workspacePath: string,
-  rulesSection?: string,
-  runtime?: { agentDefinitions?: AgentDefinition[]; model?: string }
-): string {
-  const effectiveModel = (runtime?.model ?? settings.model).trim();
-  const multimodalEnabled = shouldExposeReadImage(settings, effectiveModel);
-  const mcpSearchEnabled = hasEnabledMcpSearch(settings.mcp);
-  // 与工具注册层（registerWorkspaceTools / FilteringToolRegistry）的可见性条件保持对齐，
-  // 避免系统提示词提及模型实际不可用的工具。
-  const toolNames = DEFAULT_PROMPT_TOOL_NAMES.filter((name) => {
-    if (name === 'read_image') return multimodalEnabled;
-    if (APP_ONLY_TOOL_NAMES.has(name)) return mode === 'app';
-    if (PLAN_ONLY_TOOL_NAMES.has(name)) return mode === 'plan';
-    if (MUTATING_TOOL_NAMES.has(name)) return name === 'git' || !isReadOnlyMode(mode);
-    if (name === 'websearch' || name === 'webfetch') return !mcpSearchEnabled;
-    return true;
-  });
-
-  const delegableAgents = listDelegableAgents(runtime?.agentDefinitions ?? [])
-    .filter((agent) => agent.model !== 'mentor' || settings.mentorEnabled)
-    .map((agent) => ({
-      name: agent.name,
-      description: resolveAgentDescription(agent, settings.lang ?? 'zh-CN'),
-    }));
-
-  return buildRuntimeSystemPrompt({
-    mode,
-    workspacePath,
-    lang: settings.lang ?? 'zh-CN',
-    rulesSection,
-    toolNames,
-    mentorEnabled: settings.mentorEnabled,
-    delegableAgents,
-  });
 }
 
 /**

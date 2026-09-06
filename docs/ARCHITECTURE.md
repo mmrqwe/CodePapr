@@ -103,7 +103,9 @@ host::start(app)
 
 拿不到端口报 `Timed out waiting for codepapr-server to bind a TCP port`；找不到二进制报 `Could not locate 'codepapr-server' binary. Build it with 'cargo build -p codepapr-server' or set CODEPAPR_SERVER_BIN.`
 
-`initialize` 返回 `serverInfo`（name / version）、`capabilities`（fs / git / shell / lsp / agent / db / snapshot / mcp / web）与默认 `workspace`。`ping` 返回 `"pong"`。
+`initialize` 返回 `serverInfo`（name / version）、`capabilities`（fs / git / shell / lsp / agent / db / snapshot / mcp / web / harness）与默认 `workspace`。`ping` 返回 `"pong"`。
+
+`codepapr run`（外部 harness 路径）在此之上有独立的 sidecar 帧握手：CLI 先发 `harness/ping`，sidecar（`agentRuntime.sidecar.ts` 里的 headless mediator）以 `harness-pong` 应答，之后 `harness/init` / `harness/run` 在 **sidecar 进程内**用与桌面同源的装配函数（core `isPromptToolVisible`、`buildRuntimeSystemPrompt`、`buildSessionBootstrapPrompt`、`toWorkerAgentSettings`）合成与桌面逐字节同构的 init/chat 帧喂给同一个 `agentRuntimeLoop`。工具执行仍走 `RUST_HOSTED_TOOLS`；UI-bound 工具（question/todo/其余 unsupported）由 mediator 就地应答，绝不依赖 WebView。sidecar 缺少 harness 帧时 CLI 硬失败（exit 1），不降级到旧 REPL 的固定工具表。详见 `docs/USAGE.md`「外部 Harness」。
 
 CLI 侧（`crates/codepapr-cli/src/rpc_client.rs`）同构：`--server` → TCP；`CODEPAPR_SERVER_URL` → TCP；都没有则 spawn stdio 守护进程。
 
