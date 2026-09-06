@@ -22,6 +22,10 @@ export const tauriMockInitScript = String.raw`
     handlers.set('plugin:os|version', () => '0.0.0');
     handlers.set('plugin:dialog|open', () => null);
     handlers.set('plugin:http|fetch', () => ({ status: 200, body: '' }));
+    // Boot-time stores expect shaped payloads; null would throw and surface an
+    // error toast, breaking the "clean boot" invariant of the e2e suite.
+    handlers.set('load_app_characters', () => ({ charactersJson: null }));
+    handlers.set('get_external_access_policy', () => ({ yolo: false, allowedDirs: [], allowedFiles: [] }));
   }
   registerDefaults();
 
@@ -56,6 +60,11 @@ export const tauriMockInitScript = String.raw`
     arch: 'x86_64',
     hostname: 'e2e',
     locale: 'en-US',
+  };
+
+  // Tauri 2 event API unlisten() requires this internals registry.
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener: () => {},
   };
 
   // Some packages eagerly call window.__TAURI__ helpers; provide a stub.
