@@ -11,6 +11,7 @@ import {
   DeepSeekProvider,
   OpenAIProvider,
   RequestBuilder,
+  ResponseProvider,
 } from '../packages/@codepapr/api/src/index';
 import type { IMessage } from '../packages/@codepapr/types/src/index';
 import { runProjectDiagnostics } from '../packages/@codepapr/core/src/tool/workspace/diagnostics';
@@ -44,7 +45,17 @@ async function smokeListWorkspaceFiles(workspacePath: string, relativePath?: str
 
 async function smokeReadWorkspaceFile(workspacePath: string, relativePath: string, maxBytes: number): Promise<SmokeReadFileResult> {
   const [parsedPath, lineColumn] = parsePathWithAnchor(relativePath);
-  const fullPath = parsedPath ? path.join(workspacePath, parsedPath) : path.join(workspacePath, relativePath);
+  // Parity with the Rust host: accept workspace-relative paths AND absolute
+  // paths that resolve inside the workspace (path.join would blindly
+  // concatenate an absolute second segment and miss the file).
+  const resolved = path.isAbsolute(parsedPath)
+    ? path.normalize(parsedPath)
+    : path.join(workspacePath, parsedPath);
+  const inside = path.relative(workspacePath, resolved);
+  if (inside.startsWith('..') || path.isAbsolute(inside)) {
+    throw new Error(`路径不在工作区内: ${relativePath}`);
+  }
+  const fullPath = resolved;
   const content = await fsp.readFile(fullPath, 'utf8');
   const totalLines = content.split('\n').length;
   const sliced = content.slice(0, maxBytes);
@@ -82,13 +93,23 @@ async function smokeRunWorkspaceCommand(workspacePath: string, command: string, 
   });
 }
 
+interface ModelProfile {
+  id?: string;
+  apiMode?: 'deepseek' | 'custom';
+  apiFormat?: 'openai' | 'claude' | 'response';
+  baseURL?: string;
+  model?: string;
+  apiKey?: string;
+}
+
 interface AppSettings {
   apiMode?: 'deepseek' | 'custom';
-  apiFormat?: 'openai' | 'claude';
+  apiFormat?: 'openai' | 'claude' | 'response';
   baseURL?: string;
   model?: string;
   apiKey?: string;
   systemPrompt?: string;
+  modelProfiles?: ModelProfile[];
 }
 
 interface WorkspaceEntry {
@@ -176,6 +197,20 @@ function readStoredSettings(): AppSettings {
     throw new Error('CodePapr 配置不是合法 JSON 对象');
   }
 
+  // Desktop keeps per-provider sub-configs (modelProfiles) and stores keys
+  // there; the top-level fields are just the normalized active view. Mirror
+  // the CLI's resolve_llm_config fallback so profile-based setups also work.
+  if (!String(parsed.apiKey ?? '').trim()) {
+    const mode = parsed.apiMode ?? 'custom';
+    const profile = (parsed.modelProfiles ?? []).find((item) => item.apiMode === mode);
+    if (profile) {
+      parsed.apiKey = parsed.apiKey || profile.apiKey;
+      parsed.baseURL = parsed.baseURL || profile.baseURL;
+      parsed.model = parsed.model || profile.model;
+      parsed.apiFormat = parsed.apiFormat || profile.apiFormat;
+    }
+  }
+
   return parsed;
 }
 
@@ -184,7 +219,7 @@ function buildProvider(settings: AppSettings) {
   const apiKey = String(settings.apiKey ?? '').trim();
 
   if (!apiKey) {
-    throw new Error('CodePapr 配置中的 apiKey 为空，无法执行真实 Agent 烟测');
+    throw new Error('CodePapr 配置中的 apiKey 为空，无法执行真实 Agent 烟测（top-level 与 modelProfiles 均无 key）');
   }
 
   if (providerName === 'deepseek') {
@@ -198,6 +233,16 @@ function buildProvider(settings: AppSettings) {
     return {
       providerName,
       provider: new OpenAIProvider({
+        apiKey,
+        ...(settings.baseURL ? { baseURL: settings.baseURL.trim() } : {}),
+      }),
+    };
+  }
+
+  if (providerName === 'response') {
+    return {
+      providerName,
+      provider: new ResponseProvider({
         apiKey,
         ...(settings.baseURL ? { baseURL: settings.baseURL.trim() } : {}),
       }),
@@ -830,8 +875,19 @@ function extractToolCalls(messages: ReadonlyArray<IMessage>): string[] {
   return calls;
 }
 
-function extractToolInvocations(messages: ReadonlyArray<IMessage>): SmokeToolInvocation[] {
-  const invocations: SmokeToolInvocation[] = [];
+/** The Agent persists tool results as JSON strings; validators want objects. */
+function parseToolResult(result: unknown): unknown {
+  if (typeof result === 'string') {
+    try {
+      return JSON.parse(result);
+    } catch {
+      return result;
+    }
+  }
+  return result;
+}
+
+function extractToolInvocations(messages: ReadonlyArray<IMessage>): SmokeToolInvocation[] {  const invocations: SmokeToolInvocation[] = [];
   const byId = new Map<string, SmokeToolInvocation>();
 
   for (const message of messages) {
@@ -852,7 +908,7 @@ function extractToolInvocations(messages: ReadonlyArray<IMessage>): SmokeToolInv
       const invocation = byId.get(message.toolResult.toolCallId);
       if (invocation) {
         invocation.success = message.toolResult.success;
-        invocation.result = message.toolResult.result;
+        invocation.result = parseToolResult(message.toolResult.result);
         invocation.error = message.toolResult.error;
       }
     }

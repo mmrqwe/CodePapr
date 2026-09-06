@@ -161,6 +161,12 @@ pub async fn run(
                 "path": path,
             })).await?;
 
+            // core returns false for a missing file: report it instead of
+            // printing a false "Deleted" with exit 0.
+            let deleted = res.get("data").unwrap_or(&res).as_bool().unwrap_or(false);
+            if !deleted {
+                return Err(format!("file not found in workspace: {path}").into());
+            }
             if json_mode {
                 println!("{}", serde_json::to_string_pretty(&res)?);
             } else {
