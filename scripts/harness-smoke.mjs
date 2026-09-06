@@ -29,6 +29,36 @@ if (!fs.existsSync(cliPath)) {
   process.exit(1);
 }
 
+// A stale target/debug/codepapr-server silently changes behaviour (observed:
+// a fixed once-grant bug re-appeared as regressions against the old binary).
+// Refuse to run when Rust sources are newer than the CLI/host binaries.
+const serverBinName = process.platform === 'win32' ? 'codepapr-server.exe' : 'codepapr-server';
+const serverPath = process.env.CODEPAPR_SERVER_BIN
+  ?? path.join(repoRoot, 'target', 'debug', serverBinName);
+function newestSourceMtime(dir) {
+  let newest = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'target' || entry.name.startsWith('.')) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) newest = Math.max(newest, newestSourceMtime(full));
+    else if (entry.name.endsWith('.rs')) newest = Math.max(newest, fs.statSync(full).mtimeMs);
+  }
+  return newest;
+}
+{
+  const srcMtime = newestSourceMtime(path.join(repoRoot, 'crates'));
+  for (const [label, binPath] of [['codepapr-cli', cliPath], ['codepapr-server', serverPath]]) {
+    if (!fs.existsSync(binPath)) {
+      console.error(`missing ${label} binary at ${binPath}; run: cargo build -p codepapr-cli -p codepapr-server`);
+      process.exit(1);
+    }
+    if (fs.statSync(binPath).mtimeMs + 1000 < srcMtime) {
+      console.error(`${label} at ${binPath} is older than sources in crates/; run: cargo build -p codepapr-cli -p codepapr-server`);
+      process.exit(1);
+    }
+  }
+}
+
 let failures = 0;
 const check = (label, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
