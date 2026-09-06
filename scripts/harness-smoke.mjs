@@ -142,7 +142,8 @@ function runCli(workspace, extraArgs) {
         // user profile so denial/timeout scenarios stay deterministic.
         HOME: process.env.HOME_FAKE ?? fs.mkdtempSync(path.join(os.tmpdir(), 'codepapr-home-')),
         USERPROFILE: undefined,
-        CODEPAPR_SERVER_BIN: path.join(repoRoot, 'target', 'debug', process.platform === 'win32' ? 'codepapr-server.exe' : 'codepapr-server'),
+        CODEPAPR_SERVER_BIN: process.env.CODEPAPR_SERVER_BIN
+          ?? path.join(repoRoot, 'target', 'debug', process.platform === 'win32' ? 'codepapr-server.exe' : 'codepapr-server'),
       },
     });
     let stdout = '';
