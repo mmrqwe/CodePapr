@@ -639,7 +639,10 @@ is deprecated and emits only the `{response, user}` subset). Harness flows use `
 - `--question-auto` / `--question-answers answers.json`: plan-mode question policy.
   Default `skip`: the question tool fails fast and a `question.skipped` event is
   recorded — answers are never silently fabricated.
-- `--session-id <id>`: multi-turn (resend `run` against the same sidecar to accumulate history).
+- `--session-id <id>`: multi-turn. Each run persists the canonical conversation to the
+  project DB (`<workspace>/.CodePapr`); the next `run` with the same id loads that history
+  and seeds the sidecar, so separate CLI invocations continue one conversation (compaction
+  included). Omitting the flag keeps runs cold-start and writes nothing to the DB.
 - `--events-jsonl` / `--result-json`: machine-readable outputs below.
 
 ### Event line protocol (`--events-jsonl`, v1)

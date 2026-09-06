@@ -92,6 +92,25 @@ struct RunState {
     tool_calls: Vec<(String, bool, u128)>,
     final_text: String,
     usage: Option<Value>,
+    /// Canonical conversation (no bootstrap message). Seeded from the host
+    /// DB when `--session-id` resumes a run, extended from each result
+    /// frame, written back so the next invocation can continue the turn.
+    session_mirror: Vec<Value>,
+}
+
+const BOOTSTRAP_MESSAGE_ID: &str = "session-bootstrap";
+
+fn strip_bootstrap(messages: Option<&Value>) -> Vec<Value> {
+    messages
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|m| m.get("id").and_then(Value::as_str) != Some(BOOTSTRAP_MESSAGE_ID))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl RunState {
@@ -101,7 +120,23 @@ impl RunState {
             tool_calls: Vec::new(),
             final_text: String::new(),
             usage: None,
+            session_mirror: Vec::new(),
         }
+    }
+
+    /// Mirror the sidecar session update: a compacted turn replaces the whole
+    /// log, otherwise the per-turn delta appends (same rules as
+    /// headlessHarness.handleOutgoing).
+    fn absorb_result_messages(&mut self, message: &Value) {
+        if message.get("compacted").and_then(Value::as_bool) == Some(true) {
+            if message.get("fullMessages").is_some() {
+                self.session_mirror = strip_bootstrap(message.get("fullMessages"));
+            }
+            return;
+        }
+        self.session_mirror.extend(strip_bootstrap(
+            message.get("deltaMessages"),
+        ));
     }
 
     fn track_stream_event(&mut self, event: &Value) {
@@ -292,21 +327,31 @@ async fn drive(
         .map(|ms| Instant::now() + Duration::from_millis(ms.min(24 * 3600 * 1000)));
 
     events.run_start(&args.mode, &config.model, &config.provider, workspace, &harness_tool_names);
+
+    // Explicit --session-id = multi-turn contract: restore the canonical
+    // history persisted by an earlier run (if any) and seed the sidecar with
+    // it, so separate CLI invocations accumulate one conversation.
+    let restored_history: Vec<Value> = match args.session_id.as_deref() {
+        Some(id) => load_session_history(client, workspace, id).await,
+        None => Vec::new(),
+    };
+    let mut run_payload = json!({
+        "requestId": run_request_id,
+        "sessionId": session_id,
+        "prompt": prompt,
+    });
+    if !restored_history.is_empty() {
+        run_payload["history"] = Value::Array(restored_history.clone());
+    }
     send_frame(
         client,
         &runtime_id,
-        &json!({
-            "type": "harness/run",
-            "payload": {
-                "requestId": run_request_id,
-                "sessionId": session_id,
-                "prompt": prompt,
-            }
-        }),
+        &json!({ "type": "harness/run", "payload": run_payload }),
     )
     .await?;
 
     let mut state = RunState::new();
+    state.session_mirror = restored_history;
     let mut dedup = ToolEventDeduper::default();
     let mut exit_reason: &'static str = "error";
     let mut exit_code = EXIT_RUNTIME_ERROR;
@@ -405,6 +450,7 @@ async fn drive(
                     state.final_text = content.to_string();
                 }
                 state.usage = message.pointer("/response/cacheStats").cloned();
+                state.absorb_result_messages(message);
                 exit_reason = "completed";
                 exit_code = EXIT_OK;
                 break;
@@ -478,6 +524,9 @@ async fn drive(
                     }
                     // Cancelled is the expected ACK; result/error mean the
                     // turn finished anyway — stop waiting either way.
+                    if frame_type == "result" {
+                        state.absorb_result_messages(message);
+                    }
                     if matches!(frame_type, "cancelled" | "result" | "error") {
                         break;
                     }
@@ -502,6 +551,10 @@ async fn drive(
         }));
     }
     let _ = client.call("agent/stop", json!({ "runtimeId": runtime_id })).await;
+
+    if args.session_id.is_some() && !state.session_mirror.is_empty() {
+        persist_session_history(client, workspace, &config, &session_id, &state.session_mirror).await;
+    }
 
     let result = build_result_json(
         &session_id,
@@ -556,6 +609,74 @@ fn apply_tools_preset(mut override_: Value, preset: Option<&str>) -> Value {
         override_["agentToolProfile"] = json!(preset);
     }
     override_
+}
+
+/// Canonical history persisted by an earlier `run --session-id` invocation
+/// (project DB under `.CodePapr`). Any host/DB error degrades to "no
+/// history" so resuming never hard-fails a fresh conversation.
+async fn load_session_history(client: &RpcClient, workspace: &str, session_id: &str) -> Vec<Value> {
+    let Ok(res) = client
+        .call(
+            "db/loadSessionMessages",
+            json!({ "workspacePath": workspace, "sessionId": session_id }),
+        )
+        .await
+    else {
+        return Vec::new();
+    };
+    let Some(raw) = res.get("messagesJson").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<Value>>(raw).unwrap_or_default()
+}
+
+async fn persist_session_history(
+    client: &RpcClient,
+    workspace: &str,
+    config: &ResolvedLlmConfig,
+    session_id: &str,
+    mirror: &[Value],
+) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let session = json!({
+        "id": session_id,
+        "name": session_id,
+        "provider": config.provider,
+        "model": config.model,
+        "createdAt": now_ms,
+        "updatedAt": now_ms,
+    });
+    if let Err(err) = client
+        .call(
+            "db/saveSession",
+            json!({ "workspacePath": workspace, "sessionJson": session.to_string() }),
+        )
+        .await
+    {
+        eprintln!("warning: session not persisted ({err}); --session-id history will not resume");
+        return;
+    }
+    match serde_json::to_string(mirror) {
+        Ok(messages_json) => {
+            if let Err(err) = client
+                .call(
+                    "db/saveMessageBatch",
+                    json!({
+                        "workspacePath": workspace,
+                        "sessionId": session_id,
+                        "messagesJson": messages_json,
+                    }),
+                )
+                .await
+            {
+                eprintln!("warning: session messages not persisted ({err}); --session-id history will not resume");
+            }
+        }
+        Err(err) => eprintln!("warning: session mirror not serializable ({err})"),
+    }
 }
 
 fn resolve_prompt(arg: Option<&str>) -> Option<String> {
@@ -788,6 +909,36 @@ mod tests {
         assert!(!state.tool_calls[0].1);
         // closed once: a second sweep finds nothing left to report
         assert!(state.close_unfinished_tool_calls().is_empty());
+    }
+
+    #[test]
+    fn session_mirror_tracks_delta_and_compaction() {
+        let mut state = RunState::new();
+        state.absorb_result_messages(&json!({
+            "type": "result",
+            "deltaMessages": [
+                { "id": BOOTSTRAP_MESSAGE_ID, "role": "assistant", "content": "bootstrap" },
+                { "id": "u1", "role": "user", "content": "hi" },
+                { "id": "a1", "role": "assistant", "content": "hello" }
+            ]
+        }));
+        assert_eq!(state.session_mirror.len(), 2);
+        state.absorb_result_messages(&json!({
+            "type": "result",
+            "deltaMessages": [{ "id": "u2", "role": "user", "content": "again" }]
+        }));
+        assert_eq!(state.session_mirror.len(), 3);
+        // compacted turn replaces the whole log (bootstrap stripped too)
+        state.absorb_result_messages(&json!({
+            "type": "result",
+            "compacted": true,
+            "fullMessages": [
+                { "id": BOOTSTRAP_MESSAGE_ID, "role": "assistant", "content": "bootstrap" },
+                { "id": "c1", "role": "user", "content": "summary checkpoint" }
+            ]
+        }));
+        assert_eq!(state.session_mirror.len(), 1);
+        assert_eq!(state.session_mirror[0]["id"], "c1");
     }
 
     #[test]

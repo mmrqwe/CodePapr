@@ -266,6 +266,38 @@ async function scenarioYoloExternalWrite() {
   try { fs.unlinkSync(outside); } catch { /* ignore */ }
 }
 
+async function scenarioSessionIdMultiTurn() {
+  const ws = makeWorkspace({ 'a.txt': 'x' });
+  const sessionId = `smoke-multi-${Date.now()}`;
+  const p1 = await startMockProvider([sseContent('noted: purple banana')]);
+  const r1 = await runCli(ws, [
+    'run', '--mode', 'agent', '--yolo',
+    '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', p1.url,
+    '--timeout-ms', '60000', '--session-id', sessionId,
+    'remember the passphrase purple banana',
+  ]);
+  p1.close();
+  check('multi-turn: first run exits 0', r1.code === 0, `code=${r1.code} ${r1.stderr.slice(0, 200)}`);
+
+  const p2 = await startMockProvider([sseContent('the passphrase was purple banana')]);
+  const r2 = await runCli(ws, [
+    'run', '--mode', 'agent', '--yolo',
+    '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', p2.url,
+    '--timeout-ms', '60000', '--session-id', sessionId,
+    'what was the passphrase?',
+  ]);
+  // Regression: --session-id used to cold-start every invocation. The second
+  // run must carry the first run's canonical history into the LLM request.
+  const sentBody = p2.requests.length ? JSON.stringify(p2.requests[0]) : '';
+  p2.close();
+  check('multi-turn: second run exits 0', r2.code === 0, `code=${r2.code}`);
+  check('multi-turn: second run request carries first run history',
+    sentBody.includes('purple banana') && sentBody.includes('what was the passphrase?'),
+    `body=${sentBody.slice(0, 160)}...`);
+  check('multi-turn: second run answer reflects history',
+    r2.stdout.includes('purple banana'), r2.stdout.slice(0, 120));
+}
+
 async function scenarioProvider4xx() {
   const ws = makeWorkspace({ 'a.txt': 'x' });
   let requests = 0;
@@ -451,6 +483,7 @@ const scenarios = [
   ['minimal prompt hygiene', scenarioMinimalPromptHygiene],
   ['default prompt unchanged', scenarioDefaultPromptUnchanged],
   ['allowlist grant', scenarioAllowlistGrant],
+  ['session-id multi turn', scenarioSessionIdMultiTurn],
   ['yolo external write', scenarioYoloExternalWrite],
   ['provider 4xx', scenarioProvider4xx],
   ['timeout', scenarioTimeout],

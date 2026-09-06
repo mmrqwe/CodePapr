@@ -675,7 +675,7 @@ codepapr-cli -C /path/to/workspace run \
 - `--question-auto` / `--question-answers answers.json`：plan 模式 question 策略。
   缺省为 `skip`：question 工具立即返回错误并在事件流记 `question.skipped`，
   **不会**静默伪造回答。
-- `--session-id <id>`：多轮（对同一 sidecar 重发 `run` 时累积会话历史）。
+- `--session-id <id>`：多轮。每次 run 会把 canonical 会话写进项目库（`<workspace>/.CodePapr`）；下次带同一 id 的 `run` 会加载历史并注入 sidecar，跨进程续上同一会话（含压缩）。不带此 flag 则每次冷启动，且不写库。
 - `--events-jsonl` / `--result-json`：机读产物，见下。
 
 ### 事件行协议（`--events-jsonl`，v1）

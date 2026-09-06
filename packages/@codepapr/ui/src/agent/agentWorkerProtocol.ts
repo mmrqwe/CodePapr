@@ -218,6 +218,10 @@ export interface HarnessRunPayload {
   sessionId: string;
   prompt: string;
   userMessageId?: string;
+  /** Canonical prior history (no bootstrap) restored by the host so a fresh
+   *  sidecar process can continue a multi-run session; seeds the session
+   *  mirror only when it is still empty. */
+  history?: IMessage[];
 }
 
 export type HarnessEventName =

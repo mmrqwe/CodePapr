@@ -207,6 +207,13 @@ export function createHarnessMediator(deps: HarnessMediatorDeps): HarnessMediato
   function handleRun(payload: HarnessRunPayload): void {
     const harness = requireAssembled();
     const mirror = getSession(payload.sessionId);
+    if (mirror.messages.length === 0 && payload.history && payload.history.length > 0) {
+      // Host-restored multi-run history: seed the mirror so this process
+      // continues the conversation instead of cold-starting.
+      mirror.messages = payload.history.filter(
+        (item) => item.id !== SESSION_BOOTSTRAP_MESSAGE_ID
+      );
+    }
     const bootstrapMessage: IMessage = {
       id: SESSION_BOOTSTRAP_MESSAGE_ID,
       role: 'assistant',

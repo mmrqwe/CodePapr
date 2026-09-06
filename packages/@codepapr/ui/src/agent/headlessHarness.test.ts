@@ -208,6 +208,47 @@ describe('harness run frame assembly', () => {
     expect(chat2.payload.messages.map((m) => m.id)).toEqual([SESSION_BOOTSTRAP_MESSAGE_ID, 'u1', 'a1']);
     expect(chat2.payload.userInput).toBe('second');
   });
+
+  it('run seeds the session mirror from host-restored history (fresh process)', () => {
+    const harness = createHarness();
+    harness.init({ ...BASE_INIT, mode: 'agent' });
+    harness.run({
+      requestId: 'r1',
+      sessionId: 'restored-s1',
+      prompt: 'follow-up',
+      history: [
+        { id: SESSION_BOOTSTRAP_MESSAGE_ID, role: 'assistant', content: 'stale bootstrap', timestamp: 1 },
+        { id: 'u0', role: 'user', content: 'earlier', timestamp: 2 },
+        { id: 'a0', role: 'assistant', content: 'answer', timestamp: 3 },
+      ],
+    });
+    const chat = harness.toLoop.find((m) => m.type === 'chat');
+    if (chat?.type !== 'chat') throw new Error('no chat frame');
+    // stale bootstrap from the DB is dropped; the fresh one is prepended
+    expect(chat.payload.messages.map((m) => m.id)).toEqual([SESSION_BOOTSTRAP_MESSAGE_ID, 'u0', 'a0']);
+  });
+
+  it('in-process history wins over host-restored payload on the same mirror', () => {
+    const harness = createHarness();
+    harness.init({ ...BASE_INIT, mode: 'agent' });
+    harness.run({ requestId: 'r1', sessionId: 's1', prompt: 'first' });
+    harness.mediator.handleOutgoing({
+      type: 'result',
+      requestId: 'r1',
+      response: { role: 'assistant', content: 'ok' },
+      deltaMessages: [{ id: 'u1', role: 'user', content: 'first', timestamp: 2 }],
+      logLength: 2,
+    } as Extract<AgentWorkerToMainMessage, { type: 'result' }>);
+    harness.run({
+      requestId: 'r2',
+      sessionId: 's1',
+      prompt: 'second',
+      history: [{ id: 'stale', role: 'user', content: 'should be ignored', timestamp: 0 }],
+    });
+    const chat2 = harness.toLoop.filter((m) => m.type === 'chat')[1];
+    if (chat2?.type !== 'chat') throw new Error();
+    expect(chat2.payload.messages.map((m) => m.id)).toEqual([SESSION_BOOTSTRAP_MESSAGE_ID, 'u1']);
+  });
 });
 
 describe('UI-bound headless policies', () => {
