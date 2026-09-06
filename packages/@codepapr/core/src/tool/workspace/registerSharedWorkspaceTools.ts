@@ -9,6 +9,10 @@ import type { ToolHandler, ToolRegistry } from '../ToolRegistry';
 import { MERGE_TOOL_DEFINITIONS } from './mergeToolDefs';
 import { asString } from './toolArgHelpers';
 
+function unknownActionError(tool: string, action: string, allowed: readonly string[]): Error {
+  return new Error(`${tool} 工具无此 action: ${action}。可用 action：${allowed.join(' / ')}`);
+}
+
 function findTool(name: string): IToolDefinition {
   const tool = MERGE_TOOL_DEFINITIONS.find((t) => t.name === name);
   if (!tool) {
@@ -93,7 +97,7 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
       format: 'workspace_format_files',
     };
     const target = m[a];
-    if (!target) throw new Error(`未知的 lsp_edit action: ${a}`);
+    if (!target) throw unknownActionError('lsp_edit', a, Object.keys(m));
     return await registry.execute(target, args);
   });
 
@@ -119,7 +123,7 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
       reset: 'workspace_git_reset',
     };
     const target = m[a];
-    if (!target) throw new Error(`未知的 git action: ${a}`);
+    if (!target) throw unknownActionError('git', a, Object.keys(m));
     return await registry.execute(target, args, context);
   });
 
@@ -135,7 +139,8 @@ export function registerSharedToolDispatchers(options: SharedToolDispatcherOptio
     if (a === 'stop_all') {
       return await registry.execute('workspace_stop_all_background_processes', args, context);
     }
-    if (a !== 'run') throw new Error(`未知的 bash action: ${a}`);
+    if (a !== 'run')
+      throw unknownActionError('bash', a, ['run', 'list', 'stop', 'stop_all']);
     if (args.background === true) {
       return await registry.execute('workspace_start_shell_background_command', args, context);
     }
@@ -209,7 +214,8 @@ function createDefaultLspHandler(registry: ToolRegistry): ToolHandler {
       outgoingCalls: 'workspace_outgoing_calls',
     };
     const target = m[a];
-    if (!target) throw new Error(`未知的 lsp action: ${a}`);
+    if (!target)
+      throw unknownActionError('lsp', a, Object.keys(m));
     return await registry.execute(target, args);
   };
 }

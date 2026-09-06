@@ -110,7 +110,9 @@ export function applySearchReplacePatch(
     } else if (!plan.search.includes('\r\n') && fileHasCrLf) {
       hint = '（文件使用 CRLF 换行，但 search 使用了 LF）';
     }
-    throw new Error(`未找到要替换的文本块${hint}`);
+    throw new Error(
+      `未找到要替换的文本块${hint}。请核对 search 与文件当前内容是否一致（含缩进、空白与结尾换行），必要时先用 read 读取后再试`
+    );
   }
 
   if (

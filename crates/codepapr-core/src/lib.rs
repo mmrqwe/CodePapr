@@ -21,6 +21,9 @@ pub mod test_helpers;
 pub mod web;
 pub mod workspace_fs;
 
+#[cfg(test)]
+mod error_contract_tests;
+
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }

@@ -479,7 +479,7 @@ fn dispatch_tool_inner(
             )?;
             if current.truncated_by_bytes {
                 return Err(format!(
-                    "文件 {path} 超过 20MB 上限，请改用 workspace_write_file 重写整个文件"
+                    "文件 {path} 超过 20MB 上限，请改用 write 工具重写整个文件"
                 ));
             }
             let patched = apply_search_replace(
@@ -668,7 +668,9 @@ fn apply_multi_patch(
             None,
         )?;
         if current.truncated_by_bytes {
-            return Err(format!("文件 {path} 超过 20MB 上限，无法打补丁"));
+            return Err(format!(
+                "文件 {path} 超过 20MB 上限，无法打补丁，请改用 write 工具重写整个文件"
+            ));
         }
         let content = match planned.iter().find(|(p, _)| p == &path) {
             Some((_, existing)) => existing.clone(),
@@ -1639,7 +1641,9 @@ pub(crate) fn apply_search_replace(
         } else {
             ""
         };
-        return Err(format!("未找到要替换的文本块{hint}"));
+        return Err(format!(
+            "未找到要替换的文本块{hint}。请核对 search 与文件当前内容是否一致（含缩进、空白与结尾换行），必要时先用 read 读取后再试"
+        ));
     }
     if let Some(expected) = expected_occurrences {
         if expected != occurrences {
@@ -1818,7 +1822,7 @@ fn sandbox_skip_prefixes() -> Vec<String> {
     prefixes
 }
 
-fn require_path(args: &Value) -> Result<String, String> {
+pub(crate) fn require_path(args: &Value) -> Result<String, String> {
     if let Some(path) = extract_path(args, false)? {
         return Ok(path);
     }

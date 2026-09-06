@@ -69,7 +69,8 @@ async function interceptMemoryFileWrite(
  */
 function assertReadNotTruncated(result: ReadFileResult, relativePath: string): void {
   if (result.truncatedByBytes || result.bytes >= 20_000_000) {
-    throw new Error(`文件 ${relativePath} 超过 20MB 上限，请改用 workspace_write_file 重写整个文件`);
+    // `write` 是 LLM 可见的工具名；报错文案里的内部名（workspace_*）模型无法执行。
+    throw new Error(`文件 ${relativePath} 超过 20MB 上限，请改用 write 工具重写整个文件`);
   }
 }
 

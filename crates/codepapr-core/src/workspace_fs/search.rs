@@ -38,7 +38,8 @@ impl SearchSkipStats {
     }
 
     /// 拼 note 用的中文摘要；total 为 0 时返回 None。
-    fn explain(&self) -> Option<String> {
+    /// pub(crate) 仅为 L1 错误文案契约测试（error_contract_tests）可见。
+    pub(crate) fn explain(&self) -> Option<String> {
         if self.total() == 0 {
             return None;
         }

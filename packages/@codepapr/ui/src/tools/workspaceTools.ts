@@ -117,7 +117,18 @@ export function registerWorkspaceTools(
       if (a === 'suggest_refactors') return await suggestRefactorings(graph);
       if (a === 'test_impact') return await selectTestsByChangeImpact(graph, asOptionalStringArray(args.paths) ?? []);
       if (a === 'generate_tests') return await generateTestSkeletons(graph);
-      throw new Error(`未知的 graph action: ${a}`);
+      throw new Error(
+        `graph 工具无此 action: ${a}。可用 action：${[
+          ...Object.keys(m),
+          'smart_context',
+          'dead_code',
+          'circular_deps',
+          'type_hierarchy',
+          'suggest_refactors',
+          'test_impact',
+          'generate_tests',
+        ].join(' / ')}`
+      );
     },
     browserHandler: async (args: Record<string, unknown>, context) => {
       const a = asString(args.action, 'action');
@@ -133,7 +144,10 @@ export function registerWorkspaceTools(
         screenshot: 'browser_take_screenshot',
       };
       const target = m[a];
-      if (!target) throw new Error(`未知的 browser action: ${a}`);
+      if (!target)
+        throw new Error(
+          `browser 工具无此 action: ${a}。可用 action：${Object.keys(m).join(' / ')}`
+        );
       return await registry.execute(target, args, context);
     },
     questionHandler: async (args: Record<string, unknown>) => {
