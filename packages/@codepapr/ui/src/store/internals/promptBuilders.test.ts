@@ -204,9 +204,13 @@ describe('buildAgentRuntimeSystemPrompt', () => {
     expect(prompt).not.toContain('[git]');
     expect(prompt).not.toContain('[list]');
     expect(prompt).not.toContain('[browser]');
-    // allowlist 内的提示保留。
-    expect(prompt).toContain('[read]');
+    // 含陈旧交叉引用的行整行剔除（[read] 教用已移除的 list/glob、[edit/patch/write]
+    // 教用已移除的 patch）；allowlist 工具的正确用法仍随 schema description 下发。
+    expect(prompt).not.toContain('[read]');
+    expect(prompt).not.toContain('[项目记忆]');
+    // 无陈旧引用的行保留。
     expect(prompt).toContain('[bash]');
+    expect(prompt).toContain('[web]');
   });
 
   it('includes the read_image hint when multimodal is enabled', () => {
