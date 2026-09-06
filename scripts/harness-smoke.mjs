@@ -341,6 +341,40 @@ async function scenarioToolsPresetDefaultSurface() {
     `count=${tools.length}`);
 }
 
+async function scenarioMinimalPromptHygiene() {
+  const ws = makeWorkspace({ 'a.txt': 'x' });
+  const provider = await startMockProvider([sseContent('done')]);
+  await runCli(ws, [
+    'run', '--mode', 'agent', '--yolo', '--tools-preset', 'minimal',
+    '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', provider.url,
+    '--timeout-ms', '60000',
+    'noop',
+  ]);
+  const body = JSON.stringify(provider.requests[0] ?? {});
+  provider.close();
+  const stale = ['`todo`', '`diagnostics(', '委派 **Explore**', '`question`', 'read/graph/lsp', '[git]', '[lsp]', '[graph]', '[todo]', 'TodoList'];
+  const leaks = stale.filter((token) => body.includes(token));
+  check('minimal: prompt mentions no removed tools', leaks.length === 0, `leaks=${JSON.stringify(leaks)}`);
+  check('minimal: prompt keeps allowed tool guidance', body.includes('[bash]') && body.includes('你处于 Agent 模式'));
+  check('minimal: request schema has exactly 7 tools', Array.isArray(provider.requests[0]?.tools) && provider.requests[0].tools.length === 7,
+    `tools=${provider.requests[0]?.tools?.map((t) => t.function?.name ?? t.name)?.join(',')}`);
+}
+
+async function scenarioDefaultPromptUnchanged() {
+  const ws = makeWorkspace({ 'a.txt': 'x' });
+  const provider = await startMockProvider([sseContent('done')]);
+  await runCli(ws, [
+    'run', '--mode', 'agent', '--yolo',
+    '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', provider.url,
+    '--timeout-ms', '60000',
+    'noop',
+  ]);
+  const body = JSON.stringify(provider.requests[0] ?? {});
+  provider.close();
+  check('default: prompt still carries full guidance (git/todo/delegation)',
+    body.includes('[git]') && body.includes('`todo`') && body.includes('委派 **Explore**'));
+}
+
 const scenarios = [
   ['completed run', scenarioCompletedRun],
   ['ask cannot write', scenarioAskCannotWrite],
@@ -348,6 +382,8 @@ const scenarios = [
   ['tools-preset minimal', scenarioToolsPresetMinimal],
   ['tools-preset minimal rejects non-allowlist', scenarioToolsPresetMinimalRejectsNonAllowlist],
   ['tools-preset default surface', scenarioToolsPresetDefaultSurface],
+  ['minimal prompt hygiene', scenarioMinimalPromptHygiene],
+  ['default prompt unchanged', scenarioDefaultPromptUnchanged],
   ['allowlist grant', scenarioAllowlistGrant],
   ['provider 4xx', scenarioProvider4xx],
   ['timeout', scenarioTimeout],

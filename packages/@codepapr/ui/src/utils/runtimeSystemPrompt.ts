@@ -51,5 +51,6 @@ export function buildAgentRuntimeSystemPrompt(
     toolNames,
     mentorEnabled: settings.mentorEnabled,
     delegableAgents,
+    toolProfile: settings.agentToolProfile,
   });
 }

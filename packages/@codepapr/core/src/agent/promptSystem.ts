@@ -21,6 +21,8 @@ export interface BuildModeSystemPromptOptions {
   mentorEnabled?: boolean;
   /** task 工具可见的子代理（已过滤 internal / primary / 未启用 mentor）。 */
   delegableAgents?: readonly DelegableAgentHint[];
+  /** 工具面档位；minimal 时按 toolNames 行级裁剪硬编码文案里的失效工具引用。 */
+  toolProfile?: 'default' | 'minimal';
 }
 
 export interface BuildRuntimeSystemPromptOptions extends BuildModeSystemPromptOptions {
@@ -1502,6 +1504,59 @@ function normalizeLang(lang?: PromptLang): PromptLang {
 export const DEFAULT_CODING_SYSTEM_PROMPT = buildSystemPromptBase('zh-CN', false);
 export const DEFAULT_PROMPT_TOOL_NAMES = [...UI_TOOL_DEFAULTS];
 
+/** prompt 文案中可能被引用的工具 id 全集（含主代理软隐藏的 graph 与 memory 系）。 */
+const PROMPT_KNOWN_TOOL_IDS: ReadonlySet<string> = new Set<string>([
+  ...UI_TOOL_DEFAULTS,
+  'graph',
+  'memory_write',
+  'memory_search',
+  'memory_forget',
+  'memory_list',
+]);
+
+/**
+ * 提取一行提示词里「工具用法」形态的工具引用：`todo`、`diagnostics(...)`、
+ * read/graph/lsp 斜杠链、[tool] 标记、list（目录树）这类紧跟括号/括号的裸名。
+ * 刻意不匹配普通英文单词（避免把 prose 里的 "list" 误判为工具），只认这些
+ * 明确在教模型调工具的形态。
+ */
+export function collectPromptToolRefs(line: string): Set<string> {
+  const refs = new Set<string>();
+  const consider = (token: string): void => {
+    const head = token.trim().split(/[(\s:：，,、]/)[0];
+    if (PROMPT_KNOWN_TOOL_IDS.has(head)) refs.add(head);
+  };
+  for (const match of line.matchAll(/`([^`\n]+)`/g)) consider(match[1]);
+  for (const match of line.matchAll(/\b([a-z_]+(?:\/[a-z_]+)+)\b/g)) {
+    const parts = match[1].split('/');
+    // 全段都是工具 id 才算工具引用（`bash(action: list/stop)` 里的 list/stop
+    // 是 action 枚举值，不是 list 工具）。
+    if (parts.every((part) => PROMPT_KNOWN_TOOL_IDS.has(part))) {
+      for (const part of parts) refs.add(part);
+    }
+  }
+  for (const match of line.matchAll(/\[([a-z_]+)\]/g)) consider(match[1]);
+  for (const match of line.matchAll(/\b([a-z_]+)\s*[（(]/g)) consider(match[1]);
+  // app_* / memory_* 前缀族是强标识（普通英文/中文不会撞这些 token），裸词也算引用。
+  for (const match of line.matchAll(/\b(app_[a-z_]+|memory_[a-z_]+)\b/g)) consider(match[1]);
+  return refs;
+}
+
+/**
+ * 极简工具面下行级裁剪：MODE_INTROS / AGENT_DELEGATION_RULE / COMMON_CONSTRAINTS
+ * 的硬编码文案会引用 diagnostics、todo、question、task、graph、lsp 等——极简档
+ * 这些工具已从 schema 移除，保留文案会诱导模型幻觉调用。仅当 profile=minimal
+ * 时启用；default 档逐字节不变。
+ */
+function dropStaleToolLines(lines: readonly string[], toolNames: ReadonlySet<string>): string[] {
+  return lines.filter((line) => {
+    for (const ref of collectPromptToolRefs(line)) {
+      if (!toolNames.has(ref)) return false;
+    }
+    return true;
+  });
+}
+
 export function createDefaultUserPromptSections(lang?: PromptLang): UserPromptSections {
   const promptLang = normalizeLang(lang);
   return { ...USER_PROMPT_SECTION_DEFAULTS[promptLang] };
@@ -1591,26 +1646,34 @@ export function buildModeSystemPrompt(options: BuildModeSystemPromptOptions): st
   const labels = SECTION_LABELS[lang];
   const toolNames = new Set(options.toolNames ?? DEFAULT_PROMPT_TOOL_NAMES);
   const mentorEnabled = options.mentorEnabled ?? false;
-  const intro = [...MODE_INTROS[lang][options.mode]];
+  const minimalSurface = options.toolProfile === 'minimal';
+  let intro = [...MODE_INTROS[lang][options.mode]];
   if (options.mode === 'agent') {
     // Insert "no need to report for simple changes" after the first line when mentor is enabled
     if (mentorEnabled) {
       const noReportLine = lang === 'en'
         ? 'Simple single-file changes do not require reporting to the Architect — just execute.'
         : lang === 'zh-TW'
-        ? '簡單單檔案修改無需向架構師匯報，直接執行。'
-        : '简单单文件修改无需向架构师汇报，直接执行。';
+          ? '簡單單檔案修改無需向架構師匯報，直接執行。'
+          : '简单单文件修改无需向架构师汇报，直接执行。';
       intro.splice(1, 0, noReportLine);
     }
     intro.push(mentorEnabled ? AGENT_DELEGATION_RULE[lang].withMentor : AGENT_DELEGATION_RULE[lang].withoutMentor);
   }
-  const toolConstraints = buildToolConstraints(
+  // 极简工具面：剔除引用了已被裁掉工具的硬编码指令行（diagnostics/todo/question/
+  // task 委派/read/graph/lsp 等），避免提示词教模型调用不存在于 schema 的工具。
+  if (minimalSurface) intro = dropStaleToolLines(intro, toolNames);
+  let toolConstraints = buildToolConstraints(
     lang,
     toolNames,
     options.mode,
     mentorEnabled,
     options.delegableAgents
   );
+  if (minimalSurface) toolConstraints = dropStaleToolLines(toolConstraints, toolNames);
+  const commonConstraints = minimalSurface
+    ? dropStaleToolLines(COMMON_CONSTRAINTS[lang], toolNames)
+    : COMMON_CONSTRAINTS[lang];
 
   return [
     ...intro,
@@ -1619,7 +1682,7 @@ export function buildModeSystemPrompt(options: BuildModeSystemPromptOptions): st
     // 这里只保留「未选择工作区」时的提醒文案。
     ...(options.workspacePath?.trim() ? [] : [labels.workspaceFallback, '']),
     labels.constraints,
-    ...COMMON_CONSTRAINTS[lang],
+    ...commonConstraints,
     ...toolConstraints,
   ].join('\n');
 }

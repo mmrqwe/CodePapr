@@ -330,6 +330,7 @@ export {
   buildModeSystemPrompt,
   buildSessionBootstrapPrompt,
   buildMinimalToolSurfaceSection,
+  collectPromptToolRefs,
   buildRuntimeSystemPrompt,
   buildRuntimeUserPrompt,
   buildStructuredUserPrompt,

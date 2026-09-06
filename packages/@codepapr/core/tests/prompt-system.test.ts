@@ -6,10 +6,14 @@ import {
   buildRuntimeSystemPrompt,
   buildRuntimeUserPrompt,
   buildStructuredUserPrompt,
+  collectPromptToolRefs,
   createDefaultUserPromptSections,
   ImmutablePrefix,
   parseStructuredUserPrompt,
   validateUserPrompt,
+  DEFAULT_PROMPT_TOOL_NAMES,
+  isMinimalAgentToolName,
+  isPromptToolVisible,
   type SkillDefinition,
 } from '../src';
 
@@ -707,5 +711,107 @@ describe('promptSystem', () => {
     expect(prompt).toContain('git(action: status/diff/log)');
     expect(prompt).toContain('只读模式');
     expect(prompt).not.toContain('action: commit');
+  });
+});
+
+describe('极简工具面 prompt 卫生（不引用不存在工具）', () => {
+  function minimalNamesFor(mode: 'ask' | 'plan' | 'agent' | 'app'): string[] {
+    return DEFAULT_PROMPT_TOOL_NAMES
+      .filter((n) => isPromptToolVisible(n, mode, { multimodalEnabled: false, mcpSearchEnabled: false }))
+      .filter((n) => isMinimalAgentToolName(n));
+  }
+
+  it('collectPromptToolRefs：识别工具用法形态，不误伤 action 枚举与普通词', () => {
+    expect([...collectPromptToolRefs('立即调用 `todo` 管理')]).toEqual(['todo']);
+    expect([...collectPromptToolRefs('必须先 `diagnostics(relativePath)` 检查')]).toEqual(['diagnostics']);
+    expect([...collectPromptToolRefs('必须先用 read/graph/lsp 核实')].sort()).toEqual(['graph', 'lsp', 'read']);
+    // bash 的 action 枚举 list/stop 不是工具引用（stop 不是工具 id，整条链不成立）。
+    expect([...collectPromptToolRefs('用 `bash(action: list/stop)` 管理')]).toEqual(['bash']);
+    // 裸词 prose 不算。
+    expect([...collectPromptToolRefs('browser navigation already handles waiting')]).toEqual([]);
+    // [todo] / [git] 标记形态。
+    expect([...collectPromptToolRefs('- [git] inspect repo')]).toEqual(['git']);
+  });
+
+  for (const mode of ['ask', 'plan', 'agent', 'app'] as const) {
+    for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+      it(`不变式：mode=${mode} lang=${lang} 极简 prompt 每一行引用的工具都在 allowlist∩mode 内`, () => {
+        const allowed = new Set(minimalNamesFor(mode));
+        const prompt = buildModeSystemPrompt({
+          mode,
+          workspacePath: '/tmp/project',
+          lang,
+          toolNames: [...allowed],
+          mentorEnabled: false,
+          toolProfile: 'minimal',
+        });
+        const stale = new Set<string>();
+        for (const line of prompt.split('\n')) {
+          for (const ref of collectPromptToolRefs(line)) {
+            if (!allowed.has(ref)) stale.add(`${ref}  <= ${line.slice(0, 60)}`);
+          }
+        }
+        expect([...stale]).toEqual([]);
+      });
+    }
+  }
+
+  it('minimal+agent：剔除 todo/diagnostics/task 委派行，保留核心指令与 [bash]/[web]', () => {
+    const prompt = buildRuntimeSystemPrompt({
+      mode: 'agent',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: minimalNamesFor('agent'),
+      toolProfile: 'minimal',
+    });
+    expect(prompt).not.toContain('`todo`');
+    expect(prompt).not.toContain('`diagnostics(');
+    expect(prompt).not.toContain('委派 **Explore**');
+    expect(prompt).not.toContain('[todo]');
+    expect(prompt).not.toContain('[git]');
+    expect(prompt).not.toContain('[lsp]');
+    // allowlist 内工具的指引保留。
+    expect(prompt).toContain('[bash]');
+    expect(prompt).toContain('[web]');
+    expect(prompt).toContain('你处于 Agent 模式');
+  });
+
+  it('minimal+plan：question 提示被剔除（question 不在极简档）', () => {
+    const prompt = buildRuntimeSystemPrompt({
+      mode: 'plan',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: minimalNamesFor('plan'),
+      toolProfile: 'minimal',
+    });
+    expect(prompt).not.toContain('`question`');
+    expect(prompt).toContain('你处于 Plan 模式');
+  });
+
+  it('minimal+ask：read/graph/lsp 核实行被剔除（graph/lsp 不在极简档）', () => {
+    const prompt = buildRuntimeSystemPrompt({
+      mode: 'ask',
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      toolNames: minimalNamesFor('ask'),
+      toolProfile: 'minimal',
+    });
+    expect(prompt).not.toContain('read/graph/lsp');
+    expect(prompt).toContain('你处于 Ask 模式');
+  });
+
+  it('default 档逐字节不变：toolProfile 省略与传 default 输出一致', () => {
+    for (const mode of ['ask', 'plan', 'agent', 'app'] as const) {
+      for (const lang of ['zh-CN', 'zh-TW', 'en'] as const) {
+        const base = buildModeSystemPrompt({ mode, workspacePath: '/tmp/project', lang });
+        const explicitDefault = buildModeSystemPrompt({
+          mode,
+          workspacePath: '/tmp/project',
+          lang,
+          toolProfile: 'default',
+        });
+        expect(explicitDefault).toBe(base);
+      }
+    }
   });
 });
