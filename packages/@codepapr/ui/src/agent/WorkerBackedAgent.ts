@@ -23,7 +23,7 @@ import { registerWorkspaceTools, type WorkspaceMutationListener } from '../tools
 import { registerMcpTools } from '../tools/mcpTools';
 import { registerMemoryTools } from '../tools/memoryTools';
 import { registerTodoListTools } from '../tools/todoListTool';
-import { hasEnabledMcpSearch } from '../utils/mcpTypes';
+import { mcpSearchHidesNativeWeb } from '../utils/mcpTypes';
 import {
   resolveAppAgentIdleTimeoutMs,
   type AgentWorkerChatPayload,
@@ -233,7 +233,7 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
     config.runtime.editHistory,
     config.runtime.onWorkspaceMutated,
     {
-      disableWebSearchTools: hasEnabledMcpSearch(config.settings.mcp),
+      disableWebSearchTools: mcpSearchHidesNativeWeb(config.settings.mcp, config.settings.agentToolProfile),
       multimodalEnabled: config.exposeReadImage ?? resolveWorkerMultimodalEnabled(config.settings, config.model),
       mode,
       sessionId: config.sessionId,

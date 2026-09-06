@@ -204,7 +204,7 @@ LLM 可通过 4 个工具管理 app（仅 App 模式）：
 - **高级**：压缩、Goal、ProjectGraph、工具上下文
 - **App**：未声明 app 的默认权限
 
-**Agent 工具面**（设置 → 通用）：「默认」= 现有桌面全量工具（仍按 Ask/Plan/Agent/App 模式过滤）；「极简」= 仅暴露 7 个工具 `read / edit / write / grep / bash / websearch / webfetch`——更少工具、更接近极简 coding harness（注意：bash 仍可执行任意命令，极简≠沙箱）。组合按 mode ∩ profile 取交集（极简+Ask 会再砍掉写/bash；极简下 App 专属工具不可用，App 模式需默认工具面）。开启 MCP 搜索时 `websearch`/`webfetch` 照旧由 MCP 工具替代。保存后于下一条消息生效，不打断当前流式回合。CLI 侧对应 `codepapr run --tools-preset minimal`，与 UI 极简共用同一 allowlist（`MINIMAL_AGENT_TOOLS`）。
+**Agent 工具面**（设置 → 通用）：「默认」= 现有桌面全量工具（仍按 Ask/Plan/Agent/App 模式过滤）；「极简」= 仅暴露 7 个工具 `read / edit / write / grep / bash / websearch / webfetch`——更少工具、更接近极简 coding harness（注意：bash 仍可执行任意命令，极简≠沙箱）。组合按 mode ∩ profile 取交集（极简+Ask 会再砍掉写/bash；极简下 App 专属工具不可用，App 模式需默认工具面）。网络能力规则：**默认档**开启 MCP 搜索时 `websearch`/`webfetch` 由 MCP 搜索工具替代；**极简档不加载任何 MCP**，原生 `websearch`/`webfetch` 始终保留（不会出现搜索全无）。保存后于下一条消息生效，不打断当前流式回合。CLI 侧对应 `codepapr run --tools-preset minimal`，与 UI 极简共用同一 allowlist（`MINIMAL_AGENT_TOOLS`）。
 
 语音在角色面板。完整参数见 `packages/@codepapr/core/docs/CONFIGURATION.md`。
 
@@ -347,7 +347,7 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 
 **读取**：不会把账本整库塞进请求。短指令已经在会话引导里；每个用户回合（含 Ask，Ask 下收紧至 3 条）用你这句话做关键词召回（约 5 条 / 1200 tokens，跳过 citation）；不够时 Agent 调 `memory_search`（含 citation，Ask 也可用）。想看目录才调 `memory_list`（最多 40 条预览）。`memory_search` 不会每句话自动跑一遍。
 
-**加载与缓存**：会话启动时从账本渲染 Bootstrap 段注入 Session Bootstrap（`log[0]`，`isPrefixSystem`），按「会话 × 稳定签名」冻结。渲染结果排除在签名外，新记住的内容**不拆当前前缀缓存**。压缩 epoch 随 `refreshBootstrap` 刷新；新会话总是重读账本。每用户回合另做一次 Recall（citation 不进入自动 Recall）。
+**加载与缓存**：会话启动时从账本渲染 Bootstrap 段注入 Session Bootstrap（`log[0]`，`isPrefixSystem`），按「会话 × 稳定签名」冻结。渲染结果排除在签名外，新记住的内容**不拆当前前缀缓存**；`memory_forget` 同理——当前会话的 Bootstrap 不回滚重渲染（工具返回会注明「下次会话前缀不再包含」），遗忘在下一次压缩 epoch 刷新或新会话生效。这是刻意契约：换取前缀缓存稳定，面板与账本始终是权威事实源。压缩 epoch 随 `refreshBootstrap` 刷新；新会话总是重读账本。每用户回合另做一次 Recall（citation 不进入自动 Recall）。
 
 **冷启动**：若账本没有 Bootstrap 段且 ProjectGraph 可用，后台生成项目结构 / 技术栈 / 构建命令摘要写入账本；不阻塞当前会话，下次会话或压缩后进入 Bootstrap。
 

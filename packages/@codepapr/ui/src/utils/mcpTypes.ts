@@ -115,6 +115,19 @@ export function hasEnabledMcpSearch(settings: McpSettings): boolean {
   );
 }
 
+/**
+ * 内置 websearch/webfetch 是否应因 MCP 搜索而隐藏（N1）。
+ * 极简工具面不注册任何 MCP 工具（allowlist 是唯一能力面），「MCP 搜索接管
+ * web 能力」的替代前提不成立——若照旧隐藏原生 web，极简+MCP 搜索开启会出现
+ * 零搜索能力。因此 minimal 档强制保留原生 websearch/webfetch。
+ */
+export function mcpSearchHidesNativeWeb(
+  settings: McpSettings,
+  toolProfile: 'default' | 'minimal' | undefined
+): boolean {
+  return hasEnabledMcpSearch(settings) && toolProfile !== 'minimal';
+}
+
 export function createMcpSettingsCacheKey(settings: McpSettings): string {
   return JSON.stringify(settings.servers
     .filter((server) => server.enabled)

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRecallInsertion,
   buildRecallQuery,
-  estimateRecallItemTokens,
   filterAutoRecallItems,
   MAX_RECALL_ITEMS,
   MAX_RECALL_ITEM_TOKENS,
@@ -129,13 +128,6 @@ describe('buildRecallInsertion', () => {
       order: 2,
     });
     expect(insertion.order).toBe(2);
-  });
-});
-
-describe('estimateRecallItemTokens', () => {
-  it('sums title+content estimates', () => {
-    const tokens = estimateRecallItemTokens([item('t', 'c'.repeat(40))]);
-    expect(tokens).toBeGreaterThan(0);
   });
 });
 

@@ -56,11 +56,14 @@ export function buildHeadlessToolDefinitions(
 ): IToolDefinition[] {
   const { mode, multimodalEnabled, mcpSearchEnabled, agentDefinitionsCount = 0, toolProfile = 'default' } = options;
   const minimal = toolProfile === 'minimal';
+  // N1：极简档不加载 MCP 工具，「MCP 搜索替代原生 web」的前提不成立——
+  // 若照旧隐藏 websearch/webfetch，极简+MCP 搜索开启会出现零搜索能力。
+  const webHidden = mcpSearchEnabled && !minimal;
   const definitions: IToolDefinition[] = [];
   for (const name of DEFAULT_PROMPT_TOOL_NAMES) {
     if (HEADLESS_UI_BOUND_EXCLUDED.has(name)) continue;
     if (name === 'task' && agentDefinitionsCount === 0) continue;
-    if (!isPromptToolVisible(name, mode, { multimodalEnabled, mcpSearchEnabled })) continue;
+    if (!isPromptToolVisible(name, mode, { multimodalEnabled, mcpSearchEnabled: webHidden })) continue;
     if (minimal && !isMinimalAgentToolName(name)) continue;
     definitions.push(resolveToolDefinition(name));
   }

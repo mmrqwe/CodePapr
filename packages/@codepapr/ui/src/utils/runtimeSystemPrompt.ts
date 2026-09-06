@@ -15,7 +15,7 @@ import {
   resolveAgentDescription,
   type AgentDefinition,
 } from '@codepapr/core';
-import { hasEnabledMcpSearch } from './mcpTypes';
+import { mcpSearchHidesNativeWeb } from './mcpTypes';
 import { shouldExposeReadImage } from './visionRouting';
 import type { WorkMode } from './agentPrompts';
 import type { Settings } from '../store/internals/types';
@@ -29,7 +29,8 @@ export function buildAgentRuntimeSystemPrompt(
 ): string {
   const effectiveModel = (runtime?.model ?? settings.model).trim();
   const multimodalEnabled = shouldExposeReadImage(settings, effectiveModel);
-  const mcpSearchEnabled = hasEnabledMcpSearch(settings.mcp);
+  // 极简档不加载 MCP，原生 web 不被替代（mcpSearchHidesNativeWeb 内部门控，N1）。
+  const mcpSearchEnabled = mcpSearchHidesNativeWeb(settings.mcp, settings.agentToolProfile);
   // 与工具注册层（registerWorkspaceTools / FilteringToolRegistry）的可见性条件保持对齐，
   // 避免系统提示词提及模型实际不可用的工具。mode ∩ profile：极简工具面只列举 allowlist。
   const toolNames = DEFAULT_PROMPT_TOOL_NAMES.filter((name) =>

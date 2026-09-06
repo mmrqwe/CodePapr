@@ -37,7 +37,7 @@ import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTo
 import { registerMcpTools } from '../../tools/mcpTools';
 import { registerMemoryTools } from '../../tools/memoryTools';
 import { registerTodoListTools } from '../../tools/todoListTool';
-import { hasEnabledMcpSearch } from '../../utils/mcpTypes';
+import { mcpSearchHidesNativeWeb } from '../../utils/mcpTypes';
 import {
   buildProviderInstance,
   shouldUseSidecarAgentRuntime,
@@ -424,7 +424,7 @@ export function buildAgentSessionParts(
   registerWorkspaceTools(toolRegistry, workspacePath, runtime.editHistory, (paths) => {
     onWorkspaceMutated(paths);
   }, {
-    disableWebSearchTools: hasEnabledMcpSearch(settings.mcp),
+    disableWebSearchTools: mcpSearchHidesNativeWeb(settings.mcp, settings.agentToolProfile),
     multimodalEnabled: shouldExposeReadImage(settings, currentModel),
     mode,
     sessionId,

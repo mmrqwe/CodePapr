@@ -24,6 +24,8 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 import { registerWorkspaceTools } from '../tools/workspaceTools';
 import { registerTodoListTools } from '../tools/todoListTool';
 import { registerMemoryTools } from '../tools/memoryTools';
+import { createDefaultMcpSettings, mcpSearchHidesNativeWeb } from '../utils/mcpTypes';
+import type { McpSettings } from '../utils/mcpTypes';
 import {
   HEADLESS_UI_BOUND_EXCLUDED,
   buildHeadlessToolDefinitions,
@@ -81,8 +83,20 @@ function catalogNames(testCase: Case): string[] {
     .sort();
 }
 
+/** 生产同款 MCP 搜索判定：构造开启态/关闭态 McpSettings。 */
+function mcpSettingsWithSearch(searchOn: boolean): McpSettings {
+  const base = createDefaultMcpSettings();
+  return {
+    ...base,
+    enabled: searchOn,
+    exposeTools: searchOn,
+    servers: base.servers.map((server) => (server.category === 'search' ? { ...server, enabled: searchOn } : server)),
+  };
+}
+
 /** 桌面极简路径的镜像：registerWorkspaceTools（含 mode 过滤）→ 跳过
- *  todo/memory（与 WorkerBackedAgent/agentFactory 一致）→ applyMinimalToolProfile。 */
+ *  todo/memory（与 WorkerBackedAgent/agentFactory 一致）→ applyMinimalToolProfile。
+ *  与生产同源调用 mcpSearchHidesNativeWeb（N1：minimal 下 MCP 不加载，web 不被替代）。 */
 function desktopMinimalNames(testCase: Case): string[] {
   const inner: ToolRegistry = isReadOnlyMode(testCase.mode)
     ? new FilteringToolRegistry(allowToolForReadOnlyMode, readOnlyModeBlockMessage)
@@ -90,7 +104,7 @@ function desktopMinimalNames(testCase: Case): string[] {
   registerWorkspaceTools(inner, '/tmp/ws', undefined, undefined, {
     mode: testCase.mode,
     multimodalEnabled: testCase.multimodalEnabled,
-    disableWebSearchTools: testCase.mcpSearchEnabled,
+    disableWebSearchTools: mcpSearchHidesNativeWeb(mcpSettingsWithSearch(testCase.mcpSearchEnabled), 'minimal'),
   });
   applyMinimalToolProfile(inner, 'minimal');
   return inner
@@ -151,6 +165,26 @@ describe('headlessToolCatalog ↔ desktop registry parity', () => {
       toolProfile: 'minimal',
     }).map((tool) => tool.name).sort();
     expect(names).toEqual([...MINIMAL_AGENT_TOOLS].sort());
+  });
+
+  it('N1：极简 + MCP 搜索开 = 仍 7 项（MCP 不加载，原生 web 不被替代）', () => {
+    const minimalNames = buildHeadlessToolDefinitions({
+      mode: 'agent',
+      multimodalEnabled: false,
+      mcpSearchEnabled: true,
+      toolProfile: 'minimal',
+    }).map((tool) => tool.name);
+    expect(minimalNames).toContain('websearch');
+    expect(minimalNames).toContain('webfetch');
+    expect(minimalNames).toHaveLength(MINIMAL_AGENT_TOOLS.length);
+    // 对照：default + MCP 搜索开 → 原生 web 被 MCP 替代（既有规则不变）。
+    const defaultNames = buildHeadlessToolDefinitions({
+      mode: 'agent',
+      multimodalEnabled: false,
+      mcpSearchEnabled: true,
+    }).map((tool) => tool.name);
+    expect(defaultNames).not.toContain('websearch');
+    expect(defaultNames).not.toContain('webfetch');
   });
 
   it('default profile 与极简互不影响：default = 非极简的补集语义（含 git/lsp/todo 等）', () => {

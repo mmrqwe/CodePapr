@@ -5,6 +5,7 @@ import {
   createDefaultMcpSettings,
   createMcpSettingsCacheKey,
   hasEnabledMcpSearch,
+  mcpSearchHidesNativeWeb,
   mcpToolInfoToDefinition,
   normalizeMcpServer,
   normalizeMcpSettings,
@@ -136,6 +137,26 @@ describe('hasEnabledMcpSearch', () => {
       ],
     });
     expect(hasEnabledMcpSearch(settings)).toBe(true);
+  });
+});
+
+describe('mcpSearchHidesNativeWeb（N1）', () => {
+  const searchOn = norm({
+    enabled: true,
+    exposeTools: true,
+    servers: [{ id: 'search', enabled: true, category: 'search' }],
+  });
+  const searchOff = createDefaultMcpSettings();
+
+  it('default 档：MCP 搜索开启时替代原生 web（既有规则不变）', () => {
+    expect(mcpSearchHidesNativeWeb(searchOn, 'default')).toBe(true);
+    expect(mcpSearchHidesNativeWeb(searchOn, undefined)).toBe(true);
+    expect(mcpSearchHidesNativeWeb(searchOff, 'default')).toBe(false);
+  });
+
+  it('极简档：MCP 不加载，原生 websearch/webfetch 强制保留（防零搜索能力）', () => {
+    expect(mcpSearchHidesNativeWeb(searchOn, 'minimal')).toBe(false);
+    expect(mcpSearchHidesNativeWeb(searchOff, 'minimal')).toBe(false);
   });
 });
 

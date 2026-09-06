@@ -209,14 +209,6 @@ export function resolveRecallBudget(params: {
   return { maxItems: MAX_RECALL_ITEMS, maxTokens };
 }
 
-/** 单条 recall item 的 token 估算（用于审计记录）。 */
-export function estimateRecallItemTokens(items: readonly RecallDisplayItem[]): number {
-  return items.reduce(
-    (sum, item) => sum + estimateTokens(`${item.title}\n${item.content}`),
-    0
-  );
-}
-
 /** 按 estimateTokens（UTF-8 字节/4）截断，避免 CJK 字符数口径低估。 */
 export function truncateToMaxTokens(text: string, maxTokens: number): string {
   if (maxTokens <= 0 || !text) return '';

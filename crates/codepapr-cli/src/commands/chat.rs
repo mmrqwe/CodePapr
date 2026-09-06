@@ -51,6 +51,18 @@ pub async fn run(
     mut event_rx: mpsc::UnboundedReceiver<JsonRpcNotification>,
     json_mode: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // N2: loud deprecation. `chat` runs on a fixed legacy tool table
+    // (read/write/edit/grep/list/bash/git) that is NOT the desktop or
+    // `codepapr run` harness surface — results from it must not be used
+    // for evaluation. Migrate to `codepapr run` (harness) before the
+    // island is deleted.
+    if !json_mode {
+        eprintln!(
+            "warning: `codepapr chat` is a LEGACY standalone tool table (7 fixed tools, not \
+             desktop/harness parity). For automation and evaluation use `codepapr run`. \
+             This command is scheduled for removal."
+        );
+    }
     // 1. Resolve LLM Configuration
     let config = resolve_llm_config(
         client,
