@@ -136,7 +136,9 @@ export function createHarnessMediator(deps: HarnessMediatorDeps): HarnessMediato
       ...DEFAULT_SETTINGS,
       ...(payload.settingsOverride as Partial<Settings> | undefined),
       systemPrompt: normalizeCustomSystemPrompt(
-        payload.systemPromptOverride ?? DEFAULT_SETTINGS.systemPrompt
+        payload.systemPromptOverride ??
+        (payload.settingsOverride as { systemPrompt?: string } | undefined)?.systemPrompt ??
+        DEFAULT_SETTINGS.systemPrompt
       ),
       experimentalCharacters: false,
     };

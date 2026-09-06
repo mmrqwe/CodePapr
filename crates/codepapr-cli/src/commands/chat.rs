@@ -419,6 +419,22 @@ async fn execute_turn(
     Ok(())
 }
 
+/// Load the desktop app's saved settings object (shared by `chat` and `run`).
+/// The run path layers the provider resolution on top of this whole object so
+/// the sidecar harness starts from the same base the desktop agent uses.
+pub(crate) async fn load_saved_settings(client: &RpcClient) -> Option<Value> {
+    match client.call("db/loadSettings", json!({})).await {
+        // Server contract: {"dbPath": "...", "settingsJson": "..."} (older
+        // builds used "settings"; accept either, but settingsJson first).
+        Ok(res) => res
+            .get("settingsJson")
+            .or_else(|| res.get("settings"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| serde_json::from_str::<Value>(s).ok()),
+        Err(_) => None,
+    }
+}
+
 pub(crate) async fn resolve_llm_config(
     client: &RpcClient,
     provider_arg: Option<&str>,
@@ -427,10 +443,7 @@ pub(crate) async fn resolve_llm_config(
     model_arg: Option<&str>,
 ) -> Result<ResolvedLlmConfig, Box<dyn std::error::Error>> {
     // 1. Try to load saved settings from CodePapr DB
-    let db_settings = match client.call("db/loadSettings", json!({})).await {
-        Ok(res) => res.get("settings").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<Value>(s).ok()),
-        Err(_) => None,
-    };
+    let db_settings = load_saved_settings(client).await;
 
     // 2. Resolve provider and API key
     let mut provider = provider_arg.unwrap_or_default().to_string();
@@ -480,6 +493,27 @@ pub(crate) async fn resolve_llm_config(
                 model = m.to_string();
             }
         }
+        // The desktop normalizes per-profile sub-configs (`custom`/`deepseek`/
+        // `local`) into the active fields; saved API keys usually live ONLY
+        // there. Mirror that: fall back to the sub-config named by `apiMode`.
+        let mode = settings.get("apiMode").and_then(|v| v.as_str()).unwrap_or("custom");
+        if let Some(profile) = settings.get(mode).filter(|v| v.is_object()) {
+            if api_key.is_empty() {
+                if let Some(k) = profile.get("apiKey").and_then(|v| v.as_str()) {
+                    api_key = k.to_string();
+                }
+            }
+            if base_url.is_empty() {
+                if let Some(u) = profile.get("baseURL").and_then(|v| v.as_str()) {
+                    base_url = u.to_string();
+                }
+            }
+            if model.is_empty() {
+                if let Some(m) = profile.get("model").and_then(|v| v.as_str()) {
+                    model = m.to_string();
+                }
+            }
+        }
     }
 
     if provider.is_empty() {
@@ -489,6 +523,7 @@ pub(crate) async fn resolve_llm_config(
     let (default_model, default_url, api_format) = match provider.as_str() {
         "deepseek" => ("deepseek-chat", "https://api.deepseek.com", "openai"),
         "claude" => ("claude-3-5-sonnet-20241022", "https://api.anthropic.com", "claude"),
+        "response" => ("", "", "response"),
         _ => ("gpt-4o", "https://api.openai.com/v1", "openai"),
     };
 

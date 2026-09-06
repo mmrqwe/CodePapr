@@ -7,7 +7,7 @@
 //! policies) live in the desktop-sidecar TS runtime; this file must never
 //! grow a tool table or agent loop of its own.
 
-use crate::commands::chat::{resolve_llm_config, ResolvedLlmConfig};
+use crate::commands::chat::{load_saved_settings, resolve_llm_config, ResolvedLlmConfig};
 use crate::harness::allowlist::Allowlist;
 use crate::harness::events::{frame_to_lines, EventWriter, PROTOCOL_VERSION};
 use crate::rpc_client::{JsonRpcNotification, RpcClient};
@@ -228,7 +228,8 @@ async fn drive(
         .into());
     }
 
-    let settings_override = harness_settings_override(&config);
+    let saved = load_saved_settings(client).await;
+    let settings_override = harness_settings_override(&config, saved.as_ref());
     let mut policy = json!({});
     if args.question_auto || question_answers.is_some() {
         let mut question = json!({ "mode": "auto-default" });
@@ -489,15 +490,23 @@ fn format(prefix: &str, id: u32) -> String {
     format!("{prefix}-{id}")
 }
 
-fn harness_settings_override(config: &ResolvedLlmConfig) -> Value {
-    json!({
-        "apiMode": if config.provider == "deepseek" { "deepseek" } else { "custom" },
-        "apiFormat": config.api_format,
-        "provider": config.provider,
-        "baseURL": config.base_url,
-        "apiKey": config.api_key,
-        "model": config.model,
-    })
+/// settingsOverride = desktop's saved settings as the base (same object the
+/// desktop agent runtime boots from), with provider resolution applied on
+/// top. Without this the harness would start from stock defaults whose
+/// thinking/tool-round settings may not match the user's model (real-world
+/// 4xx seen with `thinking` on response-format endpoints).
+fn harness_settings_override(config: &ResolvedLlmConfig, saved: Option<&Value>) -> Value {
+    let mut base = match saved {
+        Some(Value::Object(map)) => map.clone(),
+        _ => serde_json::Map::new(),
+    };
+    base.insert("apiMode".into(), json!(if config.provider == "deepseek" { "deepseek" } else { "custom" }));
+    base.insert("apiFormat".into(), json!(config.api_format));
+    base.insert("provider".into(), json!(config.provider));
+    base.insert("baseURL".into(), json!(config.base_url));
+    base.insert("apiKey".into(), json!(config.api_key));
+    base.insert("model".into(), json!(config.model));
+    Value::Object(base)
 }
 
 fn resolve_prompt(arg: Option<&str>) -> Option<String> {
@@ -615,9 +624,32 @@ mod tests {
             base_url: "https://api.deepseek.com".into(),
             api_format: "openai".into(),
         };
-        let value = harness_settings_override(&config);
+        let value = harness_settings_override(&config, None);
         assert_eq!(value["apiMode"], "deepseek");
         assert_eq!(value["provider"], "deepseek");
+    }
+
+    #[test]
+    fn saved_settings_are_the_base_and_flags_win() {
+        let saved = json!({
+            "thinkingEnabled": false,
+            "maxToolRounds": 40,
+            "provider": "response",
+            "model": "saved-model",
+            "apiKey": "saved-key"
+        });
+        let config = ResolvedLlmConfig {
+            provider: "openai".into(),
+            model: "gpt-4o".into(),
+            api_key: "flag-key".into(),
+            base_url: "u".into(),
+            api_format: "openai".into(),
+        };
+        let value = harness_settings_override(&config, Some(&saved));
+        assert_eq!(value["thinkingEnabled"], false);   // desktop parity base kept
+        assert_eq!(value["maxToolRounds"], 40);
+        assert_eq!(value["provider"], "openai");       // resolved flags override
+        assert_eq!(value["apiKey"], "flag-key");
     }
 
     #[test]
@@ -629,7 +661,7 @@ mod tests {
             base_url: "https://api.anthropic.com".into(),
             api_format: "claude".into(),
         };
-        let value = harness_settings_override(&config);
+        let value = harness_settings_override(&config, None);
         assert_eq!(value["apiMode"], "custom");
         assert_eq!(value["apiFormat"], "claude");
     }
