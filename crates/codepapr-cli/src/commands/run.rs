@@ -258,8 +258,18 @@ async fn drive(
         }),
     )
     .await?;
+    // harness-ready carries the effective LLM tool surface; record it in
+    // run.start so evaluation tooling can verify profile/mode filtering
+    // end-to-end (e.g. --tools-preset minimal => exactly the 7 allowlist ids).
+    let mut harness_tool_names: Vec<String> = Vec::new();
     if let Err(err) = wait_for_frames(event_rx, HARNESS_HANDSHAKE_TIMEOUT, &runtime_id, &mut |message| {
-        message.get("type").and_then(Value::as_str) == Some("harness-ready")
+        if message.get("type").and_then(Value::as_str) != Some("harness-ready") {
+            return false;
+        }
+        if let Some(names) = message.get("toolNames").and_then(Value::as_array) {
+            harness_tool_names = names.iter().filter_map(Value::as_str).map(str::to_string).collect();
+        }
+        true
     })
     .await
     {
@@ -271,7 +281,7 @@ async fn drive(
         .timeout_ms
         .map(|ms| Instant::now() + Duration::from_millis(ms.min(24 * 3600 * 1000)));
 
-    events.run_start(&args.mode, &config.model, &config.provider, workspace);
+    events.run_start(&args.mode, &config.model, &config.provider, workspace, &harness_tool_names);
     send_frame(
         client,
         &runtime_id,

@@ -48,13 +48,14 @@ impl EventWriter {
         let _ = writer.flush();
     }
 
-    pub fn run_start(&mut self, mode: &str, model: &str, provider: &str, workspace: &str) {
+    pub fn run_start(&mut self, mode: &str, model: &str, provider: &str, workspace: &str, tools: &[String]) {
         self.line(json!({
             "type": "run.start",
             "mode": mode,
             "model": model,
             "provider": provider,
             "workspace": workspace,
+            "tools": tools,
         }));
     }
 
@@ -209,7 +210,7 @@ mod tests {
         let path = dir.join("run.jsonl");
         {
             let mut w = EventWriter::new(&path, "sess-1".into()).unwrap();
-            w.run_start("agent", "m", "p", "/ws");
+            w.run_start("agent", "m", "p", "/ws", &["bash".into(), "read".into()]);
             w.line(json!({"type": "tool.start", "toolName": "read"}));
             w.run_end("completed", Some(json!({"model": "m"})));
         }
@@ -217,6 +218,7 @@ mod tests {
         let lines: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0]["v"], 1);
+        assert_eq!(lines[0]["tools"], json!(["bash", "read"]));
         assert_eq!(lines[0]["type"], "run.start");
         assert!(lines[0]["ts"].is_number());
         assert_eq!(lines[1]["sessionId"], "sess-1");

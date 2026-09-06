@@ -276,10 +276,78 @@ async function scenarioTimeout() {
     lines.some((l) => l.type === 'run.end' && l.exitReason === 'timeout'));
 }
 
+async function scenarioToolsPresetMinimal() {
+  const ws = makeWorkspace({ 'a.txt': 'x' });
+  const provider = await startMockProvider([sseContent('done')]);
+  const events = path.join(ws, 'run.jsonl');
+  const { code } = await runCli(ws, [
+    'run', '--mode', 'agent', '--yolo', '--tools-preset', 'minimal',
+    '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', provider.url,
+    '--timeout-ms', '60000', '--events-jsonl', events,
+    'noop',
+  ]);
+  provider.close();
+  check('minimal preset: run exits 0', code === 0, `code=${code}`);
+  const lines = readJsonl(events);
+  const runStart = lines.find((l) => l.type === 'run.start');
+  const tools = (runStart?.tools ?? []).slice().sort();
+  const expected = ['bash', 'edit', 'grep', 'read', 'webfetch', 'websearch', 'write'];
+  check('minimal preset: exactly the 7 allowlist tools (no git/lsp/todo/memory/app)',
+    JSON.stringify(tools) === JSON.stringify(expected), JSON.stringify(tools));
+}
+
+async function scenarioToolsPresetMinimalRejectsNonAllowlist() {
+  const ws = makeWorkspace({ 'a.txt': 'x' });
+  // Hallucinate `git` (a Rust-hosted tool that exists on the default surface):
+  // under minimal the worker never registered it -> must fail as unknown tool,
+  // and the run must still complete (tool error, not crash).
+  const provider = await startMockProvider([
+    sseToolCall('git', { action: 'status' }),
+    sseToolCall('read', { relativePath: 'a.txt' }),
+    sseContent('recovered'),
+  ]);
+  const events = path.join(ws, 'run.jsonl');
+  const result = path.join(ws, 'out.json');
+  const { code } = await runCli(ws, [
+    'run', '--mode', 'agent', '--yolo', '--tools-preset', 'minimal',
+    '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', provider.url,
+    '--timeout-ms', '60000', '--events-jsonl', events, '--result-json', result,
+    'git status then read',
+  ]);
+  provider.close();
+  check('minimal + hallucinated git: run completes (exit 0)', code === 0, `code=${code}`);
+  const lines = readJsonl(events);
+  const gitEnd = lines.find((l) => l.type === 'tool.end' && l.toolName === 'git');
+  check('minimal: git call rejected as unknown tool', gitEnd?.success === false, JSON.stringify(gitEnd));
+  check('minimal: allowlisted read still works',
+    lines.some((l) => l.type === 'tool.end' && l.toolName === 'read' && l.success === true));
+}
+
+async function scenarioToolsPresetDefaultSurface() {
+  const ws = makeWorkspace({ 'a.txt': 'x' });
+  const provider = await startMockProvider([sseContent('done')]);
+  const events = path.join(ws, 'run.jsonl');
+  await runCli(ws, [
+    'run', '--mode', 'agent', '--yolo',
+    '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', provider.url,
+    '--timeout-ms', '60000', '--events-jsonl', events,
+    'noop',
+  ]);
+  provider.close();
+  const lines = readJsonl(events);
+  const tools = lines.find((l) => l.type === 'run.start')?.tools ?? [];
+  check('default preset: full surface incl. git/lsp/todo (>7)',
+    tools.includes('git') && tools.includes('lsp') && tools.includes('todo') && tools.length > 7,
+    `count=${tools.length}`);
+}
+
 const scenarios = [
   ['completed run', scenarioCompletedRun],
   ['ask cannot write', scenarioAskCannotWrite],
   ['permission denied', scenarioPermissionDenied],
+  ['tools-preset minimal', scenarioToolsPresetMinimal],
+  ['tools-preset minimal rejects non-allowlist', scenarioToolsPresetMinimalRejectsNonAllowlist],
+  ['tools-preset default surface', scenarioToolsPresetDefaultSurface],
   ['allowlist grant', scenarioAllowlistGrant],
   ['provider 4xx', scenarioProvider4xx],
   ['timeout', scenarioTimeout],
