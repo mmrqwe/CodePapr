@@ -315,7 +315,10 @@ async fn execute_turn(
                                 let _ = client.call("agent/respondPermission", json!({
                                     "requestId": request_id,
                                     "approved": approved,
-                                    "scope": "directory",
+                                    // "[y/N]" approves THIS operation only;
+                                    // a persisted directory grant here would
+                                    // silently allow every later access.
+                                    "scope": "once",
                                 })).await;
                                 continue;
                             }

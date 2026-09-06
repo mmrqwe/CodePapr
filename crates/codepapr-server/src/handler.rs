@@ -336,7 +336,9 @@ pub async fn handle_request(ctx: &Arc<ServerContext>, method: &str, params: Valu
             codepapr_core::agent_runtime_tools::agent_runtime_permission_respond(
                 require_string(&params, "requestId")?,
                 opt_bool(&params, "approved").unwrap_or(false),
-                opt_string(&params, "scope").unwrap_or_else(|| "directory".to_string()),
+                // Least privilege: a client that omits `scope` approves only
+                // this operation; persisted grants must be asked for by name.
+                opt_string(&params, "scope").unwrap_or_else(|| "once".to_string()),
             )?;
             Ok(json!({ "success": true }))
         }

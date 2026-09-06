@@ -326,6 +326,21 @@ async fn drive(
         .timeout_ms
         .map(|ms| Instant::now() + Duration::from_millis(ms.min(24 * 3600 * 1000)));
 
+    // Host-level yolo silently defeats the harness permission policy: the
+    // host auto-approves external paths, so --permission rules and the
+    // deny-by-default exit-3 contract never fire. Make that visible.
+    if !args.yolo {
+        if let Ok(policy) = client.call("fs/getExternalAccessPolicy", json!({})).await {
+            if policy.get("yolo").and_then(Value::as_bool) == Some(true) {
+                eprintln!(
+                    "warning: host external-access policy has yolo=true; external paths will be \
+                     auto-approved and --permission rules will never fire. Disable YOLO in the \
+                     desktop permission settings for strict harness semantics."
+                );
+            }
+        }
+    }
+
     events.run_start(&args.mode, &config.model, &config.provider, workspace, &harness_tool_names);
 
     // Explicit --session-id = multi-turn contract: restore the canonical
