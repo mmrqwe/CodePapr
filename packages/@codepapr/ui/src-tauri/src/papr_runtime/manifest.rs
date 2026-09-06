@@ -109,6 +109,10 @@ pub struct PaprManifest {
     pub inbox: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// Thin convenience wrapper over [`load_manifest_with_raw`] for callers that
+/// do not need the on-disk source. Used by tests; production paths pass
+/// through `with_raw` so unknown manifest fields survive round-trips.
+#[allow(dead_code)]
 pub fn load_manifest(apps_dir: &Path, app_id: &str) -> Result<PaprManifest, String> {
     load_manifest_with_raw(apps_dir, app_id).map(|(manifest, _)| manifest)
 }

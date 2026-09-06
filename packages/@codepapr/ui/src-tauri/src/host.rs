@@ -28,6 +28,9 @@ struct JsonRpcNotification {
 
 #[derive(Debug, Clone, Deserialize)]
 struct JsonRpcError {
+    // Kept for wire-shape documentation; the reader pulls `code` straight
+    // off the raw JSON (see the error branch in `handle_line`).
+    #[allow(dead_code)]
     code: i64,
     message: String,
 }

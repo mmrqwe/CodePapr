@@ -596,15 +596,6 @@ pub struct ProjectStatsResult {
 
 // ── command ────────────────────────────────────────────────────────────
 
-const PROGRESS_EVENT: &str = "project-stats-progress";
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectStatsProgress {
-    workspace_path: String,
-    files: u64,
-}
-
 fn file_mtime_secs(meta: &std::fs::Metadata) -> u64 {
     meta.modified()
         .ok()

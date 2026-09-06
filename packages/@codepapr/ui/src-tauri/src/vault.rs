@@ -190,6 +190,9 @@ impl AppSecrets {
     /// doesn't exist.  Call [`save`] afterwards to persist.
     ///
     /// [`save`]: Self::save
+    // Production callers were migrated to the host `secrets/*` RPC
+    // (ADR-012); the vault API is kept and exercised by tests.
+    #[allow(dead_code)]
     pub(crate) fn delete_secret(&self, account: &str) -> Result<(), String> {
         let client = self
             .stronghold

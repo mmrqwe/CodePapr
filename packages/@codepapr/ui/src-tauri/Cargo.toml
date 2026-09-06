@@ -81,9 +81,6 @@ block2 = "0.6"
 custom-protocol = ["tauri/custom-protocol"]
 protocol-asset = ["tauri/protocol-asset"]
 
-[profile.release]
-opt-level = 3           # Maximum compiler optimization level
-lto = true              # Enable fat LTO for cross-crate inlining
-codegen-units = 1       # Single codegen unit for best global optimization
-panic = "abort"         # Remove stack unwinding overhead, smaller binary
-strip = true            # Strip debug symbols for faster cold start
+# NOTE: a [profile.release] block here was silently ignored by cargo
+# (profiles only work at the workspace root). Release tuning, if ever
+# needed, belongs in the root Cargo.toml.

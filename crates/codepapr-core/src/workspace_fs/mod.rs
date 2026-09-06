@@ -18,11 +18,6 @@ pub mod types;
 pub mod watcher;
 pub mod write;
 
-// Only re-export what external modules (task_queue, invoke_handler) actually need.
-pub(crate) use list::list_workspace_files_impl;
-pub(crate) use read::read_text_file_impl;
-pub(crate) use types::{ListFilesResult, ReadFileResult};
-
 // ── Shared constants ─────────────────────────────────────────────────
 
 pub(crate) const DEFAULT_MAX_DEPTH: usize = 2;
