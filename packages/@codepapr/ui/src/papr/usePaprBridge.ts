@@ -5,7 +5,7 @@ import { isPaprMessage, createPaprResponse } from './paprProtocol';
 import { usePermissionStore } from './permissionStore';
 import { normalizeWorkspaceId } from './projectRecordScope';
 import { accessAllows, resolveEffectiveAccess } from './levelGrants';
-import { registerAppPoster } from './appChannelHub';
+import { registerAppPoster, flushPendingAppEvents } from './appChannelHub';
 import { useAgentStore } from '../store/agentStore';
 import { useAppRuntimeStore } from '../store/appRuntimeStore';
 import {
@@ -182,6 +182,12 @@ export function usePaprBridge({ iframeRef, appId, manifest, onAppReady, onConsol
       // 加载检测握手（无 reqId，先于 isPaprMessage 的 reqId 校验处理）：
       // SDK 执行即证明真实应用页面已渲染——协议层错误页（404/403）不注入 SDK。
       if ((data as { type?: string }).type === 'papr://app-ready') {
+        // 挂载竞态补发：广播时本 app 零挂载而排队的 papr://event，趁文档刚
+        // ready、先于 onAppReady 记账冲刷给这个实例（reveal-on-publish 场景）。
+        // 与应用的 db 回放可能重叠，接收方按 seq 去重是契约的一部分。
+        flushPendingAppEvents(appId, (envelope) => {
+          iframeRef.current?.contentWindow?.postMessage(envelope, appOrigin);
+        });
         onAppReadyRef.current?.();
         return;
       }

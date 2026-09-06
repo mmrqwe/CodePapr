@@ -933,7 +933,7 @@ After the change, at least run verification for the affected scope; if no narrow
             <tr><td><code>app_start</code></td><td>Start backend service by appId. Checks port availability, turns status green.</td></tr>
             <tr><td><code>app_stop</code></td><td>Stop backend service by appId. Turns status red.</td></tr>
             <tr><td><code>app_delete</code></td><td>Delete app by appId. Stops backend, removes files, clears storage. Irreversible.</td></tr>
-            <tr><td><code>app_publish</code></td><td>Push content to an app/plugin channel (app_publish({ appId, channel, payload })). Only publish to targets listed in session context "## Enabled plugins" (enabled + declared inbox); do not call app_list first. Events are appended atomically (concurrency-safe, last 200 kept) and delivered live via papr://event when the app is mounted. Canvas/kanban: after analysis → push a scene or a card using the example.</td></tr>
+            <tr><td><code>app_publish</code></td><td>Push content to an app/plugin channel (app_publish({ appId, channel, payload })). Only publish to targets listed in session context "## Enabled plugins" (enabled + declared inbox); do not call app_list first. Events are appended atomically (concurrency-safe, last 200 kept) and delivered live via papr://event when the app is mounted; when unmounted they are briefly queued (~30s) so a shortly-opening app still receives them live. Canvas/kanban: after analysis → push a scene or a card using the example.</td></tr>
           </tbody>
         </table>
 
@@ -1547,7 +1547,7 @@ Current status: !`git status -s`</code></pre>
           <li><strong>Plugin Declares Contract</strong>: Declare <code>inbox</code> channels and minimal payload <code>example</code> in <code>manifest.json</code>.</li>
           <li><strong>Agent Auto-Discovery</strong>: Enabled inbox plugins are automatically surfaced in the coding Agent's session context under "## Enabled plugins".</li>
           <li><strong>Push from Any Mode</strong>: The coding Agent calls <code>app_publish({ appId, channel, payload })</code> from any writable mode (Agent / Plan / App).</li>
-          <li><strong>Dual-Channel Persistence &amp; Replay</strong>: Events are atomically appended to the app's <code>db.sqlite</code> (up to 200 events retained); delivered live via <code>papr://event</code> if mounted, or replayed on next launch using <code>papr.db.get("inbox:&lt;channel&gt;")</code>.</li>
+          <li><strong>Dual-Channel Persistence &amp; Replay</strong>: Events are atomically appended to the app's <code>db.sqlite</code> (up to 200 events retained); delivered live via <code>papr://event</code> if mounted; when unmounted events are briefly queued (~30s) so a freshly opening instance still receives them live, while later launches replay history using <code>papr.db.get("inbox:&lt;channel&gt;")</code> (live and replay can overlap — dedupe by <code>seq</code>).</li>
         </ol>
 
         <h3>Security &amp; Permission Isolation Model</h3>

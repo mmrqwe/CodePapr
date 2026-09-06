@@ -1487,10 +1487,10 @@ function buildToolConstraints(
     );
     lines.push(
       lang === 'en'
-        ? '- [app_publish] Push content to a .papr app/plugin channel: app_publish({ appId, channel, payload }). Session context "## Enabled plugins" lists current publish targets (enabled + declared inbox). Follow that appId/channel/example exactly. If the section is absent, call app_list to discover enabled apps with inbox contracts — never invent channels. Publishing to a disabled plugin still persists but returns a disabledTarget warning (no live consumer) — prompt the user to enable it. Data is persisted (the app can reload history) and delivered live if the app is mounted. Unknown channels are rejected with the valid list.'
+        ? '- [app_publish] Push content to a .papr app/plugin channel: app_publish({ appId, channel, payload }). Session context "## Enabled plugins" lists current publish targets (enabled + declared inbox). Follow that appId/channel/example exactly. If the section is absent, call app_list to discover enabled apps with inbox contracts — never invent channels. Publishing to a disabled plugin still persists but returns a disabledTarget warning (no live consumer) — prompt the user to enable it. Data is persisted (the app can reload history); delivered live if the app is mounted, otherwise briefly queued (queued=true) so an app opening moments later (e.g. auto-revealed) still receives the live event — never claim the user cannot see it. Unknown channels are rejected with the valid list.'
           : lang === 'zh-TW'
-          ? '- [app_publish] 向 .papr 應用/外掛的頻道推送內容：app_publish({ appId, channel, payload })。會話上下文「已啟用外掛」列出目前可推送目標（已啟用且宣告了 inbox）。嚴格按其 appId/頻道/example 推送；章節缺失時先用 app_list 查目錄與啟用態，不要 invent 頻道。推給已停用的外掛會被拒絕並說明原因。數據會持久化（應用可回放歷史），應用已掛載時即時送達。傳未聲明頻道會被拒絕並列出可用頻道。'
-          : '- [app_publish] 向 .papr 应用/插件的频道推送内容：app_publish({ appId, channel, payload })。会话上下文「已启用插件」列出当前可推送目标（已启用且声明了 inbox）。严格按其 appId/频道/example 推送；章节缺失时先用 app_list 查目录与启用态，不要 invent 频道。推给已停用的插件会落库但返回 disabledTarget 告警（当前无人实时消费），应提示用户启用。数据会持久化（应用可回放历史），应用已挂载时即时送达。传未声明频道会被拒绝并列出可用频道。'
+          ? '- [app_publish] 向 .papr 應用/外掛的頻道推送內容：app_publish({ appId, channel, payload })。會話上下文「已啟用外掛」列出目前可推送目標（已啟用且宣告了 inbox）。嚴格按其 appId/頻道/example 推送；章節缺失時先用 app_list 查目錄與啟用態，不要 invent 頻道。推給已停用的外掛會被拒絕並說明原因。數據會持久化（應用可回放歷史），應用已掛載時即時送達；未掛載時事件會短暫排隊（queued=true），應用隨後打開（含自動揭開）仍會即時收到，勿宣稱用戶看不到。傳未聲明頻道會被拒絕並列出可用頻道。'
+          : '- [app_publish] 向 .papr 应用/插件的频道推送内容：app_publish({ appId, channel, payload })。会话上下文「已启用插件」列出当前可推送目标（已启用且声明了 inbox）。严格按其 appId/频道/example 推送；章节缺失时先用 app_list 查目录与启用态，不要 invent 频道。推给已停用的插件会落库但返回 disabledTarget 告警（当前无人实时消费），应提示用户启用。数据会持久化（应用可回放历史），应用已挂载时即时送达；未挂载时事件会短暂排队（queued=true），应用随后打开（含自动揭开）仍会实时收到，勿声称用户看不到。传未声明频道会被拒绝并列出可用频道。'
     );
   }
 

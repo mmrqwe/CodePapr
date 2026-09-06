@@ -45,9 +45,14 @@ function dispatchFrom(source: unknown, data: unknown): void {
   );
 }
 
+// afterEach 恢复基准：旧实现只做 `postMessage.bind(window.parent)` 叠加包装，
+// console 转发的测试替换时丢弃 targetOrigin 且从不还原，泄漏给后续用例
+// （任何之后再调 db.get 的测试都会踩 Invalid target origin undefined）。
+const pristinePostMessage = window.parent.postMessage.bind(window.parent);
+
 afterEach(() => {
   delete (window as unknown as { papr?: unknown }).papr;
-  window.parent.postMessage = window.parent.postMessage.bind(window.parent);
+  window.parent.postMessage = pristinePostMessage;
 });
 
 describe('papr-sdk.js message source validation (#26)', () => {
@@ -314,6 +319,71 @@ describe('papr-sdk.js papr.events (app_publish 下行推送)', () => {
       off1();
       off2();
     }).not.toThrow();
+  });
+
+  it('seq 去重：已消费过的 seq（含更小 seq）不再二次送达，更新 seq 正常送达', () => {
+    loadSdk();
+    const received: Array<Record<string, unknown>> = [];
+    eventsApi().on('cards', (evt) => received.push(evt as Record<string, unknown>));
+
+    const post = (seq: number) => {
+      dispatchFrom(window.parent, {
+        __papr: true,
+        type: 'papr://event',
+        payload: { channel: 'cards', seq, ts: seq, payload: { n: seq } },
+      });
+    };
+    post(7);
+    post(7); // 冲刷补发的重复副本
+    post(6); // 比已消费更旧
+    post(8);
+    expect(received.map((e) => e.seq)).toEqual([7, 8]);
+
+    // 无 seq（0/缺省）的旧信封不参与去重，照常送达
+    dispatchFrom(window.parent, { __papr: true, type: 'papr://event', payload: { channel: 'cards', payload: 'a' } });
+    dispatchFrom(window.parent, { __papr: true, type: 'papr://event', payload: { channel: 'cards', payload: 'b' } });
+    expect(received).toHaveLength(4);
+  });
+
+  it('db.get("inbox:<channel>") 回放后，同 seq 的实时事件被抑制、更新 seq 不受影响', async () => {
+    loadSdk();
+    type Sdk = { db: { get: (k: string) => Promise<unknown> }; events: EventsApi };
+    const papr = (window as unknown as { papr: Sdk }).papr;
+    const sent = captureSentMessages();
+    const received: Array<Record<string, unknown>> = [];
+    papr.events.on('cards', (evt) => received.push(evt as Record<string, unknown>));
+
+    const replay = papr.db.get('inbox:cards');
+    const reqId = sent[0]?.reqId ?? '';
+    expect(reqId).toBeTruthy();
+    dispatchFrom(window.parent, {
+      __papr: true,
+      reqId,
+      result: JSON.stringify([
+        { seq: 8, ts: 1, payload: { n: 8 } },
+        { seq: 9, ts: 2, payload: { n: 9 } },
+      ]),
+    });
+    await replay;
+
+    const post = (seq: number) => {
+      dispatchFrom(window.parent, {
+        __papr: true,
+        type: 'papr://event',
+        payload: { channel: 'cards', seq, ts: seq, payload: { n: seq } },
+      });
+    };
+    post(9); // 回放已覆盖 → 抑制（挂载竞态冲刷的副本）
+    post(10); // 新事件 → 送达
+    expect(received.map((e) => e.seq)).toEqual([10]);
+
+    // 非 inbox 键的回放不影响该频道去重
+    const other = papr.db.get('settings');
+    const otherReqId = sent[1]?.reqId ?? '';
+    dispatchFrom(window.parent, { __papr: true, reqId: otherReqId, result: JSON.stringify([{ seq: 99 }]) });
+    await other;
+    post(11);
+    expect(received.map((e) => e.seq)).toEqual([10, 11]);
   });
 });
 

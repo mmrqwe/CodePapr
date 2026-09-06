@@ -657,9 +657,12 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       payload: args.payload,
     });
 
-    // 通知面：已挂载则实时送达（SDK papr.events.on）；未挂载仅落库。
+    // 通知面：已挂载则实时送达（SDK papr.events.on）；未挂载则落库 + 进入
+    // appChannelHub 短队列，应用随后挂载（含下面 reveal-on-publish 自动打开）
+    // 并在 papr://app-ready 时补发。
     const delivered = postAppEvent(rawAppId, { channel, seq, ts, payload: args.payload });
 
+    let autoOpened = false;
     if (parsePaprKind(manifest) === 'plugin') {
       const runtime = useAppRuntimeStore.getState();
       if (
@@ -670,6 +673,7 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
         )
       ) {
         runtime.pinPlugin(rawAppId);
+        autoOpened = true;
       }
     }
 
@@ -678,12 +682,16 @@ export function registerWorkspaceAppTools(ctx: WorkspaceToolContext): void {
       channel,
       seq,
       delivered,
+      ...(delivered ? {} : { queued: true }),
+      ...(autoOpened ? { autoOpened: true } : {}),
       ...(pluginDisabled ? { disabledTarget: true } : {}),
       hint: pluginDisabled
         ? `插件 '${rawAppId}' 当前已停用：事件已落库（下次启用可回放），但现在无人实时消费。请提示用户在「设置 → 插件」中启用后再看效果；不要因此改推其他频道或插件。`
         : delivered
         ? '已实时推送到挂载中的应用（papr.events.on 收到事件）。'
-        : `事件已写入应用存储（papr.db 键 inbox:${channel}），应用打开时可回放历史；当前应用未挂载。`,
+        : autoOpened
+        ? `应用原本未挂载，但本次推送已自动打开它；事件已排队，应用加载完成时将通过 papr.events.on 实时送达，用户即刻可见。不要向用户声称「看不到实时推送」。`
+        : `事件已写入应用存储（papr.db 键 inbox:${channel}）并排队等待实时通道：约 30 秒内应用被打开/挂载即会收到 papr.events.on 实时事件，之后打开则靠历史回放。当前无已挂载实例。`,
     };
   });
 

@@ -1447,7 +1447,8 @@ describe('app_publish (agent → app/plugin 推送)', () => {
       channel: 'cards',
       payload: { op: 'add', card: { title: '修复登录' } },
     });
-    expect(result).toMatchObject({ appId: 'kanban', channel: 'cards', seq: 1, delivered: false });
+    expect(result).toMatchObject({ appId: 'kanban', channel: 'cards', seq: 1, delivered: false, queued: true });
+    expect(String((result as Record<string, unknown>).hint)).toContain('排队');
     const appendCall = invokeMock.mock.calls.find(([command]) => command === 'papr_inbox_append');
     expect(appendCall?.[1]).toMatchObject({
       appId: 'kanban',
@@ -1531,7 +1532,14 @@ describe('app_publish (agent → app/plugin 推送)', () => {
     useAppRuntimeStore.getState().enablePlugin('kanban');
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);
 
-    await build().execute('app_publish', { appId: 'kanban', channel: 'cards', payload: { op: 'add' } });
+    const revealResult = (await build().execute('app_publish', {
+      appId: 'kanban',
+      channel: 'cards',
+      payload: { op: 'add' },
+    })) as Record<string, unknown>;
+    // 挂载竞态：广播时零挂载 → delivered=false，事件排队待自动打开后补发。
+    expect(revealResult).toMatchObject({ delivered: false, queued: true, autoOpened: true });
+    expect(String(revealResult.hint)).toContain('自动打开');
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['kanban']);
     expect(useAppRuntimeStore.getState().pluginChrome.kanban).toMatchObject({
       enabled: true,

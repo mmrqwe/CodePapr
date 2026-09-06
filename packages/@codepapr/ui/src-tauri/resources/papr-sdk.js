@@ -14,6 +14,27 @@
   var boundsListeners = [];
   // app_publish 下行事件订阅表：channel -> [cb]（null 原型，防原型键污染）
   var eventListeners = Object.create(null);
+  // seq 去重：channel -> 本页已消费过的最大 seq。实时事件与 db 回放
+  // （inbox:<channel>）可能重叠（挂载竞态排队冲刷、订阅时序竞态），
+  // seq 按 app+channel 单调递增，seq <= 已见值的实时事件按重复丢弃。
+  var lastSeenSeq = Object.create(null);
+
+  function noteSeenSeq(channel, seq) {
+    if (!channel || typeof seq !== 'number' || !(seq > 0)) return;
+    var seen = lastSeenSeq[channel];
+    if (typeof seen !== 'number' || seq > seen) lastSeenSeq[channel] = seq;
+  }
+
+  // db.get('inbox:<channel>') 回放即视为已消费：记下各条 seq，
+  // 之后冲刷补发的同 seq 实时事件会被丢弃。
+  function trackInboxReplay(key, value) {
+    if (typeof key !== 'string' || key.indexOf('inbox:') !== 0 || !Array.isArray(value)) return;
+    var channel = key.slice('inbox:'.length);
+    for (var i = 0; i < value.length; i++) {
+      var item = value[i];
+      if (item && typeof item === 'object') noteSeenSeq(channel, item.seq);
+    }
+  }
 
   function dispatchAppEvent(payload) {
     var channel = payload && typeof payload.channel === 'string' ? payload.channel : '';
@@ -23,12 +44,16 @@
     if (channel === '__proto__' || channel === 'constructor' || channel === 'prototype') return;
     var listeners = eventListeners[channel];
     if (!listeners) return;
+    var seq = payload && typeof payload.seq === 'number' ? payload.seq : 0;
+    var seen = lastSeenSeq[channel];
+    if (seq > 0 && typeof seen === 'number' && seq <= seen) return;
     var event = {
       channel: channel,
-      seq: payload && typeof payload.seq === 'number' ? payload.seq : 0,
+      seq: seq,
       ts: payload && typeof payload.ts === 'number' ? payload.ts : 0,
       payload: payload ? payload.payload : undefined
     };
+    noteSeenSeq(channel, seq);
     for (var i = 0; i < listeners.length; i++) {
       try { listeners[i](event); } catch (e) { /* listener errors are isolated */ }
     }
@@ -161,7 +186,13 @@
       get: function (key) {
         return send('papr://db.get', { key: key }).then(function (raw) {
           if (raw === null || raw === undefined) return null;
-          try { return JSON.parse(raw); } catch (e) { return raw; }
+          try {
+            var parsed = JSON.parse(raw);
+            trackInboxReplay(key, parsed);
+            return parsed;
+          } catch (e) {
+            return raw;
+          }
         });
       },
       set: function (key, value) {

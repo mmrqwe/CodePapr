@@ -139,7 +139,7 @@ For "Agent works, App displays" scenarios — kanban boards, progress panels, ar
 
 Properties:
 
-- **Persistent + live dual channel**: each event is atomically appended to the app's `db.sqlite` (concurrency-safe, no lost events); if the app is mounted it is also delivered live via `papr://event`. Unmounted apps lose nothing — history replays on next open.
+- **Persistent + live dual channel**: each event is atomically appended to the app's `db.sqlite` (concurrency-safe, no lost events); if the app is mounted it is also delivered live via `papr://event`. When unmounted, the event additionally enters a short (~30s) live queue (`queued`) so an app that mounts moments later (e.g. auto-revealed by the publish) still receives it live; later opens replay history from the db. Live events can overlap with replay — apps should dedupe by `seq`.
 - **Session catalog**: only enabled plugins that declared `inbox` (plus fullscreen apps that declared inbox) are copied into session context; examples are truncated so the catalog stays small
 - **Contract validation**: pushing to an undeclared channel is rejected with the list of valid channels and their descriptions, letting the Agent self-correct.
 - `inbox:*` keys are written only by `app_publish` — the app side is read-only. `payload` is capped at 256KB.

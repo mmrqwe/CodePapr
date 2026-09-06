@@ -139,7 +139,7 @@ const history = await papr.db.get('inbox:cards');
 
 特性：
 
-- **持久化 + 实时双通道**：事件先原子写入 App 的 `db.sqlite`（并发安全，不丢事件），App 已挂载时再经 `papr://event` 实时送达；未挂载也不丢，下次打开回放
+- **持久化 + 实时双通道**：事件先原子写入 App 的 `db.sqlite`（并发安全，不丢事件），App 已挂载时再经 `papr://event` 实时送达；未挂载时事件还会进入约 30 秒的短实时队列（`queued`），随后被打开（含被推送自动揭开）仍能实时收到，更晚打开则靠下次打开回放历史。实时事件与回放可能重叠，App 应按 `seq` 去重
 - **会话目录**：只有声明了 `inbox` 且已启用的插件（以及声明了 inbox 的全屏 App）会进会话上下文；说明书会截断 example，避免浪费 token
 - **契约校验**：推送未声明频道会被拒绝并列出可用频道及描述，Agent 可自我纠正
 - `inbox:*` 键只由 `app_publish` 写入，App 端只读；`payload` 上限 256KB

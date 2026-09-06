@@ -933,7 +933,7 @@ https://api.deepseek.com/v1</code></pre>
             <tr><td><code>app_start</code></td><td>按 appId 启动后端服务。检查端口可用性，成功后绿点亮起。</td></tr>
             <tr><td><code>app_stop</code></td><td>按 appId 停止后端服务。停止后绿点变红。</td></tr>
             <tr><td><code>app_delete</code></td><td>按 appId 彻底删除 App。停止后端、删除文件、清除存储。不可恢复。</td></tr>
-            <tr><td><code>app_publish</code></td><td>向 App/插件频道推送内容（app_publish({ appId, channel, payload })）。只推会话上下文「已启用插件」里列出的目标（已启用且声明了 inbox）；不要先 app_list。事件原子落库（并发安全，保留最近 200 条），App 挂载时经 papr://event 实时送达。画布/看板：分析完 → 按 example 推一张图或一张卡片。</td></tr>
+            <tr><td><code>app_publish</code></td><td>向 App/插件频道推送内容（app_publish({ appId, channel, payload })）。只推会话上下文「已启用插件」里列出的目标（已启用且声明了 inbox）；不要先 app_list。事件原子落库（并发安全，保留最近 200 条），App 挂载时经 papr://event 实时送达；未挂载时短暂排队（约 30 秒），App 随后打开仍会实时收到。画布/看板：分析完 → 按 example 推一张图或一张卡片。</td></tr>
           </tbody>
         </table>
 
@@ -1547,7 +1547,7 @@ TTS 数据流：
           <li><strong>插件声明契约</strong>：在 <code>manifest.json</code> 中定义 <code>inbox</code> 频道和最小数据示例 <code>example</code>。</li>
           <li><strong>Agent 自动感知</strong>：已启用的 inbox 插件会自动注入到 Agent 会话上下文的「已启用插件」列表中。</li>
           <li><strong>多模式推送</strong>：编程 Agent 在任何可写模式（Agent / Plan / App）下直接调用 <code>app_publish({ appId, channel, payload })</code>。</li>
-          <li><strong>双通道持久化与回放</strong>：推送数据首先原子写入应用的 <code>db.sqlite</code>（保留最新 200 条）；插件已挂载时经 <code>papr://event</code> 实时更新，未打开时下次启动通过 <code>papr.db.get("inbox:&lt;channel&gt;")</code> 无缝回放历史。</li>
+          <li><strong>双通道持久化与回放</strong>：推送数据首先原子写入应用的 <code>db.sqlite</code>（保留最新 200 条）；插件已挂载时经 <code>papr://event</code> 实时更新；未挂载时事件短暂排队（约 30 秒），刚打开的实例仍会实时收到；更晚启动则通过 <code>papr.db.get("inbox:&lt;channel&gt;")</code> 无缝回放历史（实时与回放可能重叠，按 <code>seq</code> 去重）。</li>
         </ol>
 
         <h3>权限与安全隔离模型</h3>
