@@ -53,7 +53,7 @@ pub struct ReadWindow {
     pub(crate) location_column: Option<usize>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WriteFileResult {
     pub(crate) path: String,
@@ -63,7 +63,7 @@ pub struct WriteFileResult {
     pub(crate) change: WriteFileChangeSummary,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WriteFileChangeSummary {
     pub(crate) kind: String,

@@ -163,6 +163,50 @@ describe('tool error contracts: UI edit/patch 处理器（模型可见面）', (
     });
   });
 
+  it('多文件 patch 中途写失败：定位到第几个文件并报告回滚结果', async () => {
+    const files = new Map<string, string>([
+      ['src/x.ts', 'const x = 1;\n'],
+      ['src/y.ts', 'const y = 1;\n'],
+    ]);
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'read_text_file') {
+        const rel = String(args?.relativePath);
+        return readResult(rel, files.get(rel) ?? '');
+      }
+      if (command === 'write_text_file') {
+        const rel = String(args?.relativePath);
+        if (rel === 'src/y.ts') {
+          throw new Error('磁盘写入失败: src/y.ts');
+        }
+        files.set(rel, String(args?.content ?? ''));
+        return { path: rel, bytes: 0 };
+      }
+      if (command === 'check_syntax') {
+        return { supported: false, errorCount: 0, errors: [] };
+      }
+      if (command === 'resolve_symbols') {
+        return [];
+      }
+      return {};
+    });
+    const registry = build();
+    const message = await captureReject(
+      registry.execute('patch', {
+        patches: [
+          { relativePath: 'src/x.ts', search: 'const x = 1;', replace: 'const x = 2;' },
+          { relativePath: 'src/y.ts', search: 'const y = 1;', replace: 'const y = 2;' },
+        ],
+      })
+    );
+    assertErrorContract(message, {
+      locate: [/第 2\/2 个文件/, /src\/y\.ts/],
+      explain: [/写入失败/, /磁盘写入失败/],
+      action: [/已自动回滚前 1 个文件/],
+    });
+    // 报错必须承认"回滚过"：模型若以为 x.ts 还带着新内容会继续错下去
+    expect(files.get('src/x.ts')).toBe('const x = 1;\n');
+  });
+
   it('成功写回的返回自带 LSP 结论（反馈闭环，不留静默成功）', async () => {
     const files = new Map<string, string>([['src/d.ts', 'const d = 1;\n']]);
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {

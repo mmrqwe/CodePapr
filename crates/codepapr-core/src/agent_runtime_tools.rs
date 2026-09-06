@@ -653,7 +653,7 @@ fn apply_multi_patch(
         .get("patches")
         .and_then(Value::as_array)
         .ok_or_else(|| "patches 必须是数组".to_string())?;
-    let mut planned: Vec<(String, String)> = Vec::new();
+    let mut planned: Vec<PlannedPatchWrite> = Vec::new();
     for patch in patches {
         let path = require_path(patch)?;
         ensure_codepapr_access(&path, "write", &ctx.mode, allow_codepapr_apps(ctx, req))?;
@@ -672,38 +672,39 @@ fn apply_multi_patch(
                 "文件 {path} 超过 20MB 上限，无法打补丁，请改用 write 工具重写整个文件"
             ));
         }
-        let content = match planned.iter().find(|(p, _)| p == &path) {
-            Some((_, existing)) => existing.clone(),
-            None => current.content,
+        let base = match planned.iter().find(|p| p.path == path) {
+            Some(existing) => existing.after.clone(),
+            None => current.content.clone(),
         };
         let patched = apply_search_replace(
-            &content,
+            &base,
             &arg_string_req(patch, &["search"])?,
             &arg_string_req(patch, &["replace"])?,
             arg_bool(patch, "replaceAll"),
             arg_usize(patch, "expectedOccurrences"),
         )?;
-        if let Some((_, existing)) = planned.iter_mut().find(|(p, _)| p == &path) {
-            *existing = patched.content;
+        if let Some(existing) = planned.iter_mut().find(|p| p.path == path) {
+            existing.after = patched.content;
         } else {
-            planned.push((path, patched.content));
+            planned.push(PlannedPatchWrite {
+                path,
+                before: Some(current.content),
+                after: patched.content,
+            });
         }
     }
-    let mut files = Vec::new();
-    let mut mutated = Vec::new();
-    for (path, content) in planned {
-        let result = workspace_fs::write::write_text_file_impl(
-            ctx.workspace_path.clone(),
-            path.clone(),
-            content,
-        )?;
-        mutated.push(result.path.clone());
-        files.push(json!({
-            "path": result.path,
-            "bytes": result.bytes,
-            "change": result.change,
-        }));
-    }
+    let results = commit_planned_patch_writes(&ctx.workspace_path, &planned)?;
+    let files: Vec<Value> = results
+        .iter()
+        .map(|result| {
+            json!({
+                "path": result.path,
+                "bytes": result.bytes,
+                "change": result.change,
+            })
+        })
+        .collect();
+    let mutated: Vec<String> = results.into_iter().map(|result| result.path).collect();
     Ok(HostedOutcome {
         result: Ok(json!({
             "files": files,
@@ -712,6 +713,166 @@ fn apply_multi_patch(
         })),
         mutated,
     })
+}
+
+/// 多文件 patch 的写盘条目：before = 写前原文（None 理论上仅防御性存在——
+/// 规划阶段读取失败即整体报错，patch 不创建新文件），after = 拟落盘内容。
+pub(crate) struct PlannedPatchWrite {
+    pub(crate) path: String,
+    pub(crate) before: Option<String>,
+    pub(crate) after: String,
+}
+
+/// 写盘阶段原子化（对齐 TS 侧 workspaceFileTools.ts #25 的回滚语义）：
+/// 逐文件「写入 + 写后验证」，任一文件失败则逆序回滚所有已落盘文件
+/// （新建文件删除、既有文件写回原文），整体报错。规划阶段已全量校验过
+/// patch 匹配，走到这里的残余失败窗口只有 IO/文件系统层。
+pub(crate) fn commit_planned_patch_writes(
+    workspace_path: &str,
+    planned: &[PlannedPatchWrite],
+) -> Result<Vec<workspace_fs::types::WriteFileResult>, String> {
+    let total = planned.len();
+    let mut results: Vec<workspace_fs::types::WriteFileResult> = Vec::with_capacity(total);
+    let mut applied: Vec<&PlannedPatchWrite> = Vec::new();
+    for (index, entry) in planned.iter().enumerate() {
+        match write_and_verify_patch_file(workspace_path, entry) {
+            Ok(result) => {
+                results.push(result);
+                applied.push(entry);
+            }
+            Err(failure) => {
+                let (rolled_back, backup_failures) = rollback_written_patch_files(workspace_path, &applied);
+                let mut message = format!(
+                    "patch 第 {}/{} 个文件 ({}) 写入失败: {failure}",
+                    index + 1,
+                    total,
+                    entry.path
+                );
+                if rolled_back > 0 {
+                    message.push_str(&format!("；已自动回滚前 {rolled_back} 个文件"));
+                }
+                if !backup_failures.is_empty() {
+                    message.push_str(&format!(
+                        "；{} 个文件回滚失败：{}。请手动恢复或从对话检查点回滚",
+                        backup_failures.len(),
+                        backup_failures.join("，")
+                    ));
+                }
+                return Err(message);
+            }
+        }
+    }
+    Ok(results)
+}
+
+/// 写入并回读验证。验证不通过视为写失败：可能云同步/竞态吞掉了写入，
+/// 若信任"写成功"返回，模型后续基于错误前提继续改代码（TS 侧同理）。
+fn write_and_verify_patch_file(
+    workspace_path: &str,
+    entry: &PlannedPatchWrite,
+) -> Result<workspace_fs::types::WriteFileResult, String> {
+    let result = workspace_fs::write::write_text_file_impl(
+        workspace_path.to_string(),
+        entry.path.clone(),
+        entry.after.clone(),
+    )?;
+    let verify_limit = entry.after.len().saturating_add(1024).max(16_384);
+    let verified = workspace_fs::read::read_text_file_impl(
+        workspace_path.to_string(),
+        entry.path.clone(),
+        Some(verify_limit),
+        None,
+        None,
+        None,
+        None,
+    )?;
+    // 回读被字节上限截断时降级为前缀比对（读写上限一致，理论不发生），对齐 TS assertWriteVerified
+    let matches = if verified.truncated_by_bytes {
+        entry.after.starts_with(&verified.content)
+    } else {
+        verified.content == entry.after
+    };
+    if !matches {
+        return Err(format!(
+            "文件写入验证失败：{} 写入后内容与预期不一致，可能由云同步锁或文件系统问题导致，请重试",
+            entry.path
+        ));
+    }
+    Ok(result)
+}
+
+/// 逆序回滚已写入的文件；返回 (成功回滚数, 失败说明列表)。
+/// 回滚 best-effort，但失败不静默：旧内容转储到 tool-output 供手动恢复。
+fn rollback_written_patch_files(
+    workspace_path: &str,
+    applied: &[&PlannedPatchWrite],
+) -> (usize, Vec<String>) {
+    let mut rolled_back = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    for entry in applied.iter().rev() {
+        let restore = match &entry.before {
+            Some(before) => workspace_fs::write::write_text_file_impl(
+                workspace_path.to_string(),
+                entry.path.clone(),
+                before.clone(),
+            )
+            .map(|_| ()),
+            None => {
+                let raw = std::path::PathBuf::from(&entry.path);
+                let target = if raw.is_absolute() {
+                    raw
+                } else {
+                    std::path::Path::new(workspace_path).join(raw)
+                };
+                std::fs::remove_file(&target)
+                    .map_err(|err| format!("删除新建文件 {} 失败: {err}", target.display()))
+            }
+        };
+        match restore {
+            Ok(()) => rolled_back += 1,
+            Err(err) => {
+                let backup_note = match dump_rollback_backup(
+                    workspace_path,
+                    &entry.path,
+                    entry.before.as_deref().unwrap_or_default(),
+                ) {
+                    Ok(rel) => format!("（旧内容已备份到 {rel}）"),
+                    Err(dump_err) => format!("（旧内容备份也失败: {dump_err}）"),
+                };
+                failures.push(format!("{} 回滚失败: {err}{backup_note}", entry.path));
+            }
+        }
+    }
+    (rolled_back, failures)
+}
+
+/// 回滚失败时把旧内容转储为 UTF-8 备份副本，落在 artifact 目录内
+/// （模型可用 read 直接回读），文件名压平路径分隔符防目录逃逸。
+pub(crate) fn dump_rollback_backup(
+    workspace_path: &str,
+    relative_path: &str,
+    content: &str,
+) -> Result<String, String> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs())
+        .unwrap_or(0);
+    let safe_name: String = relative_path
+        .chars()
+        .map(|ch| if matches!(ch, '/' | '\\' | ':') { '_' } else { ch })
+        .collect();
+    let safe_name = if safe_name.trim_matches('.').is_empty() {
+        "backup".to_string()
+    } else {
+        safe_name
+    };
+    let dir_rel = format!(".CodePapr/tool-output/rollback-failed-{stamp}");
+    let file_rel = format!("{dir_rel}/{safe_name}");
+    let dir = std::path::Path::new(workspace_path).join(&dir_rel);
+    std::fs::create_dir_all(&dir).map_err(|err| format!("创建备份目录失败: {err}"))?;
+    std::fs::write(dir.join(&safe_name), content.as_bytes())
+        .map_err(|err| format!("写入备份文件失败: {err}"))?;
+    Ok(file_rel)
 }
 
 fn dispatch_bash(
@@ -2182,5 +2343,94 @@ mod tests {
         let value = local_time_now();
         assert!(value.get("iso").and_then(Value::as_str).unwrap_or("").contains('T'));
         assert!(value.get("unixMs").and_then(Value::as_u64).unwrap_or(0) > 0);
+    }
+
+    // ──── Phase 2：多文件 patch 写盘原子性（对齐 TS #25 回滚语义） ────
+
+    #[test]
+    fn multi_patch_all_success_writes_every_file() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-patch-ok");
+        std::fs::write(ws.file_path("a.txt"), "AAA\n").unwrap();
+        std::fs::write(ws.file_path("b.txt"), "BBB\n").unwrap();
+        let planned = vec![
+            PlannedPatchWrite {
+                path: "a.txt".to_string(),
+                before: Some("AAA\n".to_string()),
+                after: "AAA-new\n".to_string(),
+            },
+            PlannedPatchWrite {
+                path: "b.txt".to_string(),
+                before: Some("BBB\n".to_string()),
+                after: "BBB-new\n".to_string(),
+            },
+        ];
+        let results = commit_planned_patch_writes(&ws.workspace_arg(), &planned).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(std::fs::read_to_string(ws.file_path("a.txt")).unwrap(), "AAA-new\n");
+        assert_eq!(std::fs::read_to_string(ws.file_path("b.txt")).unwrap(), "BBB-new\n");
+    }
+
+    #[test]
+    fn multi_patch_write_failure_rolls_back_earlier_files() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-patch-rollback");
+        std::fs::write(ws.file_path("a.txt"), "AAA\n").unwrap();
+        // 目标是一个目录：临时文件 rename 到目录必然失败（EISDIR），
+        // 且失败发生在第一个文件已落盘之后——正是旧实现留部分应用状态的窗口。
+        std::fs::create_dir(ws.file_path("blocked-dir")).unwrap();
+        let planned = vec![
+            PlannedPatchWrite {
+                path: "a.txt".to_string(),
+                before: Some("AAA\n".to_string()),
+                after: "AAA-new\n".to_string(),
+            },
+            PlannedPatchWrite {
+                path: "blocked-dir".to_string(),
+                before: Some(String::new()),
+                after: "never\n".to_string(),
+            },
+        ];
+        let err = commit_planned_patch_writes(&ws.workspace_arg(), &planned).unwrap_err();
+        assert!(err.contains("patch 第 2/2 个文件 (blocked-dir)"), "{err}");
+        assert!(err.contains("已自动回滚前 1 个文件"), "{err}");
+        // 可定位/可行动：错误含失败原因（IO 报错原文）
+        assert!(err.contains("写入文件") || err.contains("失败"), "{err}");
+        // a.txt 必须恢复写前内容
+        assert_eq!(std::fs::read_to_string(ws.file_path("a.txt")).unwrap(), "AAA\n");
+    }
+
+    #[test]
+    fn multi_patch_rollback_deletes_files_created_in_the_batch() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-patch-newfile");
+        std::fs::create_dir(ws.file_path("blocked-dir")).unwrap();
+        let planned = vec![
+            PlannedPatchWrite {
+                path: "new.txt".to_string(),
+                before: None, // 防御分支：batch 内新建（patch 正常流程读不到即报错，不会走到）
+                after: "brand new\n".to_string(),
+            },
+            PlannedPatchWrite {
+                path: "blocked-dir".to_string(),
+                before: Some(String::new()),
+                after: "never\n".to_string(),
+            },
+        ];
+        let err = commit_planned_patch_writes(&ws.workspace_arg(), &planned).unwrap_err();
+        assert!(err.contains("已自动回滚前 1 个文件"), "{err}");
+        assert!(!ws.file_path("new.txt").exists(), "批内新建文件必须在回滚时删除");
+    }
+
+    #[test]
+    fn rollback_backup_dump_is_readable_and_cannot_escape() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-patch-backup");
+        let rel = dump_rollback_backup(&ws.workspace_arg(), "../evil/deep:file.txt", "keep me")
+            .unwrap();
+        assert!(rel.starts_with(".CodePapr/tool-output/rollback-failed-"), "{rel}");
+        // 路径分隔符与冒号被压平：备份必须落在 tool-output 单层目录内
+        assert!(!rel.contains('/') || rel.matches('/').count() == 3, "{rel}");
+        let dumped = std::fs::read_to_string(ws.file_path(&rel)).unwrap();
+        assert_eq!(dumped, "keep me");
+        let dots = dump_rollback_backup(&ws.workspace_arg(), "..", "x").unwrap();
+        assert!(dots.ends_with("/backup"), "{dots}");
+        assert!(ws.file_path(&dots).exists());
     }
 }

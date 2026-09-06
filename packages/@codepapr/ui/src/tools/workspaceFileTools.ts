@@ -537,9 +537,12 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     // #25：写盘阶段原子化——旧实现逐文件写+验证，中途失败会留下「前半已应用、
     // 后半未应用」的部分状态。改为：全部写盘并验证通过后才算成功；任一文件
     // 失败则回滚已写入的文件（新文件删除、旧文件恢复原内容），整体报错。
+    // 报错文案对齐 Rust 侧 commit_planned_patch_writes：定位到第几个文件、
+    // 说明回滚结果；回滚失败不静默——旧内容转储到 tool-output 供手动恢复。
     const applied: Array<{ path: string; before: string | null; result: WriteTextFileResult }> = [];
-    try {
-      for (const file of writeFiles) {
+    let failed: { path: string; index: number; message: string } | null = null;
+    for (const [index, file] of writeFiles.entries()) {
+      try {
         const result = await invoke<WriteTextFileResult>('write_text_file', {
           workspacePath: workspace(),
           relativePath: file.path,
@@ -556,9 +559,35 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
           maxBytes: Math.max(new TextEncoder().encode(file.content).length + 1024, 16384),
         });
         assertWriteVerified(verified, file.content, file.path);
+      } catch (err) {
+        failed = {
+          path: file.path,
+          index,
+          message: err instanceof Error ? err.message : String(err),
+        };
+        break;
       }
-    } catch (err) {
-      // 回滚已写入的文件：尽量恢复到写前状态
+    }
+    if (failed) {
+      // 回滚失败的旧内容转储到 artifact 目录（模型可用 read 回读），
+      // 路径分隔符/冒号压平防目录逃逸，对齐 Rust 侧 dump_rollback_backup。
+      const dumpRollbackBackup = async (path: string, before: string | null): Promise<string | null> => {
+        if (before === null) {
+          return null;
+        }
+        try {
+          const stamp = Math.floor(Date.now() / 1000);
+          const flattened = path.replace(/[/\\:]/g, '_');
+          const safeName = flattened.replace(/^\.+$/, '') || 'backup';
+          const relativePath = `.CodePapr/tool-output/rollback-failed-${stamp}/${safeName}`;
+          await invoke('write_text_file', { workspacePath: workspace(), relativePath, content: before });
+          return relativePath;
+        } catch {
+          return null;
+        }
+      };
+      let rolledBack = 0;
+      const rollbackFailures: string[] = [];
       for (const entry of applied.reverse()) {
         try {
           if (entry.before === null) {
@@ -573,11 +602,23 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
               content: entry.before,
             });
           }
-        } catch {
-          // best-effort 回滚：单个文件失败不阻断整体报错
+          rolledBack += 1;
+        } catch (rollbackErr) {
+          const backup = await dumpRollbackBackup(entry.path, entry.before);
+          const reason = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+          rollbackFailures.push(
+            `${entry.path} 回滚失败: ${reason}${backup ? `（旧内容已备份到 ${backup}）` : ''}`
+          );
         }
       }
-      throw err;
+      let message = `patch 第 ${failed.index + 1}/${writeFiles.length} 个文件 (${failed.path}) 写入失败: ${failed.message}`;
+      if (rolledBack > 0) {
+        message += `；已自动回滚前 ${rolledBack} 个文件`;
+      }
+      if (rollbackFailures.length > 0) {
+        message += `；${rollbackFailures.length} 个文件回滚失败：${rollbackFailures.join('；')}。请手动恢复或从对话检查点回滚`;
+      }
+      throw new Error(message);
     }
 
     // 全部写入成功后才做后置处理：LSP 诊断钩子 + editHistory + 结果
