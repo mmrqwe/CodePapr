@@ -834,15 +834,15 @@ export function ProjectStatsModal({
                   <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsAvgMetrics}</p>
                   <div className="space-y-3">
                     <div>
-                      <div className="text-[11px] text-fg-muted">{t.projectStatsAvgLines}</div>
+                      <div className="text-[11px] text-fg-soft">{t.projectStatsAvgLines}</div>
                       <div className="text-base font-semibold text-accent-text">{stats.avgMetrics.avgLinesPerFile.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-fg-muted">{t.projectStatsMedianLines}</div>
+                      <div className="text-[11px] text-fg-soft">{t.projectStatsMedianLines}</div>
                       <div className="text-base font-semibold text-accent-text">{stats.avgMetrics.medianLinesPerFile.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-fg-muted">{t.projectStatsMaxLines}</div>
+                      <div className="text-[11px] text-fg-soft">{t.projectStatsMaxLines}</div>
                       <div className="text-base font-semibold text-accent-text">{stats.avgMetrics.maxLinesPerFile.toLocaleString()}</div>
                     </div>
                   </div>
@@ -861,16 +861,16 @@ export function ProjectStatsModal({
                   />
                   <div className="mt-3 space-y-3">
                     <div>
-                      <div className="text-[11px] text-fg-muted">{t.projectStatsCodeLines}</div>
+                      <div className="text-[11px] text-fg-soft">{t.projectStatsCodeLines}</div>
                       <div className="text-base font-semibold text-accent-text">{stats.codeLines.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-fg-muted">{t.projectStatsBlankLines}</div>
+                      <div className="text-[11px] text-fg-soft">{t.projectStatsBlankLines}</div>
                       <div className="text-base font-semibold text-fg-soft">{stats.blankLines.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-fg-muted">{t.projectStatsCommentLines}</div>
-                      <div className="text-base font-semibold text-green-300">{stats.commentLines.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg-soft">{t.projectStatsCommentLines}</div>
+                      <div className="text-base font-semibold text-ok">{stats.commentLines.toLocaleString()}</div>
                     </div>
                   </div>
                 </div>
