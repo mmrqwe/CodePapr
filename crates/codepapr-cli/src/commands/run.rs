@@ -9,7 +9,7 @@
 
 use crate::commands::chat::{load_saved_settings, resolve_llm_config, ResolvedLlmConfig};
 use crate::harness::allowlist::Allowlist;
-use crate::harness::events::{frame_to_lines, EventWriter, PROTOCOL_VERSION};
+use crate::harness::events::{frame_to_lines, EventWriter, ToolEventDeduper, PROTOCOL_VERSION};
 use crate::rpc_client::{JsonRpcNotification, RpcClient};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -133,14 +133,24 @@ impl RunState {
         }
     }
 
-    fn close_unfinished_tool_calls(&mut self, reason: &str) {
-        for record in self.tool_calls_by_id.values_mut() {
-            if !record.finished {
-                record.finished = true;
-                self.tool_calls.push((record.name.clone(), false, record.started.elapsed().as_millis()));
+    /// Close calls that never received an end event. Returns the closed
+    /// `(toolCallId, toolName, elapsedMs)` triples so the caller can emit
+    /// matching synthetic `tool.end` trace lines: the v1 protocol promises
+    /// every started tool gets an end/cancel line on timeout/cancel.
+    fn close_unfinished_tool_calls(&mut self) -> Vec<(String, String, u128)> {
+        let ids: Vec<String> = self.tool_calls_by_id.keys().cloned().collect();
+        let mut closed = Vec::new();
+        for id in ids {
+            if let Some(record) = self.tool_calls_by_id.get_mut(&id) {
+                if !record.finished {
+                    record.finished = true;
+                    let elapsed = record.started.elapsed().as_millis();
+                    closed.push((id, record.name.clone(), elapsed));
+                    self.tool_calls.push((record.name.clone(), false, elapsed));
+                }
             }
         }
-        let _ = reason;
+        closed
     }
 }
 
@@ -297,6 +307,7 @@ async fn drive(
     .await?;
 
     let mut state = RunState::new();
+    let mut dedup = ToolEventDeduper::default();
     let mut exit_reason: &'static str = "error";
     let mut exit_code = EXIT_RUNTIME_ERROR;
     let mut denied = false;
@@ -381,7 +392,7 @@ async fn drive(
                 state.track_stream_event(event);
             }
         }
-        for line in frame_to_lines(message) {
+        for line in dedup.filter(frame_to_lines(message)) {
             events.line(line);
         }
 
@@ -462,7 +473,7 @@ async fn drive(
                             state.track_stream_event(event);
                         }
                     }
-                    for line in frame_to_lines(message) {
+                    for line in dedup.filter(frame_to_lines(message)) {
                         events.line(line);
                     }
                     // Cancelled is the expected ACK; result/error mean the
@@ -474,7 +485,22 @@ async fn drive(
             }
         }
     }
-    state.close_unfinished_tool_calls(if timed_out { "timeout" } else { "cancel" });
+    let closed_tools = state.close_unfinished_tool_calls();
+    for line in dedup.flush() {
+        events.line(line);
+    }
+    for (tool_call_id, tool_name, ms) in closed_tools {
+        events.line(json!({
+            "type": "tool.end",
+            "toolCallId": tool_call_id,
+            "toolName": tool_name,
+            "success": false,
+            "errorPreview": format!(
+                "tool call not completed ({}); {ms}ms elapsed",
+                if timed_out { "timeout" } else { "cancel" }
+            ),
+        }));
+    }
     let _ = client.call("agent/stop", json!({ "runtimeId": runtime_id })).await;
 
     let result = build_result_json(
@@ -756,9 +782,12 @@ mod tests {
     fn unfinished_tools_are_closed_on_cancel() {
         let mut state = RunState::new();
         state.track_stream_event(&json!({"type":"tool-call-start","toolCallId":"c1","toolName":"bash","arguments":{}}));
-        state.close_unfinished_tool_calls("timeout");
+        let closed = state.close_unfinished_tool_calls();
+        assert_eq!(closed, vec![("c1".to_string(), "bash".to_string(), closed[0].2)]);
         assert_eq!(state.tool_calls.len(), 1);
         assert!(!state.tool_calls[0].1);
+        // closed once: a second sweep finds nothing left to report
+        assert!(state.close_unfinished_tool_calls().is_empty());
     }
 
     #[test]

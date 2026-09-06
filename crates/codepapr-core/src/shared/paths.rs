@@ -1,9 +1,40 @@
+use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use std::{env, fs};
 
 static EXPANDED_PATH: OnceLock<String> = OnceLock::new();
+
+thread_local! {
+    /// One-time grants armed by the hosted-tool prompt gate when the client
+    /// answers with scope "once". They live only for the remainder of the
+    /// current tool request on this thread (the request handler clears them
+    /// when it finishes) and are never persisted to the access policy DB.
+    static ONCE_GRANTS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+}
+
+pub fn arm_once_grant(path: &Path) {
+    ONCE_GRANTS.with(|grants| {
+        let mut grants = grants.borrow_mut();
+        if !grants.iter().any(|granted| granted == path) {
+            grants.push(path.to_path_buf());
+        }
+    });
+}
+
+pub fn clear_once_grants() {
+    ONCE_GRANTS.with(|grants| grants.borrow_mut().clear());
+}
+
+fn has_once_grant(target: &Path) -> bool {
+    ONCE_GRANTS.with(|grants| {
+        grants
+            .borrow()
+            .iter()
+            .any(|granted| path_is_same_or_child(target, granted))
+    })
+}
 
 #[cfg(test)]
 use std::sync::Mutex;
@@ -432,6 +463,13 @@ pub fn ensure_path_accessible_with_policy(
         return Ok(());
     }
 
+    // Per-request "once" grant armed by the prompt gate (harness `--yolo` /
+    // allowlist). Checked after protected-path denial so it can never open a
+    // protected directory.
+    if has_once_grant(target) {
+        return Ok(());
+    }
+
     Err(format!(
         "外部路径未获授权：{}。请先授权该文件夹或文件",
         target.display()
@@ -582,6 +620,42 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("test base dir should be created");
         // 与实际调用点一致：base 均为 canonicalize 后的路径（macOS /var → /private/var）
         std::fs::canonicalize(&dir).expect("test base dir should canonicalize")
+    }
+
+    #[test]
+    fn once_grants_pass_gate_and_expire_on_clear() {
+        let base = test_base("once-grant");
+        let workspace = test_base("once-workspace");
+        let external_file = base.join("victim.txt");
+        std::fs::write(&external_file, b"x").expect("external file");
+        let policy = crate::db::ExternalAccessPolicy {
+            yolo: false,
+            allowed_dirs: vec![],
+            allowed_files: vec![],
+        };
+
+        clear_once_grants();
+        assert!(
+            ensure_path_accessible_with_policy(&workspace, &external_file, &policy).is_err(),
+            "ungranted external path must fail"
+        );
+
+        // "once" grant on the ancestor dir passes children within this request
+        arm_once_grant(&base);
+        assert!(
+            ensure_path_accessible_with_policy(&workspace, &external_file, &policy).is_ok(),
+            "armed once grant must pass the enforcement gate"
+        );
+
+        // cleared when the tool request ends: nothing persists, nothing leaks
+        clear_once_grants();
+        assert!(
+            ensure_path_accessible_with_policy(&workspace, &external_file, &policy).is_err(),
+            "once grants must not outlive the request"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&workspace);
     }
 
     #[test]

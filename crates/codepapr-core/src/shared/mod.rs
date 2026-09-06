@@ -16,11 +16,12 @@ pub use git_locks::remove_stale_git_locks;
 #[cfg(test)]
 pub use paths::TEST_HOME_LOCK;
 pub use paths::{
-    canonical_workspace, expanded_path, home_dir, normalize_relative_path,
-    ensure_path_accessible, ensure_path_accessible_with_policy, ensure_write_path_accessible,
-    is_protected_external_path, normalize_workspace_filter, parse_workspace_path_input,
-    relative_string, resolve_existing_path, sanitize_workspace_path_input, path_is_same,
-    path_is_same_or_child, write_file_rejecting_symlink, PathLocationInput,
+    arm_once_grant, canonical_workspace, clear_once_grants, expanded_path, home_dir,
+    normalize_relative_path, ensure_path_accessible, ensure_path_accessible_with_policy,
+    ensure_write_path_accessible, is_protected_external_path, normalize_workspace_filter,
+    parse_workspace_path_input, relative_string, resolve_existing_path,
+    sanitize_workspace_path_input, path_is_same, path_is_same_or_child,
+    write_file_rejecting_symlink, PathLocationInput,
 };
 pub use runtime::{
     child_reap_timeout, enter_fast_child_reap, is_fast_child_reap, run_blocking_workspace_task,

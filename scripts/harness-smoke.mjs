@@ -217,15 +217,53 @@ async function scenarioAllowlistGrant() {
   ]);
   const allowlist = path.join(ws, 'allow.json');
   fs.writeFileSync(allowlist, JSON.stringify([{ tool: 'write', operation: 'write', pathGlob: '**/evil-grant-*' }]));
+  const events = path.join(ws, 'run.jsonl');
   const { code } = await runCli(ws, [
     'run', '--mode', 'agent',
     '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', provider.url,
     '--timeout-ms', '60000', '--permission', allowlist,
+    '--events-jsonl', events,
     'write outside with grant',
   ]);
   provider.close();
-  try { fs.unlinkSync(outside); } catch { /* ignore */ }
   check('allowlist match grants external write (exit 0)', code === 0, `code=${code}`);
+  // Regression: the CLI answers with scope "once"; the host must approve
+  // without attempting a persisted grant (directory|file only) and the
+  // write must actually land. Exit code alone used to hide the failure.
+  const lines = readJsonl(events);
+  const grantErrors = lines.filter((l) => l.type === 'tool.end' && l.success === false)
+    .map((l) => `${l.toolName}:${l.errorPreview ?? ''}`).join(' | ');
+  check('allowlist grant: file really written outside the workspace', fs.existsSync(outside), grantErrors);
+  check('allowlist grant: permission approved event recorded',
+    lines.some((l) => l.type === 'permission' && l.approved === true));
+  check('allowlist grant: write tool.end success',
+    lines.some((l) => l.type === 'tool.end' && l.toolName === 'write' && l.success === true), grantErrors);
+  try { fs.unlinkSync(outside); } catch { /* ignore */ }
+}
+
+async function scenarioYoloExternalWrite() {
+  const ws = makeWorkspace({ 'a.txt': 'x' });
+  const outside = path.join(path.dirname(ws), `evil-yolo-${Date.now()}.txt`);
+  const provider = await startMockProvider([
+    sseToolCall('write', { relativePath: outside, content: 'yolo' }),
+    sseContent('ok'),
+  ]);
+  const events = path.join(ws, 'run.jsonl');
+  const { code } = await runCli(ws, [
+    'run', '--mode', 'agent', '--yolo',
+    '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', provider.url,
+    '--timeout-ms', '60000', '--events-jsonl', events,
+    'write outside with yolo',
+  ]);
+  provider.close();
+  check('--yolo external write exits 0', code === 0, `code=${code}`);
+  const yoloLines = readJsonl(events);
+  const yoloErrors = yoloLines.filter((l) => l.type === 'tool.end' && l.success === false)
+    .map((l) => `${l.toolName}:${l.errorPreview ?? ''}`).join(' | ');
+  check('--yolo external write: file really written', fs.existsSync(outside), yoloErrors);
+  check('--yolo external write: write tool.end success',
+    yoloLines.some((l) => l.type === 'tool.end' && l.toolName === 'write' && l.success === true), yoloErrors);
+  try { fs.unlinkSync(outside); } catch { /* ignore */ }
 }
 
 async function scenarioProvider4xx() {
@@ -274,6 +312,34 @@ async function scenarioTimeout() {
   const lines = readJsonl(events);
   check('timeout: run.end(timeout) recorded',
     lines.some((l) => l.type === 'run.end' && l.exitReason === 'timeout'));
+}
+
+async function scenarioTimeoutDuringTool() {
+  const ws = makeWorkspace({ 'a.txt': 'x' });
+  // bash sleep starts executing, then the deadline hits mid-tool. The v1
+  // protocol promises every started tool still gets an end/cancel line.
+  const provider = await startMockProvider([
+    sseToolCall('bash', { action: 'run', command: 'sleep 8' }),
+    sseContent('never reached'),
+  ]);
+  const events = path.join(ws, 'run.jsonl');
+  const { code } = await runCli(ws, [
+    'run', '--mode', 'agent', '--yolo',
+    '-p', 'openai', '-m', 'mock-model', '--api-key', 'k', '--base-url', provider.url,
+    '--timeout-ms', '2500', '--events-jsonl', events,
+    'sleep then time out',
+  ]);
+  provider.close();
+  check('timeout mid-tool exits 2', code === 2, `code=${code}`);
+  const lines = readJsonl(events);
+  const starts = lines.filter((l) => l.type === 'tool.start').map((l) => l.toolCallId);
+  const ends = new Set(lines.filter((l) => l.type === 'tool.end').map((l) => l.toolCallId));
+  check('timeout mid-tool: a tool actually started', starts.length === 1, JSON.stringify(starts));
+  check('timeout mid-tool: every tool.start has a tool.end/cancel line',
+    starts.every((id) => ends.has(id)),
+    JSON.stringify({ starts, ends: [...ends] }));
+  check('timeout mid-tool: tool.start lines are unique per toolCallId',
+    new Set(starts).size === starts.length);
 }
 
 async function scenarioToolsPresetMinimal() {
@@ -385,8 +451,10 @@ const scenarios = [
   ['minimal prompt hygiene', scenarioMinimalPromptHygiene],
   ['default prompt unchanged', scenarioDefaultPromptUnchanged],
   ['allowlist grant', scenarioAllowlistGrant],
+  ['yolo external write', scenarioYoloExternalWrite],
   ['provider 4xx', scenarioProvider4xx],
   ['timeout', scenarioTimeout],
+  ['timeout mid-tool', scenarioTimeoutDuringTool],
 ];
 
 for (const [label, scenario] of scenarios) {

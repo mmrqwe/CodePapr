@@ -158,9 +158,127 @@ pub fn frame_to_lines(message: &Value) -> Vec<Value> {
     }
 }
 
+/// Collapse duplicate `tool.start` lines. The provider stream emits a
+/// placeholder start (empty arguments) as soon as a tool call id appears
+/// in the stream, and the agent loop then emits the authoritative start
+/// (full arguments) right before executing the call — exactly one id can
+/// therefore produce two starts. The desktop side deduplicates the same
+/// way (WorkerBackedAgent tracks by toolCallId); the trace must carry at
+/// most one start per id, preferring the version with arguments. A
+/// deferred placeholder is flushed before its matching end, or at
+/// teardown (e.g. the call was interrupted mid-stream by a timeout).
+#[derive(Default)]
+pub struct ToolEventDeduper {
+    started: std::collections::HashSet<String>,
+    pending: std::collections::HashMap<String, Value>,
+}
+
+fn tool_line_id(line: &Value) -> &str {
+    line.get("toolCallId").and_then(Value::as_str).unwrap_or("")
+}
+
+fn tool_start_args_empty(line: &Value) -> bool {
+    match line.get("arguments") {
+        None | Some(Value::Null) => true,
+        Some(Value::Object(map)) => map.is_empty(),
+        _ => false,
+    }
+}
+
+impl ToolEventDeduper {
+    pub fn filter(&mut self, lines: Vec<Value>) -> Vec<Value> {
+        let mut out = Vec::with_capacity(lines.len());
+        for line in lines {
+            match line.get("type").and_then(Value::as_str).unwrap_or("") {
+                "tool.start" => {
+                    let id = tool_line_id(&line).to_string();
+                    if id.is_empty() {
+                        out.push(line);
+                    } else if self.started.contains(&id) {
+                        // duplicate start: drop
+                    } else if tool_start_args_empty(&line) {
+                        self.pending.insert(id, line);
+                    } else {
+                        self.pending.remove(&id);
+                        self.started.insert(id);
+                        out.push(line);
+                    }
+                }
+                "tool.end" => {
+                    let id = tool_line_id(&line).to_string();
+                    if !id.is_empty() && self.started.insert(id.clone()) {
+                        if let Some(start) = self.pending.remove(&id) {
+                            out.push(start);
+                        }
+                    } else {
+                        self.pending.remove(&id);
+                    }
+                    out.push(line);
+                }
+                _ => out.push(line),
+            }
+        }
+        out
+    }
+
+    /// Deferred placeholder starts that never saw a full start or an end.
+    pub fn flush(&mut self) -> Vec<Value> {
+        let mut rest: Vec<Value> = self.pending.drain().map(|(_, line)| line).collect();
+        rest.sort_by_key(|line| tool_line_id(line).to_string());
+        for line in &rest {
+            self.started.insert(tool_line_id(line).to_string());
+        }
+        rest
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deduper_prefers_full_arguments_start() {
+        let mut d = ToolEventDeduper::default();
+        let placeholder = d.filter(vec![json!({
+            "type": "tool.start", "toolCallId": "c1", "toolName": "grep", "arguments": {}
+        })]);
+        assert!(placeholder.is_empty(), "placeholder is deferred");
+        let authoritative = d.filter(vec![json!({
+            "type": "tool.start", "toolCallId": "c1", "toolName": "grep", "arguments": {"query": "x"}
+        })]);
+        assert_eq!(authoritative.len(), 1);
+        assert_eq!(authoritative[0]["arguments"]["query"], "x");
+        let rest = d.filter(vec![json!({
+            "type": "tool.start", "toolCallId": "c1", "toolName": "grep", "arguments": {"query": "x"}
+        })]);
+        assert!(rest.is_empty(), "third start for the same id is dropped");
+        let end = d.filter(vec![json!({
+            "type": "tool.end", "toolCallId": "c1", "toolName": "grep", "success": true
+        })]);
+        assert_eq!(end.len(), 1);
+        assert!(d.flush().is_empty());
+    }
+
+    #[test]
+    fn deduper_flushes_placeholder_before_end_and_at_teardown() {
+        let mut d = ToolEventDeduper::default();
+        d.filter(vec![json!({
+            "type": "tool.start", "toolCallId": "c1", "toolName": "read", "arguments": {}
+        })]);
+        let end = d.filter(vec![json!({
+            "type": "tool.end", "toolCallId": "c1", "toolName": "read", "success": false
+        })]);
+        assert_eq!(end[0]["type"], "tool.start", "start must be written before its end");
+        assert_eq!(end[1]["type"], "tool.end");
+
+        let mut d = ToolEventDeduper::default();
+        d.filter(vec![json!({
+            "type": "tool.start", "toolCallId": "c2", "toolName": "read", "arguments": {}
+        })]);
+        let flushed = d.flush();
+        assert_eq!(flushed.len(), 1);
+        assert_eq!(flushed[0]["toolCallId"], "c2");
+    }
 
     #[test]
     fn maps_stream_frames() {

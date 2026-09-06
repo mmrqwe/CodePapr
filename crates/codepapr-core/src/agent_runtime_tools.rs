@@ -310,7 +310,11 @@ pub fn handle_hosted_tool_request(sink: SharedEventSink, runtime_id: String, mes
         }
     };
 
+    // "once" grants are scoped to a single tool request; worker threads are
+    // reused, so scrub both ends defensively.
+    crate::shared::clear_once_grants();
     let outcome = dispatch_tool(&sink, &runtime_id, &ctx, &parsed, &cancel_flag);
+    crate::shared::clear_once_grants();
     finish_hosted_tool(
         &sink,
         &runtime_id,
@@ -1521,11 +1525,17 @@ fn ensure_external_allowed(
                 if !decision.approved {
                     return Err(format!("用户拒绝访问外部路径：{}", check.canonical_path));
                 }
-                crate::workspace_fs::access::grant_external_access(
-                    ctx.workspace_path.clone(),
-                    check.canonical_path.clone(),
-                    decision.scope,
-                )?;
+                // "once" = approve this call only, no persisted grant
+                // (harness/CLI allowlist semantics). directory|file persist.
+                if decision.scope == "once" {
+                    crate::shared::arm_once_grant(Path::new(&check.canonical_path));
+                } else {
+                    crate::workspace_fs::access::grant_external_access(
+                        ctx.workspace_path.clone(),
+                        check.canonical_path.clone(),
+                        decision.scope,
+                    )?;
+                }
                 return Ok(());
             }
             Ok(Err(err)) => {
