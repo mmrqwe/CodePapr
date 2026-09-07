@@ -25,6 +25,7 @@
     "test:e2e:ui": "npm run test:e2e:ui --workspace=@codepapr/ui",
     "test:e2e:ui:install": "npm run test:e2e:ui:install --workspace=@codepapr/ui",
     "smoke:agent-tools": "node ./scripts/run-agent-tool-smoke.mjs",
+    "eval:feedback": "node ./scripts/agent-feedback-eval/run-eval.mjs",
     "smoke:desktop-diagnostics": "node ./scripts/run-desktop-diagnostics-smoke.mjs",
     "smoke:lsp-preview": "node ./scripts/run-desktop-lsp-smoke.mjs",
     "lint": "node ./scripts/run-module-bin.mjs eslint/bin/eslint.js \"packages/**/*.{ts,tsx,html}\" --max-warnings=0",

@@ -39,6 +39,7 @@ playwright-report/
 test-results/
 __pycache__/
 coverage/
+scripts/agent-feedback-eval/results/
 .tmp*/
 .tmp-verify/
 .Exp/

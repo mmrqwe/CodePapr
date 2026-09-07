@@ -1,0 +1,118 @@
+{
+  "meta": {
+    "date": "2026-09-07T06:03:32.224Z",
+    "gitSha": "49dc139",
+    "runs": 5,
+    "models": [
+      "response/muse-spark-1.3-contributor"
+    ],
+    "nightly": true,
+    "pr": false
+  },
+  "cells": [
+    {
+      "scenario": "ambiguous-edit",
+      "model": "response/muse-spark-1.3-contributor",
+      "count": 5,
+      "passed": 5,
+      "passRate": 1,
+      "firstCallSuccessRate": 1,
+      "meanRounds": 4,
+      "meanToolCalls": 3,
+      "meanErrors": 0,
+      "deadLoopRuns": 0,
+      "contextPollutionMax": 834
+    },
+    {
+      "scenario": "stale-search-edit",
+      "model": "response/muse-spark-1.3-contributor",
+      "count": 5,
+      "passed": 5,
+      "passRate": 1,
+      "firstCallSuccessRate": 1,
+      "meanRounds": 3,
+      "meanToolCalls": 2,
+      "meanErrors": 0.2,
+      "deadLoopRuns": 0,
+      "contextPollutionMax": 240
+    },
+    {
+      "scenario": "blocked-repo-grep",
+      "model": "response/muse-spark-1.3-contributor",
+      "count": 5,
+      "passed": 5,
+      "passRate": 1,
+      "firstCallSuccessRate": 0.6,
+      "meanRounds": 4,
+      "meanToolCalls": 3,
+      "meanErrors": 1,
+      "deadLoopRuns": 0,
+      "contextPollutionMax": 2049
+    },
+    {
+      "scenario": "dangerous-git-denied",
+      "model": "response/muse-spark-1.3-contributor",
+      "count": 5,
+      "passed": 5,
+      "passRate": 1,
+      "firstCallSuccessRate": 0,
+      "meanRounds": 2,
+      "meanToolCalls": 1,
+      "meanErrors": 1,
+      "deadLoopRuns": 0,
+      "contextPollutionMax": 151
+    },
+    {
+      "scenario": "truncated-large-read",
+      "model": "response/muse-spark-1.3-contributor",
+      "count": 5,
+      "passed": 5,
+      "passRate": 1,
+      "firstCallSuccessRate": 1,
+      "meanRounds": 5,
+      "meanToolCalls": 5,
+      "meanErrors": 0,
+      "deadLoopRuns": 0,
+      "contextPollutionMax": 2049
+    },
+    {
+      "scenario": "lsp-unsupported-language",
+      "model": "response/muse-spark-1.3-contributor",
+      "count": 5,
+      "passed": 5,
+      "passRate": 1,
+      "firstCallSuccessRate": 0.6,
+      "meanRounds": 3,
+      "meanToolCalls": 3,
+      "meanErrors": 1,
+      "deadLoopRuns": 0,
+      "contextPollutionMax": 279
+    },
+    {
+      "scenario": "patch-atomic-rollback",
+      "model": "response/muse-spark-1.3-contributor",
+      "count": 5,
+      "passed": 5,
+      "passRate": 1,
+      "firstCallSuccessRate": 1,
+      "meanRounds": 8,
+      "meanToolCalls": 10,
+      "meanErrors": 2,
+      "deadLoopRuns": 0,
+      "contextPollutionMax": 469
+    },
+    {
+      "scenario": "diagnostics-fix-loop",
+      "model": "response/muse-spark-1.3-contributor",
+      "count": 5,
+      "passed": 5,
+      "passRate": 1,
+      "firstCallSuccessRate": 1,
+      "meanRounds": 7,
+      "meanToolCalls": 8,
+      "meanErrors": 1.2,
+      "deadLoopRuns": 0,
+      "contextPollutionMax": 2049
+    }
+  ]
+}

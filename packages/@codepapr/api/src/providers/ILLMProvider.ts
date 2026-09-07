@@ -40,6 +40,11 @@ export interface ProviderConfig {
    *  未设置时回退到默认 1s → 2s → 4s → 8s → 16s → 30s。测试可注入 0 跳过等待。 */
   requestRetryDelayMs?: (attempt: number) => number;
   fetchFn?: typeof globalThis.fetch;
+  /** OpenCode Go 网关的 x-opencode-session 标识（仅 baseURL 命中 opencode.ai 域名时生效）。
+   *  缺省时回退为 provider 实例级随机 id。该网关强制要求会话头，缺失即 400 MissingSessionID。 */
+  sessionId?: string;
+  /** x-opencode-client 客户端标识（仅 opencode.ai 域名生效），缺省 codepapr。 */
+  sessionClient?: string;
 }
 
 /** 请求级默认重试次数（连接层失败，如 DNS/TCP/TLS 无法建立连接）。 */

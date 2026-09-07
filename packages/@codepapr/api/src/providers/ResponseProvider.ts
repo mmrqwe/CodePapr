@@ -374,11 +374,35 @@ export class ResponseProvider extends BaseLLMProvider {
   name = 'response';
   models = ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini', 'doubao-1.5-pro-32k'];
 
+  private readonly opencodeSessionId: string;
+
   constructor(config: ProviderConfig) {
     super({
       baseURL: 'https://api.openai.com/v1',
       ...config,
     });
+    this.opencodeSessionId =
+      String(config.sessionId ?? '').trim() ||
+      `codepapr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  private get isOpencodeGo(): boolean {
+    const base = String(this.config.baseURL ?? '').toLowerCase();
+    return base.includes('opencode.ai');
+  }
+
+  /** OpenCode Go 网关强制要求会话路由头（缺失 → 400 MissingSessionID）；
+   *  其余 Responses 兼容网关不注入任何额外头。 */
+  private requestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${this.config.apiKey}`,
+    };
+    if (this.isOpencodeGo) {
+      headers['x-opencode-session'] = this.opencodeSessionId;
+      headers['x-opencode-client'] = String(this.config.sessionClient ?? '').trim() || 'codepapr';
+    }
+    return headers;
   }
 
   private getEndpointUrl(): string {
@@ -409,10 +433,7 @@ export class ResponseProvider extends BaseLLMProvider {
           url,
           {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${this.config.apiKey}`,
-            },
+            headers: this.requestHeaders(),
             body: sortedStringify(payload),
           },
           signal,
@@ -768,10 +789,7 @@ export class ResponseProvider extends BaseLLMProvider {
       url,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.config.apiKey}`,
-        },
+        headers: this.requestHeaders(),
         body: sortedStringify(payload),
       },
       signal,
@@ -1036,6 +1054,13 @@ export class ResponseProvider extends BaseLLMProvider {
       }
     }
 
-    return payload;
+    // OpenCode Go 网关：开启会话级缓存路由、关闭服务端存储（与 x-opencode-* 头配套）。
+    const extra: Record<string, unknown> = {};
+    if (this.isOpencodeGo) {
+      extra.prompt_cache_key = true;
+      extra.store = false;
+    }
+
+    return { ...payload, ...extra };
   }
 }
