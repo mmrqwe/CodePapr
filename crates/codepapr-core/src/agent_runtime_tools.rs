@@ -176,6 +176,14 @@ struct PermissionRequestEvent {
     workspace_path: String,
     exists: bool,
     allow_file: bool,
+    /// 缺省 = "externalPath"（历史客户端按 operation/path 渲染）；
+    /// "dangerousCommand" = 高危命令一次性确认，UI 须展示 command/reason。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -911,6 +919,11 @@ fn dispatch_bash(
     for candidate in extract_absolute_command_paths(&command) {
         ensure_external_allowed(sink, runtime_id, ctx, req, &candidate, "execute", cancel)?;
     }
+    let command_line = match arg_string_vec(args, "args") {
+        Some(extra) if !extra.is_empty() => format!("{command} {}", extra.join(" ")),
+        _ => command.clone(),
+    };
+    ensure_dangerous_command_allowed(sink, runtime_id, ctx, req, &command_line, cancel)?;
 
     let sandbox = sandbox_from_access(&ctx.mode, req.app_access.as_ref());
     let timeout = arg_u64(args, "timeoutSeconds").or_else(|| arg_u64(args, "timeout"));
@@ -1389,6 +1402,7 @@ fn dispatch_shell(
                 for candidate in extract_absolute_command_paths(&joined) {
                     ensure_external_allowed(sink, runtime_id, ctx, req, &candidate, "execute", cancel)?;
                 }
+                ensure_dangerous_command_allowed(sink, runtime_id, ctx, req, &joined, cancel)?;
                 let result = session::send_shell_command(session_id, command, Some(command_args))?;
                 return Ok(ok_result(result, Vec::new()));
             }
@@ -1397,6 +1411,7 @@ fn dispatch_shell(
             for candidate in extract_absolute_command_paths(&input) {
                 ensure_external_allowed(sink, runtime_id, ctx, req, &candidate, "execute", cancel)?;
             }
+            ensure_dangerous_command_allowed(sink, runtime_id, ctx, req, &input, cancel)?;
             let result = session::send_shell_input(session_id, input)?;
             Ok(ok_result(result, Vec::new()))
         }
@@ -1629,6 +1644,54 @@ fn ensure_external_allowed(
         return Err("已取消".to_string());
     }
 
+    let decision = request_permission_blocking(sink, runtime_id, &req.tool_request_id, cancel, |id| {
+        serde_json::to_value(PermissionRequestEvent {
+            runtime_id: runtime_id.to_string(),
+            request_id: id.to_string(),
+            path: if check.exists {
+                check.canonical_path.clone()
+            } else {
+                path.to_string()
+            },
+            operation: operation.to_string(),
+            tool_name: req.tool_name.clone(),
+            workspace_path: ctx.workspace_path.clone(),
+            exists: check.exists,
+            allow_file: check.exists,
+            kind: None,
+            command: None,
+            reason: None,
+        })
+        .unwrap_or_default()
+    })?;
+    if !decision.approved {
+        return Err(format!("用户拒绝访问外部路径：{}", check.canonical_path));
+    }
+    // "once" = approve this call only, no persisted grant
+    // (harness/CLI allowlist semantics). directory|file persist.
+    if decision.scope == "once" {
+        crate::shared::arm_once_grant(Path::new(&check.canonical_path));
+    } else {
+        crate::workspace_fs::access::grant_external_access(
+            ctx.workspace_path.clone(),
+            check.canonical_path.clone(),
+            decision.scope,
+        )?;
+    }
+    Ok(())
+}
+
+/// 通用「向宿主 UI/CLI 请求权限并阻塞等待裁决」通道：sidecar 事件 + 响应回注
+/// （agent_runtime_permission_respond / server agent/respondPermission 共用
+/// PERMISSION_WAITERS 注册表）。cancel 置位、断连、拒绝都必须以 Err 结束，
+/// 不允许默认放行（fail-closed 是权限层的第一原则）。
+fn request_permission_blocking(
+    sink: &SharedEventSink,
+    runtime_id: &str,
+    tool_request_id: &str,
+    cancel: &Arc<AtomicBool>,
+    payload_for: impl Fn(&str) -> Value,
+) -> Result<PermissionDecision, String> {
     let permission_id = format!(
         "perm-{}",
         NEXT_PERMISSION_ID.fetch_add(1, Ordering::Relaxed)
@@ -1641,30 +1704,16 @@ fn ensure_external_allowed(
     tool_permission()
         .lock()
         .unwrap_or_else(|err| err.into_inner())
-        .insert(req.tool_request_id.clone(), permission_id.clone());
+        .insert(tool_request_id.to_string(), permission_id.clone());
 
-    let _ = crate::agent_runtime::write_sidecar_stdin(
-        runtime_id,
-        &format!("{}\n", json!({ "type": "permission-wait", "waiting": true })),
-    );
-    sink.emit(
-        PERMISSION_EVENT,
-        serde_json::to_value(PermissionRequestEvent {
-            runtime_id: runtime_id.to_string(),
-            request_id: permission_id.clone(),
-            path: if check.exists {
-                check.canonical_path.clone()
-            } else {
-                path.to_string()
-            },
-            operation: operation.to_string(),
-            tool_name: req.tool_name.clone(),
-            workspace_path: ctx.workspace_path.clone(),
-            exists: check.exists,
-            allow_file: check.exists,
-        })
-        .unwrap_or_default(),
-    );
+    let set_wait_flag = |waiting: bool| {
+        let _ = crate::agent_runtime::write_sidecar_stdin(
+            runtime_id,
+            &format!("{}\n", json!({ "type": "permission-wait", "waiting": waiting })),
+        );
+    };
+    set_wait_flag(true);
+    sink.emit(PERMISSION_EVENT, payload_for(&permission_id));
 
     loop {
         if cancel.load(Ordering::SeqCst) {
@@ -1673,50 +1722,72 @@ fn ensure_external_allowed(
                 json!({ "runtimeId": runtime_id, "requestId": permission_id }),
             );
             reject_permission(&permission_id, "已取消".to_string());
-            let _ = crate::agent_runtime::write_sidecar_stdin(
-                runtime_id,
-                &format!("{}\n", json!({ "type": "permission-wait", "waiting": false })),
-            );
+            set_wait_flag(false);
             return Err("已取消".to_string());
         }
         match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(Ok(decision)) => {
-                let _ = crate::agent_runtime::write_sidecar_stdin(
-                    runtime_id,
-                    &format!("{}\n", json!({ "type": "permission-wait", "waiting": false })),
-                );
-                if !decision.approved {
-                    return Err(format!("用户拒绝访问外部路径：{}", check.canonical_path));
-                }
-                // "once" = approve this call only, no persisted grant
-                // (harness/CLI allowlist semantics). directory|file persist.
-                if decision.scope == "once" {
-                    crate::shared::arm_once_grant(Path::new(&check.canonical_path));
-                } else {
-                    crate::workspace_fs::access::grant_external_access(
-                        ctx.workspace_path.clone(),
-                        check.canonical_path.clone(),
-                        decision.scope,
-                    )?;
-                }
-                return Ok(());
+                set_wait_flag(false);
+                return Ok(decision);
             }
             Ok(Err(err)) => {
-                let _ = crate::agent_runtime::write_sidecar_stdin(
-                    runtime_id,
-                    &format!("{}\n", json!({ "type": "permission-wait", "waiting": false })),
-                );
+                set_wait_flag(false);
                 return Err(err);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let _ = crate::agent_runtime::write_sidecar_stdin(
-                    runtime_id,
-                    &format!("{}\n", json!({ "type": "permission-wait", "waiting": false })),
-                );
+                set_wait_flag(false);
                 return Err("权限请求已取消".to_string());
             }
         }
+    }
+}
+
+/// 高危命令 Confirm 闸门（sidecar 宿主入口）：Block 交给执行层的统一兜底文案，
+/// Allow 直接放行，Confirm 必须经用户一次性批准；批准后、执行前 fail-closed
+/// 创建影子 Git 检查点——检测即使漏判，最坏结果也从「数据损毁」降级为「一次回滚」。
+/// 批准仅绑定本次调用（once），不持久化：同一条命令再次执行仍需确认。
+fn ensure_dangerous_command_allowed(
+    sink: &SharedEventSink,
+    runtime_id: &str,
+    ctx: &RuntimeToolContext,
+    req: &ToolRequest,
+    command_line: &str,
+    cancel: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    let reason = match crate::shell::dangerous::classify_dangerous_command(command_line) {
+        crate::shell::dangerous::DangerVerdict::Confirm(reason) => reason,
+        _ => return Ok(()),
+    };
+    let command_line = command_line.to_string();
+    let decision = request_permission_blocking(sink, runtime_id, &req.tool_request_id, cancel, |id| {
+        serde_json::to_value(PermissionRequestEvent {
+            runtime_id: runtime_id.to_string(),
+            request_id: id.to_string(),
+            path: command_line.clone(),
+            operation: "execute".to_string(),
+            tool_name: req.tool_name.clone(),
+            workspace_path: ctx.workspace_path.clone(),
+            exists: false,
+            allow_file: false,
+            kind: Some("dangerousCommand".to_string()),
+            command: Some(command_line.clone()),
+            reason: Some(reason.clone()),
+        })
+        .unwrap_or_default()
+    })?;
+    if !decision.approved {
+        return Err(format!(
+            "用户拒绝执行高危命令：{reason}。请勿改写命令绕过确认；如确有必要，用 question 工具向用户说明理由请求授权，或由用户在终端手动运行。"
+        ));
+    }
+    let short: String = command_line.chars().take(80).collect();
+    let label = format!("before-bash: {short}");
+    match crate::snapshot::snapshot_create_blocking(&ctx.workspace_path, &label) {
+        Ok(_) => Ok(()),
+        Err(err) => Err(format!(
+            "已获用户批准，但执行前检查点创建失败（{err}）：高危命令必须有回滚兜底，拒绝执行。请先修复工作区 Git 快照仓（或改用内置检查点回滚验证其可用）后重试。"
+        )),
     }
 }
 

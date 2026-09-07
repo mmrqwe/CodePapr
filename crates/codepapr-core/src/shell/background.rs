@@ -3,7 +3,7 @@ use crate::shared::{
     normalize_workspace_filter, parse_browser_url, run_blocking_workspace_task, unix_millis,
 };
 use crate::shell::dangerous::{
-    detect_dangerous_command, detect_dangerous_invocation, detect_repo_content_search,
+    detect_fatal_block_invocation, detect_fatal_block_reason, detect_repo_content_search,
 };
 use crate::shell::process_tree::{
     kill_process_tree, prepare_new_process_group, prepare_parent_death_signal, wait_for_child_exit,
@@ -459,7 +459,7 @@ pub(crate) fn run_workspace_command_impl(
             BLOCKED_COMMANDS.join(", ")
         ));
     }
-    if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[])) {
+    if let Some(reason) = detect_fatal_block_invocation(&command, args.as_deref().unwrap_or(&[])) {
         return Err(format!(
             "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
         ));
@@ -744,7 +744,7 @@ pub(crate) fn run_workspace_shell_command_impl(
     if command.trim().is_empty() {
         return Err("命令不能为空".to_string());
     }
-    if let Some(reason) = detect_dangerous_command(&command) {
+    if let Some(reason) = detect_fatal_block_reason(&command) {
         return Err(format!(
             "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
         ));
@@ -791,7 +791,7 @@ pub fn start_workspace_background_command(
             BLOCKED_COMMANDS.join(", ")
         ));
     }
-    if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[])) {
+    if let Some(reason) = detect_fatal_block_invocation(&command, args.as_deref().unwrap_or(&[])) {
         return Err(format!(
             "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
         ));
@@ -836,7 +836,7 @@ pub fn start_app_background_command(
             BLOCKED_COMMANDS.join(", ")
         ));
     }
-    if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[])) {
+    if let Some(reason) = detect_fatal_block_invocation(&command, args.as_deref().unwrap_or(&[])) {
         return Err(format!(
             "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
         ));
@@ -1034,7 +1034,7 @@ pub fn start_workspace_shell_background_command(
     if command.trim().is_empty() {
         return Err("命令不能为空".to_string());
     }
-    if let Some(reason) = detect_dangerous_command(&command) {
+    if let Some(reason) = detect_fatal_block_reason(&command) {
         return Err(format!(
             "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
         ));

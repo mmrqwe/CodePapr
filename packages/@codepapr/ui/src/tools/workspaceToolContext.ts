@@ -8,6 +8,7 @@ import {
   findFileUriForRelativePath,
 } from '@codepapr/core';
 import { usePermissionStore, isAbsolutePath } from '../store/permissionStore';
+import { snapshotCreateWithRetry } from '../utils/snapshot';
 import { lspLanguageFromPath } from '../utils/editorLanguage';
 import { createUiWorkspaceHost } from './workspaceHost';
 import { resolveProjectMapSymbolOverrides } from './workspaceProjectMapLsp';
@@ -79,7 +80,7 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
       workspacePath: workspace(),
       editHistory,
       notifyWorkspaceMutation,
-      ensureExternalPathAllowed,
+    ensureExternalPathAllowed,
       mode: options.mode,
     });
 
@@ -276,6 +277,49 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
     );
     if (!result.approved) {
       throw new Error(`用户拒绝访问外部路径：${check.canonicalPath}`);
+    }
+  };
+
+  // 高危命令 Confirm 闸门（WebView JS 宿主入口；与 Rust 侧
+  // ensure_dangerous_command_allowed 同一套三值裁决与文案，双宿主对等）：
+  // Block 级由 Rust impl 层统一兜底，这里只处理 Confirm——
+  // 用户一次性批准 + fail-closed 执行前检查点，批准后仍拒绝则绝不执行。
+  const ensureDangerousCommandAllowed = async (
+    commandLine: string,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    let verdict: { verdict: 'block' | 'confirm' | 'allow'; reason?: string };
+    try {
+      verdict = await invoke<{ verdict: 'block' | 'confirm' | 'allow'; reason?: string }>(
+        'classify_dangerous_command',
+        { commandLine },
+      );
+    } catch {
+      // classify 命令不可用（非桌面运行时/单测环境）：退回 impl 层 Block 兜底，
+      // 保持既有行为，不因闸门自身故障阻断正常命令。
+      return;
+    }
+    if (verdict.verdict !== 'confirm') {
+      return;
+    }
+    const reason = verdict.reason ?? '命令包含破坏性操作，需用户确认。';
+    const approved = await usePermissionStore
+      .getState()
+      .requestDangerousCommand(commandLine, reason, workspace(), signal)
+      .catch(() => false);
+    if (!approved) {
+      throw new Error(
+        `用户拒绝执行高危命令：${reason}。请勿改写命令绕过确认；如确有必要，用 question 工具向用户说明理由请求授权，或由用户在终端手动运行。`,
+      );
+    }
+    try {
+      await snapshotCreateWithRetry(workspace(), `before-bash: ${commandLine.slice(0, 80)}`, {
+        shouldAbort: () => signal?.aborted === true,
+      });
+    } catch (err) {
+      throw new Error(
+        `已获用户批准，但执行前检查点创建失败（${err instanceof Error ? err.message : String(err)}）：高危命令必须有回滚兜底，拒绝执行。请先修复工作区 Git 快照仓（或改用内置检查点回滚验证其可用）后重试。`,
+      );
     }
   };
 
@@ -477,6 +521,7 @@ export function createWorkspaceToolContext(params: WorkspaceToolContextParams) {
     lspDiagnosticsHook,
     describeAmbiguousMatches,
     ensureExternalPathAllowed,
+    ensureDangerousCommandAllowed,
     buildIntelligenceProjectGraph,
     invalidateProjectGraphCache,
     readGitStatus,

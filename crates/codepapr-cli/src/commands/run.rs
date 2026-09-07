@@ -414,17 +414,23 @@ async fn drive(
 
         if event_name == "agent-runtime://permission-request" {
             let request_id = payload.get("requestId").and_then(Value::as_str).unwrap_or("").to_string();
+            let kind = payload.get("kind").and_then(Value::as_str).unwrap_or("externalPath");
             let operation = payload.get("operation").and_then(Value::as_str).unwrap_or("unknown");
             let path = payload.get("path").and_then(Value::as_str).unwrap_or("");
             let tool = payload.get("toolName").and_then(Value::as_str);
+            // dangerousCommand：path 承载命令文本，展示 reason 便于日志核对。
+            let command_text = payload.get("command").and_then(Value::as_str);
             let approved = args.yolo
                 || allowlist
                     .as_ref()
                     .is_some_and(|list| list.is_allowed(tool, Some(operation), Some(path)));
             events.line(json!({
                 "type": "permission",
+                "kind": kind,
                 "operation": operation,
                 "path": path,
+                "command": command_text,
+                "reason": payload.get("reason").and_then(Value::as_str),
                 "toolName": tool,
                 "approved": approved,
             }));

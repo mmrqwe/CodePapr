@@ -307,6 +307,7 @@ describe('exec tools check command paths including the executable token', () => 
       registry,
       workspace: () => '/tmp/ws',
       ensureExternalPathAllowed,
+      ensureDangerousCommandAllowed: vi.fn(async () => {}),
       options: {},
     } as unknown as WorkspaceToolContext;
     registerWorkspaceExecTools(ctx);
@@ -377,6 +378,7 @@ describe('exec tools check command paths including the executable token', () => 
       registry,
       workspace: () => '/tmp/ws',
       ensureExternalPathAllowed,
+      ensureDangerousCommandAllowed: vi.fn(async () => {}),
       options: {},
     } as unknown as WorkspaceToolContext;
     registerWorkspaceExecTools(ctx);

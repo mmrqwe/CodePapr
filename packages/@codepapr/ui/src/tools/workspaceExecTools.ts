@@ -90,6 +90,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     registry,
     workspace,
     ensureExternalPathAllowed,
+    ensureDangerousCommandAllowed,
     options,
   } = ctx;
   const agentMode = options.mode ?? 'agent';
@@ -142,6 +143,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     await ensureExternalPathAllowed(workdir, 'execute', context?.signal);
     await ensureCommandPathsAllowed(command, [], context?.signal);
     assertShellCodePaprAccess(command, shellMode(context?.appAccess), workdir);
+    await ensureDangerousCommandAllowed(command, context?.signal);
     // app agent 调用时按两轴构建沙箱：网络关 → 无网络；local 非 write → 工作区只读
     const sandbox = agentSandboxArgs(agentMode, context?.appAccess);
     const cancelToken = context?.signal ? createCancelToken() : undefined;
@@ -166,6 +168,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     await ensureExternalPathAllowed(workdir, 'execute', context?.signal);
     await ensureCommandPathsAllowed(command, [], context?.signal);
     assertShellCodePaprAccess(command, shellMode(context?.appAccess), workdir);
+    await ensureDangerousCommandAllowed(command, context?.signal);
     return await invoke<BackgroundCommandResult>('start_workspace_shell_background_command', {
       workspacePath: workspace(),
       command,
@@ -286,6 +289,10 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     if (parsed.command) {
       await ensureCommandPathsAllowed(parsed.command, parsed.args ?? []);
       assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), shellMode(context?.appAccess));
+      await ensureDangerousCommandAllowed(
+        [parsed.command, ...(parsed.args ?? [])].join(' '),
+        context?.signal,
+      );
       return await invoke<ShellSendInputResult>('send_shell_command', {
         sessionId: parsed.sessionId,
         command: parsed.command,
@@ -298,6 +305,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
 
     await ensureCommandPathsAllowed(parsed.input);
     assertShellCodePaprAccess(parsed.input, shellMode(context?.appAccess));
+    await ensureDangerousCommandAllowed(parsed.input, context?.signal);
 
     return await invoke<ShellSendInputResult>('send_shell_input', {
       sessionId: parsed.sessionId,

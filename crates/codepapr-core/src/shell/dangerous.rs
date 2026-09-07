@@ -1,16 +1,42 @@
-//! 高危命令检测。
+//! 高危命令检测：三值裁决（Block / Confirm / Allow）。
 //!
-//! 这里只拦截「明确具有灾难性后果、且对编码 Agent 没有正当用途」的命令：
-//! 删除根目录/用户主目录、格式化磁盘、向块设备裸写、fork 炸弹、git 强制推送/
-//! 硬重置、关机等。检测刻意保持保守——像 `rm -rf node_modules`、`rm -rf dist`
-//! 这类常规清理操作不会被拦截。
+//! 分层原则（对齐「安全靠工具架构约束，而非模型自觉」）：
+//! - **Block**：具有灾难性后果、且对编码 Agent 没有正当用途的命令——删除根目录/
+//!   用户主目录、格式化磁盘、向块设备裸写、fork 炸弹、关机重启。永远拒绝执行。
+//! - **Confirm**：破坏性但有正当用途的命令——裸 `git push --force`、
+//!   `git reset --hard`、`git clean -f`、删远端分支、`find -delete`、`xargs rm`、
+//!   递归 chmod/chown、管道喂 shell 解释器，以及「破坏性段首 + 目标无法静态解析
+//!   （变量/命令替换）」。由宿主入口层（sidecar dispatch / UI handler）向用户发起
+//!   一次性确认，批准后自动创建检查点再执行——检测漏网的最坏结果从「数据损毁」
+//!   降级为「一次回滚」。`--force-with-lease` 是安全实践，放行。
+//! - **Allow**：其余命令。检测对普通命令保持保守——像 `rm -rf node_modules`、
+//!   `rm -rf dist` 这类常规清理不会命中；误报会把 agent 死锁在无关命令上。
 //!
 //! 判定基于「段首命令」（会先剥离 `sudo`/`doas` 等提权前缀），而不是在整行里
 //! 随意搜索关键字，以避免把 `npm run reboot`、`echo rm -rf /` 这类把危险词当作
-//! 参数的命令误判为高危。
+//! 参数的命令误判。
 //!
-//! 返回 `Some(reason)` 表示命令应被拦截，`reason` 用于向调用方（最终是 LLM 与
-//! 用户）解释拦截原因。
+//! `Block`/`Confirm` 的原因字符串用于向调用方（最终是 LLM 与用户）解释判定依据。
+
+/// 高危检测裁决。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DangerVerdict {
+    /// 灾难性命令：任何宿主都不得执行。
+    Block(String),
+    /// 破坏性但可能有正当用途：必须由用户确认 + 执行前检查点后方可执行。
+    Confirm(String),
+    /// 放行。
+    Allow,
+}
+
+impl DangerVerdict {
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            DangerVerdict::Block(reason) | DangerVerdict::Confirm(reason) => Some(reason),
+            DangerVerdict::Allow => None,
+        }
+    }
+}
 
 /// 把一个命令行按 shell 元字符切成多个简单片段。
 /// 这不是完整的 shell 解析，仅用于让每个 `cmd args...` 段能被独立检查，
@@ -87,8 +113,8 @@ fn command_name(token: &str) -> String {
 const PRIVILEGE_WRAPPERS: &[&str] = &["sudo", "doas", "pkexec", "su", "please"];
 
 /// 找到段首真正要执行的命令下标：跳过提权包装命令。
-/// 若剥到 flag（如 `sudo -u root ...` 的 `-u`）则返回 None，表示无法可靠判定，
-/// 此时不做拦截（宁可漏报也不误报）。
+/// 若剥到 flag（如 `sudo -u root ...` 的 `-u`）则返回 None，表示无法可靠判定段首，
+/// 此时整段跳过（对非破坏性动词维持「宁可漏报也不误报」）。
 fn find_head_index(tokens: &[String]) -> Option<usize> {
     let mut i = 0;
     while i < tokens.len() {
@@ -106,7 +132,23 @@ fn find_head_index(tokens: &[String]) -> Option<usize> {
     }
 }
 
-/// 判断 rm 的目标路径是否属于「根目录/主目录」级别的危险目标。
+/// token 中是否含无法静态解析的目标（变量展开 / 命令替换）。
+/// 引号只防词分裂，不防展开，因此成对引号已在 tokenize 剥除后检查内文。
+fn has_unresolvable_token(tokens: &[String]) -> bool {
+    tokens.iter().any(|token| {
+        token.contains("$(")
+            || token.contains('`')
+            || token.contains("${")
+            || token.chars().next() == Some('$')
+            || token
+                .split(['/', '='])
+                .any(|part| part.starts_with('$') && part.chars().count() > 1)
+    })
+}
+
+/// 删除/搬移类动词：目标无法解析时必须走 Confirm（不再「漏报放行」）。
+const DELETE_LIKE_HEADS: &[&str] = &["rm", "rmdir", "mv", "shred", "dd", "truncate"];
+
 fn is_root_like_target(target: &str) -> bool {
     let cleaned = target.trim_end_matches('/');
     let cleaned = if cleaned.is_empty() { "/" } else { cleaned };
@@ -156,19 +198,21 @@ fn rm_is_dangerous(tokens: &[String]) -> bool {
     targets.iter().any(|t| is_root_like_target(t))
 }
 
-/// 检查以 `git` 开头的 token 序列是否为强制推送/删除远端/硬重置。
-fn git_is_dangerous(tokens: &[String]) -> bool {
-    if tokens.len() < 2 {
-        return false;
+/// `git` 段裁决：区分安全实践（--force-with-lease 放行）与真破坏。
+fn git_verdict(rest: &[String]) -> DangerVerdict {
+    if rest.len() < 2 {
+        return DangerVerdict::Allow;
     }
-    match tokens[1].to_lowercase().as_str() {
+    match rest[1].to_lowercase().as_str() {
         "push" => {
-            let mut force = false;
+            let mut bare_force = false;
+            let mut lease = false;
             let mut delete = false;
             let mut colon_delete = false;
-            for token in tokens.iter().skip(2) {
+            for token in rest.iter().skip(2) {
                 match token.as_str() {
-                    "--force" | "-f" | "--force-with-lease" => force = true,
+                    "--force" | "-f" => bare_force = true,
+                    "--force-with-lease" => lease = true,
                     "--delete" | "-d" => delete = true,
                     _ => {
                         if !token.starts_with('-') && token.starts_with(':') {
@@ -177,20 +221,56 @@ fn git_is_dangerous(tokens: &[String]) -> bool {
                     }
                 }
             }
-            force || delete || colon_delete
+            if bare_force && !lease {
+                return DangerVerdict::Confirm(
+                    "检测到 git 裸强制推送（--force/-f），会不可逆覆盖远端历史；\
+                     更安全的是 --force-with-lease。确认后可执行（将先创建检查点）。"
+                        .to_string(),
+                );
+            }
+            if delete || colon_delete {
+                return DangerVerdict::Confirm(
+                    "检测到删除远端分支，他人可能仍依赖该分支；确认后可执行。".to_string(),
+                );
+            }
+            DangerVerdict::Allow
         }
-        "reset" => tokens.iter().skip(2).any(|t| t.to_lowercase() == "--hard"),
-        _ => false,
+        "reset" => {
+            if rest.iter().skip(2).any(|t| t.to_lowercase() == "--hard") {
+                DangerVerdict::Confirm(
+                    "检测到 git reset --hard，会丢弃未提交改动；如只想回退已提交记录，\
+                     优先用内置对话重置/检查点回滚。确认后可执行（将先创建检查点）。"
+                        .to_string(),
+                )
+            } else {
+                DangerVerdict::Allow
+            }
+        }
+        "clean" => {
+            let recursive_force = rest.iter().skip(2).any(|t| {
+                let body = t.trim_start_matches('-');
+                t.starts_with('-') && body.contains('f') && !body.starts_with("dry-run")
+            });
+            if recursive_force {
+                DangerVerdict::Confirm(
+                    "检测到 git clean -f，会删除未跟踪文件且 git 无法恢复；确认后可执行（将先创建检查点）。"
+                        .to_string(),
+                )
+            } else {
+                DangerVerdict::Allow
+            }
+        }
+        _ => DangerVerdict::Allow,
     }
 }
 
-/// 检查单个片段是否命中高危模式，命中则返回原因。
-fn segment_reason(segment: &str) -> Option<String> {
+/// 检查单个片段的裁决。`index > 0` 表示该段处于管道/串联中间（有上游）。
+fn segment_verdict(segment: &str, index: usize) -> DangerVerdict {
     let lower = segment.to_lowercase();
 
     // 向块设备裸写 / 重定向覆盖块设备（不依赖段首命令，直接全段匹配）。
     if lower.contains("of=/dev/") {
-        return Some("检测到向块设备裸写（of=/dev/...），会摧毁磁盘数据".to_string());
+        return DangerVerdict::Block("检测到向块设备裸写（of=/dev/...），会摧毁磁盘数据".to_string());
     }
     for dev in [
         "/dev/sd",
@@ -204,7 +284,7 @@ fn segment_reason(segment: &str) -> Option<String> {
             let with_space = format!("{redirect} {dev}");
             let no_space = format!("{redirect}{dev}");
             if lower.contains(&with_space) || lower.contains(&no_space) {
-                return Some(format!(
+                return DangerVerdict::Block(format!(
                     "检测到重定向写入块设备（{dev}...），会摧毁磁盘数据"
                 ));
             }
@@ -212,36 +292,39 @@ fn segment_reason(segment: &str) -> Option<String> {
     }
 
     let tokens = tokenize(segment);
-    let head_idx = find_head_index(&tokens)?;
+    let Some(head_idx) = find_head_index(&tokens) else {
+        return DangerVerdict::Allow;
+    };
     let rest = &tokens[head_idx..];
     let head = command_name(&rest[0]);
 
     // 磁盘格式化/擦除类：命令名本身即足够特征。
     if head.starts_with("mkfs") || matches!(head.as_str(), "wipefs" | "shred" | "diskpart") {
-        return Some(format!("检测到磁盘格式化/擦除命令 `{head}`，已拦截"));
+        return DangerVerdict::Block(format!("检测到磁盘格式化/擦除命令 `{head}`，已拦截"));
+    }
+
+    // 管道把内容直接喂给 shell 解释器（`curl ... | sh`）：解释器作为独立段出现。
+    // 段首 index==0 时交给 BLOCKED_COMMANDS 的既有硬拦截处理（入口 shell 解释器
+    // 本来就不可执行），避免对 `bash script.sh` 这类命令先弹窗再报错。
+    if index > 0 && matches!(head.as_str(), "sh" | "bash" | "zsh" | "dash" | "ksh") {
+        return DangerVerdict::Confirm(
+            "检测到管道/串联内容交给 shell 解释器执行（| sh 类），命令文本未静态解析；\
+             确认后可执行（将先创建检查点）。".to_string(),
+        );
     }
 
     match head.as_str() {
         "rm" => {
             if rm_is_dangerous(rest) {
-                return Some(
+                return DangerVerdict::Block(
                     "检测到递归强制删除根目录或用户主目录（rm -rf / 或 ~），已拦截".to_string(),
                 );
             }
         }
         "git" => {
-            if git_is_dangerous(rest) {
-                return if rest.len() >= 2 && rest[1].to_lowercase() == "reset" {
-                    Some(
-                        "检测到 git reset --hard，会丢弃未提交改动；如需回退请使用内置的对话重置/检查点回滚"
-                            .to_string(),
-                    )
-                } else {
-                    Some(
-                        "检测到 git 强制推送/删除远端分支，可能不可逆地覆盖远端历史，已拦截"
-                            .to_string(),
-                    )
-                };
+            let verdict = git_verdict(rest);
+            if !matches!(verdict, DangerVerdict::Allow) {
+                return verdict;
             }
         }
         "dd" => {
@@ -250,7 +333,7 @@ fn segment_reason(segment: &str) -> Option<String> {
                 .skip(1)
                 .any(|t| t.to_lowercase().starts_with("of=/dev/"))
             {
-                return Some("检测到 dd 向块设备写入，会摧毁磁盘数据".to_string());
+                return DangerVerdict::Block("检测到 dd 向块设备写入，会摧毁磁盘数据".to_string());
             }
         }
         "diskutil" => {
@@ -260,15 +343,15 @@ fn segment_reason(segment: &str) -> Option<String> {
                     "erasedisk" | "erasevolume" | "zerodisk" | "secureerase" | "partitiondisk"
                 )
             }) {
-                return Some("检测到 diskutil 磁盘擦除/分区操作，已拦截".to_string());
+                return DangerVerdict::Block("检测到 diskutil 磁盘擦除/分区操作，已拦截".to_string());
             }
         }
         "shutdown" | "reboot" | "halt" | "poweroff" => {
-            return Some(format!("检测到关机/重启命令 `{head}`，已拦截"));
+            return DangerVerdict::Block(format!("检测到关机/重启命令 `{head}`，已拦截"));
         }
         "init" => {
             if rest.iter().skip(1).any(|t| matches!(t.as_str(), "0" | "6")) {
-                return Some("检测到 init 0/6 关机/重启，已拦截".to_string());
+                return DangerVerdict::Block("检测到 init 0/6 关机/重启，已拦截".to_string());
             }
         }
         "systemctl" => {
@@ -278,7 +361,7 @@ fn segment_reason(segment: &str) -> Option<String> {
                     "poweroff" | "reboot" | "halt" | "shutdown"
                 )
             }) {
-                return Some("检测到 systemctl 关机/重启，已拦截".to_string());
+                return DangerVerdict::Block("检测到 systemctl 关机/重启，已拦截".to_string());
             }
         }
         "format" => {
@@ -288,42 +371,120 @@ fn segment_reason(segment: &str) -> Option<String> {
                     && t.ends_with(':')
                     && t.chars().next().map_or(false, |c| c.is_ascii_alphabetic())
             }) {
-                return Some("检测到 Windows format 格式化磁盘命令，已拦截".to_string());
+                return DangerVerdict::Block("检测到 Windows format 格式化磁盘命令，已拦截".to_string());
+            }
+        }
+        "find" => {
+            let deletes = rest.iter().skip(1).any(|t| t == "-delete")
+                || rest
+                    .iter()
+                    .skip(1)
+                    .any(|t| ["-exec", "-execdir", "-ok", "-okdir"].contains(&t.as_str()))
+                    && rest.iter().any(|t| matches!(t.as_str(), "rm" | "unlink" | "delete"));
+            if deletes {
+                return DangerVerdict::Confirm(
+                    "检测到 find 批量删除（-delete/-exec rm），影响面可能远超预期；\
+                     确认后可执行（将先创建检查点）。"
+                        .to_string(),
+                );
+            }
+        }
+        "xargs" => {
+            if rest
+                .iter()
+                .skip(1)
+                .any(|t| matches!(basename(t).to_lowercase().as_str(), "rm" | "rmdir" | "shred" | "unlink"))
+            {
+                return DangerVerdict::Confirm(
+                    "检测到 xargs 批量删除（… | xargs rm），删除目标来自上游输出、无法静态枚举；\
+                     确认后可执行（将先创建检查点）。"
+                        .to_string(),
+                );
+            }
+        }
+        "chmod" | "chown" | "chgrp" => {
+            let recursive = rest.iter().skip(1).any(|t| {
+                t == "--recursive"
+                    || (t.starts_with('-')
+                        && !t.starts_with("--")
+                        && t.strip_prefix('-').unwrap_or_default().contains('R'))
+            });
+            if recursive {
+                return DangerVerdict::Confirm(format!(
+                    "检测到递归 {head}（-R）：会批量改写目录树权限/属主，错误范围难恢复；\
+                     确认后可执行（将先创建检查点）。"
+                ));
             }
         }
         _ => {}
     }
 
-    None
+    // 破坏性动词 + 目标含变量/命令替换：静态无法解析删除范围，漏报比误报代价高——
+    // 降级为 Confirm（仅对 DELETE_LIKE_HEADS 生效，普通命令不受影响）。
+    if DELETE_LIKE_HEADS.contains(&head.as_str()) && has_unresolvable_token(&rest[1..]) {
+        return DangerVerdict::Confirm(format!(
+            "`{head}` 的目标包含变量/命令替换，无法静态确认影响范围；\
+             确认后可执行（将先创建检查点）。"
+        ));
+    }
+
+    DangerVerdict::Allow
 }
 
-/// 对完整命令行做高危检测；命中返回拦截原因。
-pub(crate) fn detect_dangerous_command(command_line: &str) -> Option<String> {
+/// 对完整命令行做高危裁决：任一 Block 即 Block；否则任一 Confirm 即 Confirm。
+pub fn classify_dangerous_command(command_line: &str) -> DangerVerdict {
     let line = command_line.trim();
     if line.is_empty() {
-        return None;
+        return DangerVerdict::Allow;
     }
     // fork 炸弹（`:(){ :|:& };:` 及其变体）在分段前先做整体匹配，
     // 因为它依赖 `|`、`&`、`;` 这些会被分段切断的字符。
     if line.contains(":|:&") {
-        return Some("检测到 fork 炸弹模式，会耗尽系统进程资源".to_string());
+        return DangerVerdict::Block("检测到 fork 炸弹模式，会耗尽系统资源".to_string());
     }
-    for segment in split_segments(line) {
-        if let Some(reason) = segment_reason(&segment) {
-            return Some(reason);
+    let mut confirm: Option<String> = None;
+    for (index, segment) in split_segments(line).iter().enumerate() {
+        match segment_verdict(segment, index) {
+            DangerVerdict::Block(reason) => return DangerVerdict::Block(reason),
+            DangerVerdict::Confirm(reason) => {
+                if confirm.is_none() {
+                    confirm = Some(reason);
+                }
+            }
+            DangerVerdict::Allow => {}
         }
     }
-    None
+    match confirm {
+        Some(reason) => DangerVerdict::Confirm(reason),
+        None => DangerVerdict::Allow,
+    }
 }
 
-/// 供「command + args」型执行路径复用：先拼成一行再检测。
-pub(crate) fn detect_dangerous_invocation(command: &str, args: &[String]) -> Option<String> {
+/// 供「command + args」型执行路径复用：先拼成一行再裁决。
+pub fn classify_dangerous_invocation(command: &str, args: &[String]) -> DangerVerdict {
     let mut line = command.to_string();
     for arg in args {
         line.push(' ');
         line.push_str(arg);
     }
-    detect_dangerous_command(&line)
+    classify_dangerous_command(&line)
+}
+
+/// impl 层兜底防线：只对 Block 级裁决返回拒绝原因。
+/// Confirm 级由宿主入口层（sidecar dispatch_bash / UI exec handler）先行确认，
+/// 底层命令函数保持无 UI 依赖（app 启动/预览等路径不应弹 agent 确认框）。
+pub(crate) fn detect_fatal_block_reason(command_line: &str) -> Option<String> {
+    match classify_dangerous_command(command_line) {
+        DangerVerdict::Block(reason) => Some(reason),
+        _ => None,
+    }
+}
+
+pub(crate) fn detect_fatal_block_invocation(command: &str, args: &[String]) -> Option<String> {
+    match classify_dangerous_invocation(command, args) {
+        DangerVerdict::Block(reason) => Some(reason),
+        _ => None,
+    }
 }
 
 /// grep 族（grep/egrep/fgrep）的递归仓库搜标志：`-r`、`-R`、`-rn`、`--recursive`。
@@ -414,96 +575,160 @@ pub(crate) fn detect_repo_content_search(command_line: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn verdict(command: &str) -> DangerVerdict {
+        classify_dangerous_command(command)
+    }
+
+    fn assert_block(command: &str) {
+        assert!(
+            matches!(verdict(command), DangerVerdict::Block(_)),
+            "应 Block: {command}"
+        );
+    }
+
+    fn assert_confirm(command: &str) {
+        assert!(
+            matches!(verdict(command), DangerVerdict::Confirm(_)),
+            "应 Confirm: {command}"
+        );
+    }
+
+    fn assert_allow(command: &str) {
+        assert!(
+            matches!(verdict(command), DangerVerdict::Allow),
+            "应 Allow: {command}"
+        );
+    }
+
     #[test]
     fn blocks_rm_rf_root() {
-        assert!(detect_dangerous_command("rm -rf /").is_some());
-        assert!(detect_dangerous_command("rm -rf /*").is_some());
-        assert!(detect_dangerous_command("rm -fr /").is_some());
-        assert!(detect_dangerous_command("rm -rf ~").is_some());
-        assert!(detect_dangerous_command("rm -rf $HOME").is_some());
-        assert!(detect_dangerous_command("sudo rm -rf /").is_some());
-        assert!(detect_dangerous_command("echo hi && rm -rf /").is_some());
-        assert!(detect_dangerous_command("rm --recursive --force /").is_some());
-        assert!(detect_dangerous_command("rm -rf --no-preserve-root /").is_some());
+        assert_block("rm -rf /");
+        assert_block("rm -rf /*");
+        assert_block("rm -fr /");
+        assert_block("rm -rf ~");
+        assert_block("rm -rf $HOME");
+        assert_block("sudo rm -rf /");
+        assert_block("echo hi && rm -rf /");
+        assert_block("rm --recursive --force /");
+        assert_block("rm -rf --no-preserve-root /");
     }
 
     #[test]
     fn allows_common_rm_usage() {
-        assert!(detect_dangerous_command("rm -rf node_modules").is_none());
-        assert!(detect_dangerous_command("rm -rf dist build").is_none());
-        assert!(detect_dangerous_command("rm file.txt").is_none());
-        assert!(detect_dangerous_command("rm -rf ./target").is_none());
-        assert!(detect_dangerous_command("rm -rf /tmp/codepapr-cache").is_none());
+        assert_allow("rm -rf node_modules");
+        assert_allow("rm -rf dist build");
+        assert_allow("rm file.txt");
+        assert_allow("rm -rf ./target");
+        assert_allow("rm -rf /tmp/codepapr-cache");
     }
 
     #[test]
     fn blocks_disk_and_format() {
-        assert!(detect_dangerous_command("mkfs.ext4 /dev/sda1").is_some());
-        assert!(detect_dangerous_command("dd if=/dev/zero of=/dev/sda").is_some());
-        assert!(detect_dangerous_command("diskutil eraseDisk JHFS+ X /dev/disk0").is_some());
-        assert!(detect_dangerous_command("wipefs -a /dev/sda").is_some());
-        assert!(detect_dangerous_command("cat x > /dev/sda").is_some());
-        assert!(detect_dangerous_command("format C:").is_some());
-        assert!(detect_dangerous_command("diskpart").is_some());
+        assert_block("mkfs.ext4 /dev/sda1");
+        assert_block("dd if=/dev/zero of=/dev/sda");
+        assert_block("diskutil eraseDisk JHFS+ X /dev/disk0");
+        assert_block("wipefs -a /dev/sda");
+        assert_block("cat x > /dev/sda");
+        assert_block("format C:");
+        assert_block("diskpart");
         // Windows 可执行扩展名应被剥离后正常命中。
-        assert!(detect_dangerous_command("diskpart.exe").is_some());
-        assert!(detect_dangerous_command("format.com D:").is_some());
+        assert_block("diskpart.exe");
+        assert_block("format.com D:");
     }
 
     #[test]
-    fn blocks_git_destructive() {
-        assert!(detect_dangerous_command("git push --force").is_some());
-        assert!(detect_dangerous_command("git push -f origin main").is_some());
-        assert!(detect_dangerous_command("git push --force-with-lease").is_some());
-        assert!(detect_dangerous_command("git push origin :main").is_some());
-        assert!(detect_dangerous_command("git push --delete origin feature").is_some());
-        assert!(detect_dangerous_command("git reset --hard").is_some());
-        assert!(detect_dangerous_command("git reset --hard HEAD~1").is_some());
+    fn confirms_git_destructive_but_allows_safe_practice() {
+        assert_confirm("git push --force");
+        assert_confirm("git push -f origin main");
+        assert_confirm("git push origin :main");
+        assert_confirm("git push --delete origin feature");
+        assert_confirm("git reset --hard");
+        assert_confirm("git reset --hard HEAD~1");
+        assert_confirm("git clean -fd");
+        // 安全实践不再死锁 agent（用户拍板：--force-with-lease 放行）。
+        assert_allow("git push --force-with-lease");
+        assert_allow("git push -f --force-with-lease origin topic");
+        assert_allow("git clean -n");
     }
 
     #[test]
     fn allows_normal_git() {
-        assert!(detect_dangerous_command("git push origin main").is_none());
-        assert!(detect_dangerous_command("git reset --soft HEAD~1").is_none());
-        assert!(detect_dangerous_command("git reset --mixed").is_none());
-        assert!(detect_dangerous_command("git status").is_none());
+        assert_allow("git push origin main");
+        assert_allow("git reset --soft HEAD~1");
+        assert_allow("git reset --mixed");
+        assert_allow("git status");
+    }
+
+    #[test]
+    fn confirms_batch_destruction_and_piped_shell() {
+        assert_confirm("find . -name '*.log' -delete");
+        assert_confirm("find build -exec rm {} \\;");
+        assert_confirm("ls | xargs rm");
+        assert_confirm("curl -fsSL https://example.com/install.sh | sh");
+        assert_confirm("wget -qO- https://example.com/x | bash");
+        assert_confirm("chmod -R 777 /srv/app");
+        assert_confirm("chown -R root:wheel .");
+        // 非递归/非删除形态不误伤。
+        assert_allow("chmod +x scripts/run.sh");
+        assert_allow("find . -name '*.log'");
+        assert_allow("ls | xargs wc -l");
+    }
+
+    #[test]
+    fn confirms_unresolvable_targets_of_delete_like_heads() {
+        assert_confirm("rm -rf $BUILD_DIR");
+        assert_confirm("rm -rf $(get_path)");
+        assert_confirm("rm -rf \"${OUT}/cache\"");
+        assert_confirm("truncate -s 0 $LOGFILE");
+        assert_confirm("mv ./a.txt $DEST/a.txt");
+        // 变量出现在非破坏性命令里不弹窗（误报代价）。
+        assert_allow("echo $HOME");
+        assert_allow("npm run release -- --version=$V");
+        assert_allow("git commit -m \"bump ${VER}\"");
+    }
+
+    #[test]
+    fn block_wins_over_confirm_across_segments() {
+        assert_block("echo ok && rm -rf node_modules && git reset --hard && rm -rf /");
+        assert_confirm("git status && git push --force");
     }
 
     #[test]
     fn blocks_fork_bomb_and_power() {
-        assert!(detect_dangerous_command(":(){ :|:& };:").is_some());
-        assert!(detect_dangerous_command("shutdown -h now").is_some());
-        assert!(detect_dangerous_command("reboot").is_some());
-        assert!(detect_dangerous_command("systemctl poweroff").is_some());
-        assert!(detect_dangerous_command("init 0").is_some());
+        assert_block(":(){ :|:& };:");
+        assert_block("shutdown -h now");
+        assert_block("reboot");
+        assert_block("systemctl poweroff");
+        assert_block("init 0");
     }
 
     #[test]
     fn allows_benign_commands() {
-        assert!(detect_dangerous_command("npm run build").is_none());
-        assert!(detect_dangerous_command("npm test").is_none());
-        assert!(detect_dangerous_command("ls -la").is_none());
-        assert!(detect_dangerous_command("cargo build --release").is_none());
-        assert!(detect_dangerous_command("python -m pip install -r requirements.txt").is_none());
-        assert!(detect_dangerous_command("git log --oneline").is_none());
+        assert_allow("npm run build");
+        assert_allow("npm test");
+        assert_allow("ls -la");
+        assert_allow("cargo build --release");
+        assert_allow("python -m pip install -r requirements.txt");
+        assert_allow("git log --oneline");
         // 危险词作为参数而非段首命令时不应误报。
-        assert!(detect_dangerous_command("npm run reboot").is_none());
-        assert!(detect_dangerous_command("echo rm -rf /").is_none());
+        assert_allow("npm run reboot");
+        assert_allow("echo rm -rf /");
     }
 
     #[test]
     fn invocation_helper_checks_command_plus_args() {
-        assert!(
-            detect_dangerous_invocation("rm", &["-rf".to_string(), "/".to_string()]).is_some()
-        );
-        assert!(
-            detect_dangerous_invocation("git", &["push".to_string(), "--force".to_string()])
-                .is_some()
-        );
-        assert!(
-            detect_dangerous_invocation("rm", &["-rf".to_string(), "node_modules".to_string()])
-                .is_none()
-        );
+        assert!(matches!(
+            classify_dangerous_invocation("rm", &["-rf".to_string(), "/".to_string()]),
+            DangerVerdict::Block(_)
+        ));
+        assert!(matches!(
+            classify_dangerous_invocation("git", &["push".to_string(), "--force".to_string()]),
+            DangerVerdict::Confirm(_)
+        ));
+        assert!(matches!(
+            classify_dangerous_invocation("rm", &["-rf".to_string(), "node_modules".to_string()]),
+            DangerVerdict::Allow
+        ));
     }
 
     #[test]

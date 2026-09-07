@@ -218,6 +218,7 @@ fn main() {
             commands::run_workspace_command,
             commands::run_workspace_shell_command,
             commands::cancel_running_command,
+            commands::classify_dangerous_command,
             commands::snapshot_ensure,
             commands::snapshot_create,
             commands::snapshot_list,

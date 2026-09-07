@@ -9,6 +9,12 @@ export interface ExternalAccessRequest {
   operation: 'read' | 'list' | 'write' | 'execute';
   workspacePath?: string;
   allowFile?: boolean;
+  /** 缺省 'externalPath'。'dangerousCommand'：高危命令一次性确认
+   *  （path 承载命令文本；批准只对当次调用生效，绝不产生持久授权）。 */
+  kind?: 'externalPath' | 'dangerousCommand';
+  /** dangerousCommand 专用：完整命令行与风险说明（弹窗展示）。 */
+  command?: string;
+  reason?: string;
 }
 
 export interface ExternalAccessResponse {
@@ -100,6 +106,12 @@ interface PermissionStoreState {
     approved: boolean,
     scope: 'directory' | 'file',
   ) => Promise<void>;
+  requestDangerousCommand: (
+    command: string,
+    reason: string,
+    workspacePath?: string,
+    signal?: AbortSignal,
+  ) => Promise<boolean>;
   isExternalPathAllowed: (path: string) => boolean;
   addAllowedDir: (dir: string) => void;
   addAllowedFile: (file: string) => void;
@@ -217,7 +229,10 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
         : new DOMException('权限请求已取消', 'AbortError');
     const normalized = normalizePathDots(rawPath);
     const existing = pendingQueue.find(
-      (entry) => entry.request.path === normalized && entry.request.operation === operation,
+      (entry) =>
+        entry.request.kind !== 'dangerousCommand' &&
+        entry.request.path === normalized &&
+        entry.request.operation === operation,
     );
     if (existing) {
       return new Promise<ExternalAccessResponse>((resolve, reject) => {
@@ -285,13 +300,63 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
     });
   },
 
+  requestDangerousCommand: (command, reason, workspacePath, signal) => {
+    const abortReason = () =>
+      signal?.reason instanceof Error
+        ? signal.reason
+        : new DOMException('权限请求已取消', 'AbortError');
+    return new Promise<boolean>((resolve, reject) => {
+      const wasEmpty = pendingQueue.length === 0;
+      const entry: PendingExternalRequest = {
+        request: {
+          id: createId(),
+          path: command,
+          operation: 'execute',
+          kind: 'dangerousCommand',
+          command,
+          reason,
+          allowFile: false,
+          ...(workspacePath ? { workspacePath } : {}),
+        },
+        // 高危命令确认是一次性的：对外复用 respond 通道，但只暴露批准与否。
+        resolve: (value) => resolve(value.approved),
+        reject,
+        responding: false,
+        trackedBySignal: signal !== undefined,
+      };
+      pendingQueue.push(entry);
+      if (signal) {
+        if (signal.aborted) {
+          pendingQueue.pop();
+          reject(abortReason());
+          return;
+        }
+        signal.addEventListener(
+          'abort',
+          () => {
+            const index = pendingQueue.indexOf(entry);
+            if (index === -1) return;
+            pendingQueue.splice(index, 1);
+            syncPending(set);
+            if (pendingQueue.length === 0) publishPermissionWait(false);
+            reject(abortReason());
+          },
+          { once: true },
+        );
+      }
+      syncPending(set);
+      if (wasEmpty) publishPermissionWait(true);
+    });
+  },
+
   respondToExternalAccess: async (approved, scope) => {
     const entry = pendingQueue[0];
     if (!entry || entry.responding) return;
     entry.responding = true;
 
     try {
-      if (approved) {
+      // dangerousCommand 的一次性确认绝不落盘持久授权（grant 仅外部路径）。
+      if (approved && entry.request.kind !== 'dangerousCommand') {
         let grantScope: 'directory' | 'file' = scope;
         let grantPath: string;
         if (

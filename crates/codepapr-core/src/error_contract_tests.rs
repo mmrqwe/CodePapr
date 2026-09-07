@@ -9,7 +9,9 @@
 
 use crate::agent_runtime_tools::{apply_search_replace, require_path};
 use crate::shell::background::run_workspace_shell_command_impl;
-use crate::shell::dangerous::{detect_dangerous_command, detect_repo_content_search};
+use crate::shell::dangerous::{
+    classify_dangerous_command, detect_repo_content_search, DangerVerdict,
+};
 use crate::workspace_fs::search::SearchSkipStats;
 use serde_json::json;
 
@@ -115,10 +117,32 @@ fn blocked_dangerous_command_explains_and_points_to_user_channel() {
 }
 
 #[test]
-fn git_reset_hard_interception_suggests_checkpoint_rollback() {
-    let reason = detect_dangerous_command("git reset --hard HEAD~1")
-        .unwrap_or_else(|| panic!("git reset --hard 应被拦截"));
-    assert!(reason.contains("检查点回滚"), "须引导内置回滚而非硬 reset: {reason}");
+fn git_reset_hard_is_confirm_verdict_pointing_to_checkpoint() {
+    let verdict = classify_dangerous_command("git reset --hard HEAD~1");
+    assert!(
+        matches!(verdict, DangerVerdict::Confirm(_)),
+        "reset --hard 应走确认而非死锁: {verdict:?}"
+    );
+    let reason = verdict.reason().unwrap_or_default();
+    assert!(reason.contains("检查点"), "须说明检查点兜底: {reason}");
+}
+
+#[test]
+fn impl_layer_defers_confirm_verdict_to_entry_gates() {
+    // 兜底层只杀 Block 级：Confirm 级由宿主入口（sidecar dispatch/UI handler）确认。
+    // 用一个不存在的工作区路径，保证绝不会真的 spawn 命令。
+    let err = must_err(run_workspace_shell_command_impl(
+        "/tmp/codepapr-contract-test-nonexistent-ws".to_string(),
+        "git reset --hard".to_string(),
+        None,
+        None,
+        None,
+        None,
+    ));
+    assert!(
+        !err.contains("高危命令被拦截"),
+        "Confirm 级不应在 impl 层被杀: {err}"
+    );
 }
 
 #[test]
@@ -139,16 +163,17 @@ fn repo_search_interception_routes_to_grep_tool_with_feature_names() {
 #[test]
 fn dangerous_detector_stays_conservative_on_ordinary_build_commands() {
     // 契约的另一半：误报会把 agent 死锁在无关命令上（论文结论③：
-    // 工具反馈质量决定收敛）。这些必须放行。
+    // 工具反馈质量决定收敛）。这些必须 Allow（Block/Confirm 都不行）。
     for command in [
         "rm -rf node_modules",
         "npm run build",
         "git push origin main",
         "echo rm -rf /",
+        "npm run reboot",
     ] {
         assert!(
-            detect_dangerous_command(command).is_none(),
-            "常规命令被误拦: {command}"
+            matches!(classify_dangerous_command(command), DangerVerdict::Allow),
+            "常规命令被误拦/误确认: {command}"
         );
     }
 }

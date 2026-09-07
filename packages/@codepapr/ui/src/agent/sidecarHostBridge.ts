@@ -14,6 +14,10 @@ interface PermissionRequestPayload {
   workspacePath: string;
   exists: boolean;
   allowFile: boolean;
+  /** 缺省 externalPath；dangerousCommand 时展示 command/reason，once-only。 */
+  kind?: 'externalPath' | 'dangerousCommand';
+  command?: string;
+  reason?: string;
 }
 
 interface PermissionCancelPayload {
@@ -41,17 +45,33 @@ export async function attachSidecarHostBridge(options: {
     controllers.set(event.payload.requestId, controller);
     void (async () => {
       try {
-        const result = await usePermissionStore.getState().requestExternalAccess(
-          event.payload.path,
-          event.payload.operation,
-          event.payload.workspacePath,
-          event.payload.allowFile,
-          controller.signal,
-        );
+        let approved: boolean;
+        let scope: string;
+        if (event.payload.kind === 'dangerousCommand') {
+          // 高危命令确认：Rust 侧批准后自行创建 fail-closed 检查点，
+          // 这里只回报批准与否（scope 用 'once'，不产生任何持久授权）。
+          approved = await usePermissionStore.getState().requestDangerousCommand(
+            event.payload.command ?? event.payload.path,
+            event.payload.reason ?? '该命令具有破坏性，需用户确认。',
+            event.payload.workspacePath,
+            controller.signal,
+          );
+          scope = 'once';
+        } else {
+          const result = await usePermissionStore.getState().requestExternalAccess(
+            event.payload.path,
+            event.payload.operation,
+            event.payload.workspacePath,
+            event.payload.allowFile,
+            controller.signal,
+          );
+          approved = result.approved;
+          scope = result.scope;
+        }
         await invoke('agent_runtime_permission_respond', {
           requestId: event.payload.requestId,
-          approved: result.approved,
-          scope: result.scope,
+          approved,
+          scope,
         });
       } catch {
         await invoke('agent_runtime_permission_respond', {

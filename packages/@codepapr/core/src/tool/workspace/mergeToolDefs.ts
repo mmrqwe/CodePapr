@@ -239,7 +239,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
   // ──── 13. bash ────
   {
     name: 'bash',
-    description: '在项目环境中执行 shell 命令（穿过 shell 解释，支持管道、&&、变量展开等）。默认阻塞等待并返回完整输出；background:true 后台运行并返回 pid。action: run(默认，执行命令)|list(列出后台进程及日志尾部)|stop(停止指定 pid)|stop_all(停止全部后台进程)。长命令（dev server、构建、测试）建议用 background:true。更换工作目录请用 workdir 参数，不要在命令里 cd（不跨调用保留）。进程/端口排查：ps/top 在 macOS 沙箱内被系统禁止 exec（用 action: list、pgrep -fl、lsof -iTCP 代替）。',
+    description: '在项目环境中执行 shell 命令（穿过 shell 解释，支持管道、&&、变量展开等）。默认阻塞等待并返回完整输出；background:true 后台运行并返回 pid。action: run(默认，执行命令)|list(列出后台进程及日志尾部)|stop(停止指定 pid)|stop_all(停止全部后台进程)。长命令（dev server、构建、测试）建议用 background:true。更换工作目录请用 workdir 参数，不要在命令里 cd（不跨调用保留）。进程/端口排查：ps/top 在 macOS 沙箱内被系统禁止 exec（用 action: list、pgrep -fl、lsof -iTCP 代替）。破坏性命令（git push --force / git reset --hard / find -delete / 管道喂 sh 解释器 / rm 目标含变量等）会弹用户一次性确认并在批准后自动建检查点，被拒时勿改写命令绕过，改用 --force-with-lease、内置检查点回滚或 question 工具说明理由。',
     parameters: {
       type: 'object',
       properties: {

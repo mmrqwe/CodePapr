@@ -1,7 +1,7 @@
 use crate::shared::{
     canonical_workspace, child_reap_timeout, normalize_workspace_filter, unix_millis,
 };
-use crate::shell::dangerous::{detect_dangerous_command, detect_dangerous_invocation};
+use crate::shell::dangerous::{detect_fatal_block_invocation, detect_fatal_block_reason};
 use crate::shell::guard::{
     build_shell_command_line, create_shell_session_id, detect_default_shell,
     find_unquoted_shell_version_constraint, write_shell_payload,
@@ -236,7 +236,7 @@ pub fn send_shell_input(
         validate_restricted_shell_command(&input, workspace)?;
         crate::shell::path_guard::ensure_command_paths_accessible(workspace, &input, &[])?;
 
-        if let Some(reason) = detect_dangerous_command(&input) {
+        if let Some(reason) = detect_fatal_block_reason(&input) {
             return Err(format!(
                 "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"
             ));
@@ -271,7 +271,7 @@ pub fn send_shell_command(
             &command,
             args.as_deref().unwrap_or(&[]),
         )?;
-        if let Some(reason) = detect_dangerous_invocation(&command, args.as_deref().unwrap_or(&[]))
+        if let Some(reason) = detect_fatal_block_invocation(&command, args.as_deref().unwrap_or(&[]))
         {
             return Err(format!(
                 "高危命令被拦截：{reason}。如确需执行，请用户在终端手动运行。"

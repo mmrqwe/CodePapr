@@ -41,20 +41,25 @@ pub async fn snapshot_create(
     workspace_path: String,
     label: String,
 ) -> Result<Option<SnapshotInfo>, String> {
-    run_blocking_workspace_task(move || {
-        let workspace = PathBuf::from(workspace_path);
-        with_workspace_git_write_lock(&workspace, || {
-            let engine = SnapshotEngine::new(&workspace);
-            // Benign skip: an empty/new workspace (or one whose files are all ignored)
-            // has nothing to snapshot. Return None — not an error — so the UI doesn't
-            // show a "snapshot failed" banner for a normal empty workspace.
-            if !engine.has_snapshotable_files() {
-                return Ok(None);
-            }
-            engine.create(&label).map(Some)
-        })
+    run_blocking_workspace_task(move || snapshot_create_blocking(&workspace_path, &label))
+        .await
+}
+
+/// 同步创建检查点：供 sidecar 宿主在高危命令执行前 fail-closed 兜底使用
+/// （dispatch 栈已是阻塞线程，不能 await 异步版本）。语义与 snapshot_create
+/// 一致：空工作区/全忽略返回 None（无内容可保护，不算失败）。
+pub fn snapshot_create_blocking(
+    workspace_path: &str,
+    label: &str,
+) -> Result<Option<SnapshotInfo>, String> {
+    let workspace = PathBuf::from(workspace_path);
+    with_workspace_git_write_lock(&workspace, || {
+        let engine = SnapshotEngine::new(&workspace);
+        if !engine.has_snapshotable_files() {
+            return Ok(None);
+        }
+        engine.create(label).map(Some)
     })
-    .await
 }
 
 pub async fn snapshot_list(

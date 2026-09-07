@@ -300,11 +300,21 @@ async fn execute_turn(
                                 let request_id = payload.get("requestId").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                 let op = payload.get("operation").and_then(|v| v.as_str()).unwrap_or("unknown");
                                 let path = payload.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                                let kind = payload
+                                    .get("kind")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("externalPath")
+                                    .to_string();
+                                let reason = payload.get("reason").and_then(|v| v.as_str()).unwrap_or("");
 
                                 let approved = if yolo.load(Ordering::SeqCst) {
                                     true
                                 } else {
-                                    eprint!("\n[Permission Required] Operation: {op} on '{path}'\nApprove this action? [y/N]: ");
+                                    if kind == "dangerousCommand" {
+                                        eprint!("\n[高危命令确认] {reason}\n命令: {path}\n执行前将自动创建检查点。批准本次执行? [y/N]: ");
+                                    } else {
+                                        eprint!("\n[Permission Required] Operation: {op} on '{path}'\nApprove this action? [y/N]: ");
+                                    }
                                     std::io::stderr().flush()?;
                                     let mut answer = String::new();
                                     let _ = std::io::stdin().read_line(&mut answer);

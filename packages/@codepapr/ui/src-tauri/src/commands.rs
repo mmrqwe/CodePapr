@@ -761,6 +761,21 @@ pub async fn cancel_running_command(app: AppHandle, token: String) -> Result<Val
     rpc(&app, "shell/cancel", json!({ "token": token })).await
 }
 
+/// 高危命令三值裁决（纯字符串分析，无副作用）：UI exec handler 在调用执行
+/// 命令前询问 verdict，Confirm 级走用户确认 + 检查点，与 Rust 宿主入口层同一套规则。
+#[tauri::command]
+pub fn classify_dangerous_command(command_line: String) -> Result<Value, String> {
+    Ok(match codepapr_core::shell::dangerous::classify_dangerous_command(&command_line) {
+        codepapr_core::shell::dangerous::DangerVerdict::Block(reason) => {
+            json!({ "verdict": "block", "reason": reason })
+        }
+        codepapr_core::shell::dangerous::DangerVerdict::Confirm(reason) => {
+            json!({ "verdict": "confirm", "reason": reason })
+        }
+        codepapr_core::shell::dangerous::DangerVerdict::Allow => json!({ "verdict": "allow" }),
+    })
+}
+
 #[tauri::command]
 pub async fn start_workspace_background_command(
     app: AppHandle,
