@@ -441,8 +441,14 @@ async fn drive(
                 )
                 .await;
             if !approved {
-                denied = true;
-                break;
+                // dangerousCommand 在无人值守模式默认拒绝：只把拒绝作为工具错误
+                // 回给 agent（agent 可改走非破坏性路径继续），不像外部路径拒绝
+                // 那样中断整个 run —— 后者会破坏「Block 只报错不中止」的旧语义。
+                if kind != "dangerousCommand" {
+                    denied = true;
+                    break;
+                }
+                continue;
             }
             continue;
         }

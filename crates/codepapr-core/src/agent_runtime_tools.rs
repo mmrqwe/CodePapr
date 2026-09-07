@@ -464,13 +464,47 @@ fn dispatch_tool_inner(
             let content = arg_string_req(args, &["content"])?;
             ensure_codepapr_access(&path, "write", &ctx.mode, include_apps)?;
             ensure_external_allowed(sink, runtime_id, ctx, req, &path, "write", cancel)?;
+            // 前置 AST 语法预检（对齐 TS write handler）：新建文件 before=""；
+            // 读取既有内容失败按空处理（只影响预检强度，不阻断写入本身）。
+            let before = workspace_fs::read::read_text_file_impl(
+                ctx.workspace_path.clone(),
+                path.clone(),
+                Some(20_000_000),
+                None,
+                None,
+                None,
+                None,
+            )
+            .map(|current| current.content)
+            .unwrap_or_default();
+            let mut notes: Vec<String> = Vec::new();
+            let (rejected, ast_note) = ast_pre_check(&path, &before, &content);
+            if let Some(rejected) = rejected {
+                return Err(rejected);
+            }
+            if let Some(ast_note) = ast_note {
+                notes.push(ast_note);
+            }
             let result = workspace_fs::write::write_text_file_impl(
                 ctx.workspace_path.clone(),
                 path.clone(),
-                content,
+                content.clone(),
             )?;
+            if let Some(verify_note) = verify_written_text(&ctx.workspace_path, &path, &content)? {
+                notes.push(verify_note);
+            }
+            let (diag_note, diagnostics) = lsp_diagnostics_feedback(sink, &ctx.workspace_path, &path);
+            notes.push(diag_note);
             let mutated = vec![result.path.clone()];
-            Ok(ok_result(result, mutated))
+            let mut value = serde_json::to_value(result).map_err(|err| err.to_string())?;
+            value["notes"] = json!(notes);
+            if let Some(diagnostics) = diagnostics {
+                value["diagnostics"] = diagnostics;
+            }
+            Ok(HostedOutcome {
+                result: Ok(value),
+                mutated,
+            })
         }
         "edit" | "workspace_apply_patch" => {
             let path = require_path(args)?;
@@ -490,26 +524,53 @@ fn dispatch_tool_inner(
                     "文件 {path} 超过 20MB 上限，请改用 write 工具重写整个文件"
                 ));
             }
+            let search = arg_string_req(args, &["search"])?;
+            // 歧义预检（对齐 TS describeAmbiguousMatches）：多匹配时报出各自行号与所在符号
+            if arg_bool(args, "replaceAll") != Some(true) {
+                if let Some(message) = describe_ambiguous_matches(&path, &current.content, &search) {
+                    return Err(message);
+                }
+            }
             let patched = apply_search_replace(
                 &current.content,
-                &arg_string_req(args, &["search"])?,
+                &search,
                 &arg_string_req(args, &["replace"])?,
                 arg_bool(args, "replaceAll"),
                 arg_usize(args, "expectedOccurrences"),
             )?;
+            let mut notes: Vec<String> = Vec::new();
+            let (rejected, ast_note) = ast_pre_check(&path, &current.content, &patched.content);
+            if let Some(rejected) = rejected {
+                return Err(rejected);
+            }
+            if let Some(ast_note) = ast_note {
+                notes.push(ast_note);
+            }
             let result = workspace_fs::write::write_text_file_impl(
                 ctx.workspace_path.clone(),
                 path.clone(),
-                patched.content,
+                patched.content.clone(),
             )?;
+            if let Some(verify_note) =
+                verify_written_text(&ctx.workspace_path, &path, &patched.content)?
+            {
+                notes.push(verify_note);
+            }
+            let (diag_note, diagnostics) = lsp_diagnostics_feedback(sink, &ctx.workspace_path, &path);
+            notes.push(diag_note);
             let mutated = vec![result.path.clone()];
+            let mut value = json!({
+                "path": result.path,
+                "replacements": patched.replacements,
+                "bytes": result.bytes,
+                "change": result.change,
+                "notes": notes,
+            });
+            if let Some(diagnostics) = diagnostics {
+                value["diagnostics"] = diagnostics;
+            }
             Ok(HostedOutcome {
-                result: Ok(json!({
-                    "path": result.path,
-                    "replacements": patched.replacements,
-                    "bytes": result.bytes,
-                    "change": result.change,
-                })),
+                result: Ok(value),
                 mutated,
             })
         }
@@ -649,6 +710,191 @@ fn dispatch_tool_inner(
     }
 }
 
+/// AST 语法预检（对齐 TS workspaceToolContext.astPreCheck）：仅当修改「增加」
+/// 语法错误数时拒绝落盘；无 tree-sitter 支持的语言降级为 note，绝不阻断。
+/// 返回 (rejected 原因, 降级 note)。
+fn ast_pre_check(relative_path: &str, before: &str, after: &str) -> (Option<String>, Option<String>) {
+    let Some(language_id) = crate::agent_runtime_lsp::lsp_language_from_path(relative_path) else {
+        return (
+            None,
+            Some(format!("AST 语法预检跳过：无法识别 {relative_path} 的语言类型。")),
+        );
+    };
+    let before_check = crate::symbol_provider::check_syntax_for_language(language_id, before);
+    let after_check = crate::symbol_provider::check_syntax_for_language(language_id, after);
+    if !before_check.supported || !after_check.supported {
+        return (
+            None,
+            Some(format!("AST 语法预检跳过：{language_id} 无 tree-sitter 语法支持。")),
+        );
+    }
+    if after_check.error_count > before_check.error_count {
+        let sample: Vec<String> = after_check
+            .errors
+            .iter()
+            .take(5)
+            .map(|e| format!("L{}:{}({})", e.line, e.column, e.kind))
+            .collect();
+        let sample = if sample.is_empty() {
+            "未定位到具体位置".to_string()
+        } else {
+            sample.join("、")
+        };
+        return (
+            Some(format!(
+                "AST 语法预检拦截：修改后语法错误从 {} 增至 {}（{sample}）。修改已取消，请检查括号/引号闭合后重试。",
+                before_check.error_count, after_check.error_count
+            )),
+            None,
+        );
+    }
+    (None, None)
+}
+
+/// search 在（LF 归一化）content 中各次匹配的 1-based 行号。
+fn search_occurrence_lines(content: &str, search: &str) -> Vec<usize> {
+    if search.is_empty() {
+        return Vec::new();
+    }
+    let file_has_crlf = content.contains("\r\n");
+    let search_lf = search.replace("\r\n", "\n");
+    let content_lf = if file_has_crlf {
+        content.replace("\r\n", "\n")
+    } else {
+        content.to_string()
+    };
+    let mut lines = Vec::new();
+    let mut from = 0usize;
+    while let Some(offset) = content_lf[from..].find(&search_lf) {
+        let start = from + offset;
+        lines.push(1 + content_lf[..start].matches('\n').count());
+        from = start + search_lf.len();
+    }
+    lines
+}
+
+/// 多处匹配消歧预检（对齐 TS describeAmbiguousMatches）：报出前 8 处行号与所在
+/// 符号，并澄清 expectedOccurrences 不能消歧。None = 无歧义（交给通用报错）。
+fn describe_ambiguous_matches(relative_path: &str, content: &str, search: &str) -> Option<String> {
+    let lines = search_occurrence_lines(content, search);
+    if lines.len() <= 1 {
+        return None;
+    }
+    let mut symbols: Vec<(usize, String)> =
+        crate::agent_runtime_lsp::lsp_language_from_path(relative_path)
+            .map(|language_id| {
+                let mut syms: Vec<(usize, String)> =
+                    crate::symbol_provider::extract_file_symbols_for_language(language_id, content)
+                        .into_iter()
+                        .map(|s| (s.line, format!("{} {}", s.kind, s.name)))
+                        .collect();
+                syms.sort_by_key(|(line, _)| *line);
+                syms
+            })
+            .unwrap_or_default();
+    symbols.dedup_by_key(|(line, _)| *line);
+    let limit = lines.len().min(8);
+    let details: Vec<String> = lines[..limit]
+        .iter()
+        .map(|line| match symbols.iter().filter(|(l, _)| l <= line).last() {
+            Some((_, sym)) => format!("  L{line}（位于 {sym}）"),
+            None => format!("  L{line}"),
+        })
+        .collect();
+    let omitted = if lines.len() > limit {
+        format!("\n  …其余 {} 处省略", lines.len() - limit)
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "匹配到 {} 处相同文本块，无法确定修改目标。请加长 search 纳入上下唯一内容，或设置 replaceAll=true（expectedOccurrences 只能校验数量，不能消歧）：\n{}{}",
+        lines.len(),
+        details.join("\n"),
+        omitted
+    ))
+}
+
+/// 写后验证回读：Ok(None)=字节一致确认；Ok(Some(note))=回读本身失败（外部路径
+/// once 授权被消费等场景），降级为提示而非误报回滚；Err=内容不一致（需回滚）。
+fn verify_written_text(
+    workspace_path: &str,
+    relative_path: &str,
+    expected: &str,
+) -> Result<Option<String>, String> {
+    let max_bytes = expected.len().saturating_add(1024).max(16_384);
+    let verified = match workspace_fs::read::read_text_file_impl(
+        workspace_path.to_string(),
+        relative_path.to_string(),
+        Some(max_bytes),
+        None,
+        None,
+        None,
+        None,
+    ) {
+        Ok(verified) => verified,
+        Err(err) => {
+            // 刚获批的外部路径可能携带 only-once 读权限；验证回读失败不应
+            // 否决一次已成功落盘的重命名写入（rename 本身是原子的）。
+            return Ok(Some(format!(
+                "{relative_path} 写后验证回读失败（{err}），内容未逐字节确认。"
+            )));
+        }
+    };
+    // 回读被字节上限截断时（读写上限一致，理论不发生）降级为前缀比对，避免误报失败
+    let matches = if verified.truncated_by_bytes {
+        expected.starts_with(&verified.content)
+    } else {
+        verified.content == expected
+    };
+    if !matches {
+        return Err(format!(
+            "文件写入验证失败：{relative_path} 写入后内容与预期不一致。可能由云同步锁或文件系统问题导致，请重试。"
+        ));
+    }
+    Ok(None)
+}
+
+/// 写后 LSP 诊断钩子（对齐 TS lspDiagnosticsHook 文案）：best-effort，
+/// 诊断失败绝不阻断已成功的写入，只降级为 note。返回 (note, diagnostics?)。
+fn lsp_diagnostics_feedback(
+    sink: &SharedEventSink,
+    workspace_path: &str,
+    relative_path: &str,
+) -> (String, Option<Value>) {
+    let Some(language_id) = crate::agent_runtime_lsp::lsp_language_from_path(relative_path) else {
+        return (
+            format!("LSP 诊断跳过：无法识别 {relative_path} 的语言类型。"),
+            None,
+        );
+    };
+    match crate::agent_runtime_lsp::dispatch(
+        Some(&**sink),
+        workspace_path,
+        "workspace_lsp_diagnostics",
+        &json!({ "relativePath": relative_path }),
+    ) {
+        Ok((value, _)) => {
+            let count = value
+                .get("totalCount")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let diagnostics = value.get("diagnostics").cloned().unwrap_or_else(|| json!([]));
+            if count == 0 {
+                ("LSP 检查通过，无编译错误。".to_string(), Some(diagnostics))
+            } else {
+                (
+                    format!("修改已应用，但触发 {count} 个编译诊断，请检查并继续修复。"),
+                    Some(diagnostics),
+                )
+            }
+        }
+        Err(_) => (
+            format!("LSP 诊断跳过：{language_id} 文档同步失败或无可用 LSP，诊断可能不是最新。如需确证请运行 diagnostics。"),
+            None,
+        ),
+    }
+}
+
 fn apply_multi_patch(
     sink: &SharedEventSink,
     runtime_id: &str,
@@ -684,6 +930,13 @@ fn apply_multi_patch(
             Some(existing) => existing.after.clone(),
             None => current.content.clone(),
         };
+        // 歧义预检（对齐 TS：逐 patch 对原始内容检查，路径前缀定位）
+        if arg_bool(patch, "replaceAll") != Some(true) {
+            let search = arg_string_req(patch, &["search"])?;
+            if let Some(message) = describe_ambiguous_matches(&path, &current.content, &search) {
+                return Err(format!("{path}: {message}"));
+            }
+        }
         let patched = apply_search_replace(
             &base,
             &arg_string_req(patch, &["search"])?,
@@ -701,23 +954,47 @@ fn apply_multi_patch(
             });
         }
     }
+    // 前置 AST 语法预检：任一文件引入新语法错误则整体拦截、全部不落盘（对齐 TS #25）
+    let mut notes: Vec<String> = Vec::new();
+    for entry in &planned {
+        let Some(before) = entry.before.as_deref() else {
+            continue;
+        };
+        let (rejected, note) = ast_pre_check(&entry.path, before, &entry.after);
+        if let Some(rejected) = rejected {
+            return Err(format!("{}: {rejected}", entry.path));
+        }
+        if let Some(note) = note {
+            notes.push(format!("{}: {note}", entry.path));
+        }
+    }
     let results = commit_planned_patch_writes(&ctx.workspace_path, &planned)?;
-    let files: Vec<Value> = results
-        .iter()
-        .map(|result| {
-            json!({
-                "path": result.path,
-                "bytes": result.bytes,
-                "change": result.change,
-            })
-        })
-        .collect();
-    let mutated: Vec<String> = results.into_iter().map(|result| result.path).collect();
+    let mut files: Vec<Value> = Vec::new();
+    let mut mutated: Vec<String> = Vec::new();
+    for ((result, verify_note), entry) in results.into_iter().zip(&planned) {
+        if let Some(verify_note) = verify_note {
+            notes.push(format!("{}: {verify_note}", entry.path));
+        }
+        // 后置 LSP 诊断钩子：返回编译诊断供模型继续修复（无 LSP 则降级 note）
+        let (diag_note, diagnostics) = lsp_diagnostics_feedback(sink, &ctx.workspace_path, &entry.path);
+        notes.push(format!("{}: {diag_note}", entry.path));
+        let mut file = json!({
+            "path": result.path,
+            "bytes": result.bytes,
+            "change": result.change,
+        });
+        if let Some(diagnostics) = diagnostics {
+            file["diagnostics"] = diagnostics;
+        }
+        mutated.push(result.path.clone());
+        files.push(file);
+    }
     Ok(HostedOutcome {
         result: Ok(json!({
             "files": files,
             "totalFiles": files.len(),
             "totalPatches": patches.len(),
+            "notes": notes,
         })),
         mutated,
     })
@@ -733,19 +1010,21 @@ pub(crate) struct PlannedPatchWrite {
 
 /// 写盘阶段原子化（对齐 TS 侧 workspaceFileTools.ts #25 的回滚语义）：
 /// 逐文件「写入 + 写后验证」，任一文件失败则逆序回滚所有已落盘文件
-/// （新建文件删除、既有文件写回原文），整体报错。规划阶段已全量校验过
+/// （新建文件删除、旧文件恢复原文），整体报错。规划阶段已全量校验过
 /// patch 匹配，走到这里的残余失败窗口只有 IO/文件系统层。
+/// 返回 (写结果, 验证降级 note?)。
 pub(crate) fn commit_planned_patch_writes(
     workspace_path: &str,
     planned: &[PlannedPatchWrite],
-) -> Result<Vec<workspace_fs::types::WriteFileResult>, String> {
+) -> Result<Vec<(workspace_fs::types::WriteFileResult, Option<String>)>, String> {
     let total = planned.len();
-    let mut results: Vec<workspace_fs::types::WriteFileResult> = Vec::with_capacity(total);
+    let mut results: Vec<(workspace_fs::types::WriteFileResult, Option<String>)> =
+        Vec::with_capacity(total);
     let mut applied: Vec<&PlannedPatchWrite> = Vec::new();
     for (index, entry) in planned.iter().enumerate() {
         match write_and_verify_patch_file(workspace_path, entry) {
-            Ok(result) => {
-                results.push(result);
+            Ok(pair) => {
+                results.push(pair);
                 applied.push(entry);
             }
             Err(failure) => {
@@ -773,40 +1052,20 @@ pub(crate) fn commit_planned_patch_writes(
     Ok(results)
 }
 
-/// 写入并回读验证。验证不通过视为写失败：可能云同步/竞态吞掉了写入，
-/// 若信任"写成功"返回，模型后续基于错误前提继续改代码（TS 侧同理）。
+/// 写入并回读验证。内容不一致视为写失败（触发回滚）：可能云同步/竞态吞掉了
+/// 写入，若信任"写成功"返回，模型后续基于错误前提继续改代码（TS 侧同理）。
+/// 回读本身失败则降级为 note（rename 已原子落盘，不必因瞬时读失败而回滚）。
 fn write_and_verify_patch_file(
     workspace_path: &str,
     entry: &PlannedPatchWrite,
-) -> Result<workspace_fs::types::WriteFileResult, String> {
+) -> Result<(workspace_fs::types::WriteFileResult, Option<String>), String> {
     let result = workspace_fs::write::write_text_file_impl(
         workspace_path.to_string(),
         entry.path.clone(),
         entry.after.clone(),
     )?;
-    let verify_limit = entry.after.len().saturating_add(1024).max(16_384);
-    let verified = workspace_fs::read::read_text_file_impl(
-        workspace_path.to_string(),
-        entry.path.clone(),
-        Some(verify_limit),
-        None,
-        None,
-        None,
-        None,
-    )?;
-    // 回读被字节上限截断时降级为前缀比对（读写上限一致，理论不发生），对齐 TS assertWriteVerified
-    let matches = if verified.truncated_by_bytes {
-        entry.after.starts_with(&verified.content)
-    } else {
-        verified.content == entry.after
-    };
-    if !matches {
-        return Err(format!(
-            "文件写入验证失败：{} 写入后内容与预期不一致，可能由云同步锁或文件系统问题导致，请重试",
-            entry.path
-        ));
-    }
-    Ok(result)
+    let verify_note = verify_written_text(workspace_path, &entry.path, &entry.after)?;
+    Ok((result, verify_note))
 }
 
 /// 逆序回滚已写入的文件；返回 (成功回滚数, 失败说明列表)。
@@ -2407,6 +2666,70 @@ mod tests {
         assert!(!denied.allow_codepapr_apps);
         assert!(!denied.network);
         assert!(denied.workspace_write);
+    }
+
+    // ──── Phase 3 补齐：sidecar 写路径与 TS 宿主的反馈 parity ────
+
+    #[test]
+    fn ambiguous_matches_error_lists_line_numbers_like_ts_handler() {
+        let content = "x;\nx;\nconst y = 1;\nx;\n";
+        // 无歧义：单匹配
+        assert!(describe_ambiguous_matches("a.ts", content, "const y = 1;").is_none());
+        let message = describe_ambiguous_matches("a.ts", content, "x;")
+            .unwrap_or_else(|| panic!("三处匹配应触发富错误"));
+        assert!(message.contains("匹配到 3 处相同文本块"), "{message}");
+        assert!(message.contains("L1"), "{message}");
+        assert!(message.contains("L2"), "{message}");
+        assert!(message.contains("L4"), "{message}");
+        assert!(message.contains("加长 search"), "{message}");
+        assert!(message.contains("不能消歧"), "{message}");
+        // 超 8 处：明确省略数量
+        let many = "x;\n".repeat(10);
+        let message = describe_ambiguous_matches("a.ts", &many, "x;").unwrap();
+        assert!(message.contains("匹配到 10 处"), "{message}");
+        assert!(message.contains("其余 2 处省略"), "{message}");
+    }
+
+    #[test]
+    fn ast_pre_check_degrades_for_unknown_language() {
+        let (rejected, note) = ast_pre_check("notes.txt", "anything", "even worse {{{");
+        assert!(rejected.is_none(), "无语言支持不得拦截");
+        assert!(note.unwrap().contains("AST 语法预检跳过"), "须降级说明原因");
+    }
+
+    #[test]
+    fn ast_pre_check_rejects_error_introducing_edits() {
+        crate::symbol_provider::register_default_providers();
+        let before = "export const a = 1;\n";
+        let after = "export const a = (1;\n";
+        let (rejected, _note) = ast_pre_check("src/a.ts", before, after);
+        let rejected =
+            rejected.unwrap_or_else(|| panic!("引入语法错误必须拦截（tree-sitter 已注册）"));
+        assert!(rejected.contains("AST 语法预检拦截"), "{rejected}");
+        assert!(rejected.contains("增至"), "{rejected}");
+        assert!(rejected.contains("括号/引号闭合"), "{rejected}");
+        // 合法修改不误伤
+        let (ok_rejected, _) = ast_pre_check("src/a.ts", before, "export const a = 2;\n");
+        assert!(ok_rejected.is_none());
+    }
+
+    #[test]
+    fn verify_written_text_three_states() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-verify-text");
+        std::fs::write(ws.file_path("ok.txt"), "hello\n").unwrap();
+        // 一致 → Ok(None)
+        assert!(verify_written_text(&ws.workspace_arg(), "ok.txt", "hello\n")
+            .unwrap()
+            .is_none());
+        // 不一致 → Err（回滚触发器）
+        let err = verify_written_text(&ws.workspace_arg(), "ok.txt", "goodbye\n").unwrap_err();
+        assert!(err.contains("文件写入验证失败"), "{err}");
+        assert!(err.contains("云同步锁"), "{err}");
+        // 回读失败（文件不存在）→ Ok(Some(note)) 降级而非硬失败
+        let note = verify_written_text(&ws.workspace_arg(), "missing.txt", "x")
+            .unwrap()
+            .unwrap_or_else(|| panic!("回读失败必须给降级 note"));
+        assert!(note.contains("验证回读失败"), "{note}");
     }
 
     #[test]

@@ -187,6 +187,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     };
     await ensureCommandPathsAllowed(parsed.command, parsed.args ?? [], context?.signal);
     assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), shellMode(context?.appAccess));
+    await ensureDangerousCommandAllowed([parsed.command, ...(parsed.args ?? [])].join(' '), context?.signal);
 
     return await invoke<BackgroundCommandResult>('start_workspace_background_command', {
       workspacePath: workspace(),
@@ -206,6 +207,7 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
     };
     await ensureCommandPathsAllowed(parsed.command, parsed.args ?? [], context?.signal);
     assertShellCodePaprAccess([parsed.command, ...(parsed.args ?? [])].join(' '), shellMode(context?.appAccess));
+    await ensureDangerousCommandAllowed([parsed.command, ...(parsed.args ?? [])].join(' '), context?.signal);
 
     const result = await invoke<BackgroundCommandResult>('start_workspace_background_command', {
       workspacePath: workspace(),
