@@ -62,7 +62,7 @@ export function ToolUsageStats({ lang }: { lang?: Lang }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-fg-soft">{t.toolUsageTitle}</p>
+        <p className="text-xs font-semibold text-fg">{t.toolUsageTitle}</p>
         <span className="text-[11px] text-fg-muted">
           {totalCalls.toLocaleString()} {t.toolUsageTotalCalls} · {usage.length} {t.toolUsageDistinctTools}
         </span>

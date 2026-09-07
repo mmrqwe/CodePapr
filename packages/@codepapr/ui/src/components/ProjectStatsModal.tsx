@@ -798,7 +798,7 @@ export function ProjectStatsModal({
               <div className="grid grid-cols-2 gap-4">
                 <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '60ms' }}>
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold text-fg-soft">{t.projectStatsLanguages}</p>
+                    <p className="text-xs font-semibold text-fg">{t.projectStatsLanguages}</p>
                     <input
                       type="text"
                       value={langFilter}
@@ -831,25 +831,25 @@ export function ProjectStatsModal({
 
               <div className="grid grid-cols-3 gap-4">
                 <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '120ms' }}>
-                  <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsAvgMetrics}</p>
+                  <p className="text-xs font-semibold text-fg mb-3">{t.projectStatsAvgMetrics}</p>
                   <div className="space-y-3">
                     <div>
-                      <div className="text-[11px] text-fg-soft">{t.projectStatsAvgLines}</div>
-                      <div className="text-base font-semibold text-accent-text">{stats.avgMetrics.avgLinesPerFile.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg/90">{t.projectStatsAvgLines}</div>
+                      <div className="text-base font-semibold text-fg">{stats.avgMetrics.avgLinesPerFile.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-fg-soft">{t.projectStatsMedianLines}</div>
-                      <div className="text-base font-semibold text-accent-text">{stats.avgMetrics.medianLinesPerFile.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg/90">{t.projectStatsMedianLines}</div>
+                      <div className="text-base font-semibold text-fg">{stats.avgMetrics.medianLinesPerFile.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-fg-soft">{t.projectStatsMaxLines}</div>
-                      <div className="text-base font-semibold text-accent-text">{stats.avgMetrics.maxLinesPerFile.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg/90">{t.projectStatsMaxLines}</div>
+                      <div className="text-base font-semibold text-fg">{stats.avgMetrics.maxLinesPerFile.toLocaleString()}</div>
                     </div>
                   </div>
                 </div>
 
                 <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '150ms' }}>
-                  <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsLineComposition}</p>
+                  <p className="text-xs font-semibold text-fg mb-3">{t.projectStatsLineComposition}</p>
                   <StackedBar
                     segments={[
                       { color: '#6366f1', width: stats.codeLines, label: t.projectStatsCodeLines },
@@ -861,22 +861,22 @@ export function ProjectStatsModal({
                   />
                   <div className="mt-3 space-y-3">
                     <div>
-                      <div className="text-[11px] text-fg-soft">{t.projectStatsCodeLines}</div>
-                      <div className="text-base font-semibold text-accent-text">{stats.codeLines.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg/90">{t.projectStatsCodeLines}</div>
+                      <div className="text-base font-semibold text-fg">{stats.codeLines.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-fg-soft">{t.projectStatsBlankLines}</div>
-                      <div className="text-base font-semibold text-fg-soft">{stats.blankLines.toLocaleString()}</div>
+                      <div className="text-[11px] text-fg/90">{t.projectStatsBlankLines}</div>
+                      <div className="text-base font-semibold text-fg">{stats.blankLines.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-fg-soft">{t.projectStatsCommentLines}</div>
+                      <div className="text-[11px] text-fg/90">{t.projectStatsCommentLines}</div>
                       <div className="text-base font-semibold text-ok">{stats.commentLines.toLocaleString()}</div>
                     </div>
                   </div>
                 </div>
 
                 <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '180ms' }}>
-                  <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsCodeRatio}</p>
+                  <p className="text-xs font-semibold text-fg mb-3">{t.projectStatsCodeRatio}</p>
                   <RatioBar
                     code={stats.codeRatio.code}
                     config={stats.codeRatio.config}
@@ -895,7 +895,7 @@ export function ProjectStatsModal({
 
               {stats.directoryBreakdown.length > 0 && (
                 <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '180ms' }}>
-                  <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsDirectories}</p>
+                  <p className="text-xs font-semibold text-fg mb-3">{t.projectStatsDirectories}</p>
                   <DirectoryTreemap
                     dirs={stats.directoryBreakdown}
                     filesLabel={t.projectStatsFiles}
@@ -919,7 +919,7 @@ export function ProjectStatsModal({
               <div className="grid grid-cols-2 gap-4">
                 {stats.fileSizeDistribution.length > 0 && (
                   <div className="stats-reveal rounded-xl border border-line bg-base p-4" style={{ animationDelay: '210ms' }}>
-                    <p className="text-xs font-semibold text-fg-soft mb-3">{t.projectStatsFileSize}</p>
+                    <p className="text-xs font-semibold text-fg mb-3">{t.projectStatsFileSize}</p>
                     <SizeDistribution buckets={stats.fileSizeDistribution} filesLabel={t.projectStatsFiles} />
                   </div>
                 )}
