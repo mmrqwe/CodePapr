@@ -17,7 +17,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runCase } from './lib/cliRunner.mjs';
 import { computeMetrics } from './lib/metrics.mjs';
-import { loadEvalModels } from './lib/models.mjs';
+import { loadEvalModels, redact } from './lib/models.mjs';
 import { aggregate, diffAgainstBaseline, overallPassRate, renderMarkdown } from './lib/report.mjs';
 import { scenarios } from './scenarios/recovery.mjs';
 
@@ -85,7 +85,8 @@ async function main() {
             timeoutMs,
           });
         } catch (err) {
-          console.log(`  ✗ ${tag}: runner error ${err.message}`);
+          const message = redact(String(err && err.message ? err.message : err), models);
+          console.log(`  ✗ ${tag}: runner error ${message.slice(0, 300)}`);
           rows.push({
             scenario: scenario.name,
             model: model.label,
@@ -96,7 +97,7 @@ async function main() {
               deadLoops: 0, fallbackQuality: null, avoidViolation: false,
               contextPollutionChars: 0, elapsedMs: 0, toolSequence: [],
             },
-            error: String(err.message).slice(0, 400),
+            error: message.slice(0, 400),
           });
           continue;
         }

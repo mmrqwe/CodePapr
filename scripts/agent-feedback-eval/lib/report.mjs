@@ -43,7 +43,10 @@ export function diffAgainstBaseline(current, baseline) {
   return current.map((cell) => {
     const base = baseMap.get(`${cell.scenario}|${cell.model}`);
     const passDelta = base ? cell.passRate - base.passRate : null;
-    const regression = base !== undefined && base.passRate - cell.passRate > PASS_RATE_DROP_THRESHOLD;
+    // epsilon：恰好 5% 的下滑属于"阈值内"，但浮点 0.8-0.75=0.05000...04 会误判回归
+    const regression =
+      base !== undefined &&
+      base.passRate - cell.passRate > PASS_RATE_DROP_THRESHOLD + 1e-9;
     return {
       ...cell,
       baselinePassRate: base?.passRate ?? null,

@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { redact } from './models.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -166,5 +167,15 @@ export async function runCase({
   if (!keepWorkspace) {
     fs.rmSync(workspace, { recursive: true, force: true });
   }
-  return { scenario, exitCode, events, before: files, after, elapsedMs, workspace: keepWorkspace ? workspace : undefined, stderr };
+  return {
+    scenario,
+    exitCode,
+    events,
+    before: files,
+    after,
+    elapsedMs,
+    workspace: keepWorkspace ? workspace : undefined,
+    // CLI stderr 可能回显 provider 配置：返回前一律脱敏
+    stderr: redact(stderr, model ? [model] : []),
+  };
 }

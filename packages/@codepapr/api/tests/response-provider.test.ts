@@ -844,3 +844,71 @@ describe('ResponseProvider', () => {
     expect(res.choices[0].finishReason).toBe('unknown');
   });
 });
+
+describe('ResponseProvider: OpenCode Go gateway contract', () => {
+  // 真实事故回归测试：OpenCode Go 端点强制要求 x-opencode-session，
+  // 缺失时所有请求 400 MissingSessionID（整个 opencode 配置不可用）。
+  // 契约：命中 opencode 域名必带头 + prompt_cache_key/store；其余网关零注入。
+  function okFetch() {
+    return vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'resp_1',
+        status: 'completed',
+        output: [
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] },
+        ],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      }),
+    });
+  }
+  const chat = { model: 'muse', messages: [{ id: '1', role: 'user' as const, content: 'hi', timestamp: 1 }] };
+
+  it('injects session/client headers and cache fields for opencode.ai endpoints', async () => {
+    const fetchMock = okFetch();
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://opencode.ai/zen/go/v1',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+    await provider.chat(chat);
+
+    const init = fetchMock.mock.calls[0][1] as { headers: Record<string, string>; body: string };
+    expect(init.headers['x-opencode-session']).toMatch(/\S/);
+    expect(init.headers['x-opencode-client']).toBe('codepapr');
+    const body = JSON.parse(init.body);
+    expect(body.prompt_cache_key).toBe(true);
+    expect(body.store).toBe(false);
+  });
+
+  it('honors an explicit sessionId for stable conversation routing', async () => {
+    const fetchMock = okFetch();
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://opencode.ai/zen/go/v1',
+      sessionId: 'sess-fixed',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+    await provider.chat(chat);
+    const init = fetchMock.mock.calls[0][1] as { headers: Record<string, string> };
+    expect(init.headers['x-opencode-session']).toBe('sess-fixed');
+  });
+
+  it('sends no opencode headers or cache fields to other gateways', async () => {
+    const fetchMock = okFetch();
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+      fetchFn: fetchMock as unknown as typeof fetch,
+    });
+    await provider.chat(chat);
+    const init = fetchMock.mock.calls[0][1] as { headers: Record<string, string>; body: string };
+    expect(init.headers['x-opencode-session']).toBeUndefined();
+    expect(init.headers['x-opencode-client']).toBeUndefined();
+    const body = JSON.parse(init.body);
+    expect(body.prompt_cache_key).toBeUndefined();
+    expect(body.store).toBeUndefined();
+  });
+});
