@@ -263,21 +263,23 @@ export const MessageList = memo(function MessageList({
         }
 
         const hasCheckpoint = Boolean(messageCheckpoints[m.id]);
-        const canReset = hasCheckpoint && gitReady;
+        const canReset = gitReady;
         const isHover = hoveredActionMsgId === m.id;
         const resetLabel = lang === 'en' ? 'Reset to here' : lang === 'zh-TW' ? '重設到此' : '重置到此点';
         const copyLabel = lang === 'en' ? 'Copy' : '复制';
-        const noCheckpointTip = !gitReady
+        const resetTip = !gitReady
           ? (lang === 'en'
               ? 'Code reset is initializing or unavailable for this workspace.'
               : lang === 'zh-TW'
               ? '程式碼重設正在初始化，或目前工作區不可用。'
               : '代码重置正在初始化，或当前工作区不可用。')
-          : (lang === 'en'
-              ? 'No code snapshot for this message; cannot reset code.'
-              : lang === 'zh-TW'
-              ? '此訊息沒有程式碼快照，無法重置程式碼。'
-              : '此消息没有代码快照，无法重置代码。');
+          : !hasCheckpoint
+            ? (lang === 'en'
+                ? 'No code snapshot for this message; only the conversation will be reset.'
+                : lang === 'zh-TW'
+                ? '此訊息沒有程式碼快照，將僅重設對話（不回滾程式碼）。'
+                : '此消息没有代码快照，将仅重置对话（不回滚代码）。')
+            : undefined;
 
         return (
           <div key={m.id} data-window-item data-message-id={m.id}>
@@ -305,7 +307,7 @@ export const MessageList = memo(function MessageList({
                     <button
                       className="rounded-md border border-line bg-base px-2.5 py-1 text-[10px] text-fg-muted transition-colors enabled:hover:border-accent-soft enabled:hover:bg-accent-soft enabled:hover:text-accent-text disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={!canReset}
-                      title={canReset ? undefined : noCheckpointTip}
+                      title={resetTip}
                       onClick={() => onRequestReset(m.id)}
                     >
                       {resetLabel}

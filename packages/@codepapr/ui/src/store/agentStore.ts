@@ -1668,8 +1668,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         }
 
         const { messages, activeSessionId, _messageCheckpoints, workspacePath } = get();
-        const targetSha = _messageCheckpoints[messageId]?.sha;
-        if (!targetSha) return { ok: false, reason: 'no-checkpoint' };
+        const targetSha = _messageCheckpoints[messageId]?.sha ?? null;
 
         const msgIndex = messages.findIndex((m) => m.id === messageId);
         if (msgIndex === -1) return { ok: false, reason: 'message-not-found' };
@@ -1686,27 +1685,31 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         let filesChanged = 0;
         let backupSha: string | null = null;
 
-        try {
-          const r = await restoreExecute(workspacePath, targetSha);
-          // Rust 侧失败通常走 Err（invoke 抛出），但 ok=false 是显式失败信号，
-          // 同样必须按 git-failed 处理，不得继续截断对话。
-          if (!r.ok) {
+        // 无锚点（空工作区从未产生 checkpoint、或该消息快照创建失败）时降级为
+        // 「仅重置对话」：跳过代码回滚，仍截断消息。横幅会明确告知文件未回滚。
+        if (targetSha) {
+          try {
+            const r = await restoreExecute(workspacePath, targetSha);
+            // Rust 侧失败通常走 Err（invoke 抛出），但 ok=false 是显式失败信号，
+            // 同样必须按 git-failed 处理，不得继续截断对话。
+            if (!r.ok) {
+              return {
+                ok: false,
+                reason: 'git-failed',
+                error: r.error ?? undefined,
+              };
+            }
+            filesChanged = r.filesRestored;
+            backupSha = r.backupSha ?? null;
+          } catch (err) {
+            // git2 reset 失败：通常是 .git 损坏或权限问题。本期不再做 EditHistory 降级，
+            // 因为 git2 在 ensure 阶段已确保仓库可用，失败是真实异常。
             return {
               ok: false,
               reason: 'git-failed',
-              error: r.error ?? undefined,
+              error: err instanceof Error ? err.message : String(err),
             };
           }
-          filesChanged = r.filesRestored;
-          backupSha = r.backupSha ?? null;
-        } catch (err) {
-          // git2 reset 失败：通常是 .git 损坏或权限问题。本期不再做 EditHistory 降级，
-          // 因为 git2 在 ensure 阶段已确保仓库可用，失败是真实异常。
-          return {
-            ok: false,
-            reason: 'git-failed',
-            error: err instanceof Error ? err.message : String(err),
-          };
         }
 
         const truncatedMessages = messages.slice(0, cutIndex);
@@ -1756,7 +1759,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             sessionId: activeSessionId,
             truncatedMessages: projectMessageImagesForPersistence(messages.slice(cutIndex)),
             removedCheckpoints,
-            filesRestored: true,
+            filesRestored: targetSha !== null,
             backupSha,
           }),
         });
@@ -1767,7 +1770,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         return {
           ok: true,
-          codeReset: 'git',
+          codeReset: targetSha !== null ? 'git' : 'none',
           filesChanged,
           messagesRemoved,
           restoredInput,

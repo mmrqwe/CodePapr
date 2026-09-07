@@ -1566,19 +1566,28 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
           />
 
         {/* 重置到此点确认对话框 */}
-        {resetConfirmMsgId !== null && (
+        {resetConfirmMsgId !== null && (() => {
+          const resetHasCheckpoint = Boolean(messageCheckpoints[resetConfirmMsgId]);
+          return (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-overlay"
             onClick={() => { if (!resetInFlight) setResetConfirmMsgId(null); }}
           >
             <div className="mx-4 w-full max-w-sm rounded-2xl border border-line bg-base p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <p className="mb-3 text-sm text-fg">
-                {settings.lang === 'en'
+                {!resetHasCheckpoint
+                  ? (settings.lang === 'en'
+                    ? 'Reset the conversation to this point? Subsequent messages will be lost. This message has no code snapshot, so code changes will NOT be reverted.'
+                    : settings.lang === 'zh-TW'
+                    ? '要將對話重設到此位置嗎？後續的訊息將會遺失。此訊息沒有程式碼快照，程式碼變更不會被回滾。'
+                    : '要将对话重置到此位置吗？后续的消息将会丢失。此消息没有代码快照，代码变更不会被回滚。')
+                  : settings.lang === 'en'
                   ? 'Revert code and conversation to this point? Subsequent messages and code changes will be lost.'
                   : settings.lang === 'zh-TW'
                   ? '要將程式碼和對話重設到此位置嗎？後續的訊息和程式碼變更將會遺失。'
                   : '要将代码和对话重置到此位置吗？后续的消息和代码变更将会丢失。'}
               </p>
+              {resetHasCheckpoint && (
               <p className="mb-4 text-[11px] leading-relaxed text-fg-muted">
                 {settings.lang === 'en'
                   ? 'Tip: any unsaved edits in open files will be overwritten when files are reloaded. Files matched by .gitignore (e.g. node_modules/, dist/, downloaded assets) and CodePapr\u2019s own .codepapr/ data are not affected.'
@@ -1586,6 +1595,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
                   ? '提示：開啟的檔案中尚未儲存的修改會在檔案重載時被覆蓋。命中 .gitignore 的檔案（如 node_modules/、dist/、下載的素材）以及 CodePapr 自身的 .codepapr/ 資料不會受到影響。'
                   : '提示：已打开文件中尚未保存的修改会在文件重载时被覆盖。命中 .gitignore 的文件（如 node_modules/、dist/、下载的素材）以及 CodePapr 自身的 .codepapr/ 数据不会受影响。'}
               </p>
+              )}
               <div className="flex justify-end gap-3">
                 <button
                   className="rounded-lg border border-line px-4 py-2 text-xs text-fg-muted transition-colors hover:border-line-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
@@ -1618,22 +1628,23 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
                         } else {
                           setPendingImages([]);
                         }
-                        const text = lang === 'en'
+                        const conversationOnly = result.codeReset === 'none';
+                        const text = conversationOnly
+                          ? lang === 'en'
+                            ? `Conversation reset · ${result.messagesRemoved} messages removed · no code snapshot for this message, files not reverted.`
+                            : lang === 'zh-TW'
+                            ? `對話已重設 · 移除 ${result.messagesRemoved} 條訊息 · 此訊息無程式碼快照，檔案未回滾。`
+                            : `对话已重置 · 移除 ${result.messagesRemoved} 条消息 · 此消息无代码快照，文件未回滚。`
+                          : lang === 'en'
                           ? `Reset done · ${result.messagesRemoved} messages removed · ${result.filesChanged} files reverted (ignored files kept).`
                           : lang === 'zh-TW'
                           ? `重設完成 · 移除 ${result.messagesRemoved} 條訊息 · 回滾 ${result.filesChanged} 個檔案（被忽略的檔案保持不變）。`
                           : `重置完成 · 移除 ${result.messagesRemoved} 条消息 · 回滚 ${result.filesChanged} 个文件（被忽略的文件保持不变）。`;
-                        setResetBanner({ kind: 'success', text });
+                        setResetBanner({ kind: conversationOnly ? 'warn' : 'success', text });
                       } else {
                         const lang = settings.lang;
                         let text: string;
-                        if (result.reason === 'no-checkpoint') {
-                          text = lang === 'en'
-                            ? 'No code snapshot for this message; nothing to reset.'
-                            : lang === 'zh-TW'
-                            ? '此訊息沒有程式碼快照，無法重設。'
-                            : '此消息没有代码快照，无法重置。';
-                        } else if (result.reason === 'message-not-found') {
+                        if (result.reason === 'message-not-found') {
                           text = lang === 'en' ? 'Message not found.' : lang === 'zh-TW' ? '找不到訊息。' : '找不到消息。';
                         } else if (result.reason === 'turn-running') {
                           text = lang === 'en'
@@ -1657,14 +1668,15 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
                     }
                   }}
                 >
-                  {resetInFlight
+                   {resetInFlight
                     ? (settings.lang === 'en' ? 'Resetting…' : settings.lang === 'zh-TW' ? '重設中…' : '重置中…')
                     : (settings.lang === 'en' ? 'Reset' : settings.lang === 'zh-TW' ? '重設' : '重置')}
                 </button>
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
         </div>
         </div>
         <ConversationRoundsIndicator

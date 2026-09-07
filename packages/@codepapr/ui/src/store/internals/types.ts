@@ -341,7 +341,8 @@ export interface ConversationStats {
 export type ResetToMessageResult =
   | {
       ok: true;
-      codeReset: 'git';
+      /** 'git'：执行了代码回滚；'none'：该消息无 checkpoint 锚点，仅截断对话。 */
+      codeReset: 'git' | 'none';
       filesChanged: number;
       messagesRemoved: number;
       restoredInput: string;
@@ -349,7 +350,7 @@ export type ResetToMessageResult =
     }
   | {
       ok: false;
-      reason: 'no-checkpoint' | 'message-not-found' | 'git-failed' | 'turn-running';
+      reason: 'message-not-found' | 'git-failed' | 'turn-running';
       error?: string;
     };
 

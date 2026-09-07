@@ -3765,6 +3765,67 @@ describe('resetToMessage 撤销（N8）', () => {
     expect(useAgentStore.getState().sessionMessages[sessionId]).toHaveLength(4);
   });
 
+  it('无 checkpoint 锚点时降级为仅重置对话：截断消息但不调用 restore_execute', async () => {
+    setResetState();
+    // 模拟空工作区：该消息从未产生 checkpoint 锚点（snapshot_create 返回 null）
+    useAgentStore.setState({
+      _messageCheckpoints: { m1: { sha: 'sha-keep', sessionId } },
+    });
+
+    const result = await useAgentStore.getState().resetToMessage('m3');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.codeReset).toBe('none');
+      expect(result.filesChanged).toBe(0);
+      expect(result.messagesRemoved).toBe(2);
+      expect(result.restoredInput).toBe('第二步');
+    }
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === 'restore_execute')
+    ).toBe(false);
+    expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2']);
+
+    const pending = topUndo();
+    expect(pending).not.toBeNull();
+    expect(pending?.filesRestored).toBe(false);
+    expect(pending?.backupSha).toBeNull();
+  });
+
+  it('仅重置对话的撤销：回放消息，不触发任何 git 恢复调用', async () => {
+    setResetState();
+    useAgentStore.setState({
+      _messageCheckpoints: { m1: { sha: 'sha-keep', sessionId } },
+    });
+
+    await useAgentStore.getState().resetToMessage('m3');
+
+    const undoResult = await useAgentStore.getState().undoConversationReset();
+    expect(undoResult.ok).toBe(true);
+    expect(
+      invokeMock.mock.calls.some(
+        ([command]) => command === 'restore_undo' || command === 'restore_execute'
+      )
+    ).toBe(false);
+    expect(useAgentStore.getState().sessionMessages[sessionId]?.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4']);
+    expect(useAgentStore.getState()._pendingRestoreUndos).toHaveLength(0);
+  });
+
+  it('有锚点的重置行为不变：仍走 git 回滚并报告 codeReset=git', async () => {
+    setResetState();
+
+    const result = await useAgentStore.getState().resetToMessage('m3');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.codeReset).toBe('git');
+      expect(result.filesChanged).toBe(1);
+    }
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, payload]) => command === 'restore_execute' && payload?.targetSha === 'sha-reset'
+      )
+    ).toBe(true);
+  });
+
   it('重置当前会话不销毁其他会话的 checkpoint 锚点', async () => {
     setResetState();
     // 另一个会话的消息锚点
