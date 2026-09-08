@@ -21,6 +21,8 @@ import {
   type ToolContextConfig,
   PERMISSION_WAITING_TOOL_TIMEOUTS,
   withTaskSlot,
+  TODO_TOOL_NAME,
+  hasUnsettledTodoTasks,
 } from '@codepapr/core';
 import {
   DEFAULT_MAX_TOKENS,
@@ -48,6 +50,7 @@ import {
 } from './agentWorkerProtocol';
 import { parseMcpToolName, sanitizeMcpToolPart } from '../utils/mcpTypes';
 import { buildPruneOptions, createContextCompactionHandler } from './compactionHandler';
+import { getTodoListContext, setTodoListContext } from '../tools/todoListRegistry';
 import {
   CONTEXT_SURFACE_RENDER_VERSION,
   freezePruneParams,
@@ -1029,7 +1032,7 @@ function createRegistry(
         tool.name === 'graph'
           ? graphIpcTimeoutMs
           : resolveToolIpcTimeoutMs(tool.name, args, toolIpcTimeoutMs);
-      return await runWithActivity(() =>
+      const result = await runWithActivity(() =>
         requestToolExecution(
           requestId,
           tool.name,
@@ -1040,6 +1043,16 @@ function createRegistry(
           context?.signal
         )
       );
+      // todo 工具的 handler 在主线程执行（桥接返回完整快照）：把结果镜像进
+      // worker 进程注册表，供回合结束守卫读取。worker 无监听器，'none' 通知。
+      if (tool.name === TODO_TOOL_NAME) {
+        const mirrored = (result as { todoList?: import('@codepapr/types').TodoListContext } | null)
+          ?.todoList;
+        if (mirrored && Array.isArray(mirrored.tasks)) {
+          setTodoListContext(payload.sessionId, mirrored, 'none');
+        }
+      }
+      return result;
     });
   }
 
@@ -1571,6 +1584,11 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     toolRegistry: registry,
     log: sessionLog,
   });
+  // 播种回合结束守卫的清单镜像：优先用主线程随 chat 帧下发的快照（覆盖
+  // worker 重启/上一回合遗留 active 清单的场景），回合内再由 todo 工具结果刷新。
+  if (payload.todoSnapshot && Array.isArray(payload.todoSnapshot.tasks)) {
+    setTodoListContext(payload.sessionId, payload.todoSnapshot, 'none');
+  }
   const agent = new Agent({
     session,
     provider: buildProvider(payload.settings, payload.sessionId),
@@ -1590,6 +1608,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     },
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
     toolContextConfig: buildToolContextConfig(payload.settings),
+    todoListGuard: () => hasUnsettledTodoTasks(getTodoListContext(payload.sessionId)),
     contextCompaction: createContextCompactionHandler(
       payload.settings,
       payload.providerName,

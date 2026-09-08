@@ -40,6 +40,7 @@ import {
 } from '@codepapr/types';
 import { Logger, estimateTokens } from '@codepapr/common';
 import { PARALLEL_SAFE_TOOL_NAMES } from './agentConfig';
+import { TODO_GUARD_NUDGE } from './todoList';
 import { Session, mergeOptionalTokenCount } from './Session';
 import { MessageFactory } from '../message/Message';
 import { Serializer } from '../cache/Serializer';
@@ -496,6 +497,11 @@ export interface AgentOptions {
   /** 空完成退避重试的延迟表（毫秒）。缺省使用 EMPTY_COMPLETION_RETRY_DELAYS_MS；
    *  测试可注入 0 跳过等待。 */
   emptyCompletionRetryDelaysMs?: readonly number[];
+  /** 回合结束前的任务清单同步守卫：模型返回无工具调用的最终回答时，Agent 调用
+   *  本回调；返回 true 表示清单仍有未终结任务但未收到模型的 todo 同步——注入
+   *  一次性提醒（TODO_GUARD_NUDGE，仅存在于本次 chat() 的日志）并继续循环，
+   *  给模型补调 todo 工具的机会。每次 chat() 至多提醒一次。 */
+  todoListGuard?: () => boolean;
 }
 
 export const DEFAULT_AGENT_MAX_TOOL_ROUNDS = 500;
@@ -529,6 +535,7 @@ export class Agent {
   private toolContextConfig?: ToolContextConfig;
   private contextCompaction?: ContextCompactionConfig;
   private emptyCompletionRetryDelaysMs: readonly number[];
+  private todoListGuard?: () => boolean;
   private abortController: AbortController | null = null;
   private cachedPrefixTokens?: number;
   private lastCompactionRound = -Infinity;
@@ -565,6 +572,7 @@ export class Agent {
     this.contextCompaction = opts.contextCompaction;
     this.emptyCompletionRetryDelaysMs =
       opts.emptyCompletionRetryDelaysMs ?? EMPTY_COMPLETION_RETRY_DELAYS_MS;
+    this.todoListGuard = opts.todoListGuard;
   }
 
   getSession(): Session {
@@ -817,6 +825,8 @@ export class Agent {
     let finalToolCalls: IToolCall[] | undefined;
     let aggregatedStats: ICacheStatistics | undefined;
     let question: QuestionData | undefined;
+    // todo 守卫每次 chat() 至多触发一次（模型连续无视提醒时不无限追问）。
+    let todoGuardFired = false;
 
     try {
       // 注意：append/validate 等状态变更必须在 try 内——它们抛错时
@@ -1247,6 +1257,28 @@ export class Agent {
       finalToolCalls = assistant.toolCalls;
 
       if (!assistant.toolCalls || assistant.toolCalls.length === 0) {
+        // 回合结束守卫：模型给出最终回答但任务清单仍有未终结任务——很可能是
+        // 干完活忘了调 todo 同步（历史上清单永久卡 active 的主因）。注入一次性
+        // user 提醒并继续循环，给模型补调工具的机会。提醒只进本次 chat() 的
+        // logStore（回合内生效）；取消中不提醒；guard 自身异常不阻断收尾。
+        if (!todoGuardFired && this.todoListGuard && !effectiveSignal.aborted) {
+          let unsettled = false;
+          try {
+            unsettled = this.todoListGuard() === true;
+          } catch {
+            unsettled = false;
+          }
+          if (unsettled) {
+            todoGuardFired = true;
+            log.info('TodoList guard: unsettled tasks at round end; injecting one-shot nudge', {
+              round: roundNumber,
+            });
+            await this.session.logStore.append(
+              MessageFactory.user(TODO_GUARD_NUDGE, undefined, `todo-guard-nudge-r${roundNumber}`)
+            );
+            continue roundLoop;
+          }
+        }
         break;
       }
 

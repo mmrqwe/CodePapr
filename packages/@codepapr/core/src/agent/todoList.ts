@@ -311,6 +311,53 @@ export function completeCurrentTodo(
 }
 
 /**
+ * 回合结束兜底提醒（临时 user 消息注入 Agent 日志，仅用于促使模型在收尾前
+ * 同步任务清单；不进入主线程持久化的转录）。
+ */
+export const TODO_GUARD_NUDGE =
+  '你正试图结束回合，但任务清单仍有未进入终态的任务（running/pending）。'
+  + '请立即调用 todo 工具（updates）同步清单：实际已完成的任务改 completed 并附 summary；'
+  + '确认放弃的改 failed 并附 errorLog；确实仍在进行的保持不动并简述原因。'
+  + '清单与真实进度脱节会让后续回合误判工作状态。';
+
+/**
+ * 清单是否仍有未终结任务——回合结束前 guard 的判定条件。
+ * null / 空清单 / 已 completed 均返回 false。
+ */
+export function hasUnsettledTodoTasks(ctx: TodoListContext | null | undefined): boolean {
+  if (!ctx || ctx.status !== 'active') return false;
+  return ctx.tasks.some((task) => task.status === 'running' || task.status === 'pending');
+}
+
+/**
+ * 收敛未确认的 running 任务：回合结束（正常/取消/出错）或会话恢复时，若清单
+ * 仍 active 且有 running 任务，说明模型忘了调用 todo 工具同步——running 是
+ * "正在执行"的承诺，而没有在飞回合就不可能"正在执行"。诚实策略：退回
+ * pending 并写 errorLog 标记未确认，绝不伪造 completed（完成与否交由下一
+ * 回合的模型或用户根据 digest 核对）。无 running 任务时原样返回（同引用）。
+ */
+export function convergeUnconfirmedRunningTasks(
+  ctx: TodoListContext,
+  reason: string = '回合结束未确认'
+): TodoListContext {
+  if (!ctx.tasks.some((task) => task.status === 'running')) {
+    return ctx;
+  }
+  const tasks = ctx.tasks.map((task) =>
+    task.status === 'running'
+      ? { ...task, status: 'pending' as TaskStatus, errorLog: reason }
+      : task
+  );
+  return {
+    ...ctx,
+    tasks,
+    currentTaskId: inferCurrentTaskId(tasks, ctx.currentTaskId),
+    status: computeAggregateStatus(tasks),
+    updatedAt: Date.now(),
+  };
+}
+
+/**
  * 渲染 TodoList 摘要文本，作为工具返回值的一部分喂给 LLM。
  */
 export function renderTodoListDigest(ctx: TodoListContext): string {

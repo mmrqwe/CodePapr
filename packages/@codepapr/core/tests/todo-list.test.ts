@@ -5,6 +5,8 @@ import {
   updateTodoList,
   completeCurrentTodo,
   renderTodoListDigest,
+  hasUnsettledTodoTasks,
+  convergeUnconfirmedRunningTasks,
   buildTodoToolDefinition,
   DEFAULT_TODO_MAX_RETRIES,
   TODO_TOOL_NAME,
@@ -398,3 +400,59 @@ function createFailedPlan(): TodoListContext {
   updated = updateTodoList(updated, [{ id: 'add-route', status: 'failed' }]);
   return updated;
 }
+
+describe('hasUnsettledTodoTasks（回合结束守卫判定）', () => {
+  it('null / 空清单 / 已全终结 均为 false', () => {
+    expect(hasUnsettledTodoTasks(null)).toBe(false);
+    expect(hasUnsettledTodoTasks(undefined)).toBe(false);
+    expect(hasUnsettledTodoTasks(createEmptyTodoListContext('goal'))).toBe(false);
+    const done = updateTodoList(createInitialPlan(), [{ id: 'add-route', status: 'completed' }]);
+    const step2 = updateTodoList(done, [{ id: 'add-form', status: 'completed' }]);
+    const allDone = updateTodoList(step2, [{ id: 'validate-input', status: 'completed' }]);
+    expect(allDone.status).toBe('completed');
+    expect(hasUnsettledTodoTasks(allDone)).toBe(false);
+  });
+
+  it('存在 pending 或 running 时为 true', () => {
+    expect(hasUnsettledTodoTasks(createInitialPlan())).toBe(true);
+    const running = updateTodoList(createInitialPlan(), [
+      { id: 'add-route', status: 'completed' },
+    ]);
+    expect(running.currentTaskId).toBe('add-form');
+    expect(hasUnsettledTodoTasks(running)).toBe(true);
+  });
+});
+
+describe('convergeUnconfirmedRunningTasks（未确认 running 收敛）', () => {
+  it('running 任务退回 pending 并写 errorLog，指针保持', () => {
+    const ctx = updateTodoList(createInitialPlan(), [{ id: 'add-route', status: 'completed' }]);
+    expect(ctx.tasks[1]!.status).toBe('running');
+
+    const next = convergeUnconfirmedRunningTasks(ctx);
+    expect(next).not.toBe(ctx);
+    const form = next.tasks.find((t) => t.id === 'add-form')!;
+    expect(form.status).toBe('pending');
+    expect(form.errorLog).toBe('回合结束未确认');
+    // 已 completed 的任务绝不回退
+    expect(next.tasks.find((t) => t.id === 'add-route')!.status).toBe('completed');
+    expect(next.currentTaskId).toBe('add-form');
+    expect(next.status).toBe('active');
+  });
+
+  it('无 running 任务时返回同一引用（no-op，含全 pending 与全 failed）', () => {
+    const allPending = writeTodoList(null, 'goal', [
+      { id: 'a', title: 'A', description: 'a' },
+      { id: 'b', title: 'B', description: 'b' },
+    ]);
+    expect(allPending.tasks.every((t) => t.status === 'pending')).toBe(true);
+    expect(convergeUnconfirmedRunningTasks(allPending)).toBe(allPending);
+    const failed = createFailedPlan();
+    expect(convergeUnconfirmedRunningTasks(failed)).toBe(failed);
+  });
+
+  it('支持自定义原因（恢复钩子用）', () => {
+    const ctx = updateTodoList(createInitialPlan(), [{ id: 'add-route', status: 'completed' }]);
+    const next = convergeUnconfirmedRunningTasks(ctx, '进程退出前回合未确认');
+    expect(next.tasks.find((t) => t.id === 'add-form')!.errorLog).toBe('进程退出前回合未确认');
+  });
+});

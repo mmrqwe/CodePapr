@@ -11,6 +11,7 @@
  * 在 worker 里写入一个无人消费的 agentStore 副本等价，但不再拖入整个依赖图。
  */
 import type { TodoListContext } from '@codepapr/types';
+import { convergeUnconfirmedRunningTasks } from '@codepapr/core';
 import type { TaskChecklist, TaskChecklistItemStatus } from '../utils/taskChecklistTypes';
 
 /**
@@ -109,11 +110,30 @@ export function getAllTodoListContexts(): ReadonlyMap<string, TodoListContext> {
   return todoContexts;
 }
 
-/** 从持久化数据恢复 TodoList 上下文。 */
+/**
+ * 回合结束收敛（兜底）：一次 chat 结束（成功/取消/出错）后，若清单仍 active
+ * 且有 running 任务，说明模型忘了调 todo 同步——此刻不可能有在飞执行，把
+ * running 退回 pending 并标记未确认（纯函数见 core convergeUnconfirmedRunningTasks）。
+ * 返回是否发生了收敛（调用方据此决定要不要落盘）。
+ */
+export function convergeSessionTodoListAtTurnEnd(sessionId: string): boolean {
+  const ctx = todoContexts.get(sessionId);
+  if (!ctx) return false;
+  const next = convergeUnconfirmedRunningTasks(ctx);
+  if (next === ctx) return false;
+  setTodoListContext(sessionId, next);
+  return true;
+}
+
+/** 从持久化数据恢复 TodoList 上下文。恢复时无任何在飞回合，running 必然
+ *  是上次进程存续期间未同步的残留——收敛为 pending 后再灌入。 */
 export function restoreTodoListContexts(contexts: Readonly<Record<string, TodoListContext>>): void {
   for (const [sessionId, ctx] of Object.entries(contexts)) {
     if (ctx && ctx.tasks && Array.isArray(ctx.tasks) && ctx.tasks.length > 0) {
-      setTodoListContext(sessionId, ctx as TodoListContext);
+      setTodoListContext(
+        sessionId,
+        convergeUnconfirmedRunningTasks(ctx, '进程退出前回合未确认')
+      );
     }
   }
 }

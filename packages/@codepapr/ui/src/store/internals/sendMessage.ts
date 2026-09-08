@@ -51,7 +51,7 @@ import {
   collectExecutedTools,
   type ExecutedToolSummary,
 } from '../../utils/agentExecution';
-import { getTodoListContext } from '../../tools/todoListRegistry';
+import { getTodoListContext, convergeSessionTodoListAtTurnEnd } from '../../tools/todoListRegistry';
 import { getActiveCharacterPrompt } from '../charactersStore';
 import { loadMcpToolDefinitions } from '../../tools/mcpTools';
 import { isReasoningPlaceholderEcho } from '@codepapr/api';
@@ -2411,6 +2411,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 : `Goal 循环出错: ${(goalErr as Error).message}`;
               appendErrorMessage(set, goalErrMsg);
               accumulateTurnRuntime(activeSessionId);
+              if (activeSessionId) {
+                convergeSessionTodoListAtTurnEnd(activeSessionId);
+              }
               saveCurrentProjectState(get());
               return false;
             }
@@ -2860,6 +2863,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // PR5（ADR-009 B3/第11条）：回合结束归档 Recall 与 re-recall 审计行
           // （request-only，不再随后续回合注入；审计记录保留在 memory_recalls）。
           archiveTurnRecalls(activeSessionId);
+          // TodoList 兜底收敛：守卫提醒后模型仍未同步时，把无在飞回合的 running
+          // 退回 pending（不伪造 completed），随下面的 saveCurrentProjectState 落盘。
+          if (activeSessionId && get()._turnSeq === turnSeq) {
+            convergeSessionTodoListAtTurnEnd(activeSessionId);
+          }
           saveCurrentProjectState(get());
         } catch (err) {
           console.error('[sendMessage] outer catch:', err);
@@ -2902,6 +2910,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             }
             // 取消也算已消耗的执行时长（墙钟口径：发送 → 取消）。
             accumulateTurnRuntime(sid);
+            if (sid && stillCurrentTurn) {
+              convergeSessionTodoListAtTurnEnd(sid);
+            }
             saveCurrentProjectState(get());
             return messageConsumed;
           }
@@ -2937,6 +2948,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             : '';
           appendErrorMessage(set, crashPrefix + formatAgentError(err, normalizedSettings.lang ?? 'zh-CN'), sid);
           accumulateTurnRuntime(sid);
+          if (sid && stillCurrentTurn) {
+            convergeSessionTodoListAtTurnEnd(sid);
+          }
           saveCurrentProjectState(get());
         } finally {
           // 释放单执行占位（与入口处 turnInFlight = true 配对）。

@@ -23,6 +23,7 @@ import { registerWorkspaceTools, type WorkspaceMutationListener } from '../tools
 import { registerMcpTools } from '../tools/mcpTools';
 import { registerMemoryTools } from '../tools/memoryTools';
 import { registerTodoListTools } from '../tools/todoListTool';
+import { getTodoListContext } from '../tools/todoListRegistry';
 import { mcpSearchHidesNativeWeb } from '../utils/mcpTypes';
 import {
   resolveAppAgentIdleTimeoutMs,
@@ -723,6 +724,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       userInput,
       ...(userMessageId ? { userMessageId } : {}),
       ...(contextInsertions && contextInsertions.length > 0 ? { contextInsertions } : {}),
+      todoSnapshot: getTodoListContext(sessionId) ?? null,
       images,
       settings: this.config.settings,
       providerName: this.config.providerName,

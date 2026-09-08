@@ -25,6 +25,7 @@ import {
 } from '@codepapr/core';
 import type { IToolDefinition, TodoListContext } from '@codepapr/types';
 import { useAgentStore } from '../store/agentStore';
+import { saveCurrentProjectState } from '../store/internals/projectSnapshot';
 import {
   commitTodoListContext,
   getTodoListContext,
@@ -39,6 +40,26 @@ setTodoChecklistListener((sessionId, checklist) => {
     _taskChecklists: { ...s._taskChecklists, [sessionId]: checklist },
   }));
 });
+
+/**
+ * 清单变更后的防抖落盘。快照保存（saveCurrentProjectState）内部自带写队列
+ * 串行化，这里只做节流窗口。旧实现仅在回合边界/流式快照时落盘，主线程
+ * 降级 agent 无流式快照回调，回合中途进程被杀会丢失整个回合的 todo 更新。
+ */
+const TODO_PERSIST_DEBOUNCE_MS = 800;
+let todoPersistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleTodoPersist(): void {
+  if (todoPersistTimer !== null) return;
+  todoPersistTimer = setTimeout(() => {
+    todoPersistTimer = null;
+    try {
+      saveCurrentProjectState(useAgentStore.getState());
+    } catch (err) {
+      console.warn('[CodePapr] TodoList 防抖落盘失败:', err);
+    }
+  }, TODO_PERSIST_DEBOUNCE_MS);
+}
 
 interface ToolReturn {
   todoList: TodoListContext;
@@ -70,6 +91,11 @@ export function registerTodoListTools(
     return [];
   }
 
+  const commit = (ctx: TodoListContext): TodoListContext => {
+    scheduleTodoPersist();
+    return commitTodoListContext(sessionId, ctx);
+  };
+
   registry.register(definition, async (args) => {
     const hasTasks = Array.isArray(args.tasks);
     const hasUpdates = Array.isArray(args.updates);
@@ -80,7 +106,7 @@ export function registerTodoListTools(
       const rawTasks = args.tasks as Array<Record<string, unknown>>;
       const previous = getTodoListContext(sessionId) ?? null;
       const nextCtx = writeTodoList(previous, goal, rawTasks, maxRetries);
-      return buildReturn(commitTodoListContext(sessionId, nextCtx));
+      return buildReturn(commit(nextCtx));
     }
 
     // ── 部分更新模式 ──
@@ -102,14 +128,14 @@ export function registerTodoListTools(
       }
 
       const nextCtx = updateTodoList(emptyCtx, patches);
-      return buildReturn(commitTodoListContext(sessionId, nextCtx));
+      return buildReturn(commit(nextCtx));
     }
 
     if (!hasUpdates) {
       // 无 tasks 也无 updates，仅更新 goal (如果提供)
       if (goal && goal !== previous.goal) {
         const nextCtx = { ...previous, goal, updatedAt: Date.now() };
-        return buildReturn(commitTodoListContext(sessionId, nextCtx));
+        return buildReturn(commit(nextCtx));
       }
       return buildReturn(previous);
     }
@@ -121,7 +147,7 @@ export function registerTodoListTools(
     }
 
     const nextCtx = updateTodoList(previous, patches);
-    return buildReturn(commitTodoListContext(sessionId, nextCtx));
+    return buildReturn(commit(nextCtx));
   });
 
   // 如果该会话已有 TodoList（例如 Worker 重启），立刻把现状推回 store

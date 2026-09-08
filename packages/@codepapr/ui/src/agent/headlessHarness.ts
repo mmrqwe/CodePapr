@@ -232,6 +232,7 @@ export function createHarnessMediator(deps: HarnessMediatorDeps): HarnessMediato
         messages: [bootstrapMessage, ...mirror.messages],
         userInput: payload.prompt,
         userMessageId: payload.userMessageId,
+        todoSnapshot: mirror.todo ?? null,
         settings: harness.workerSettings,
         providerName: harness.workerSettings.provider,
         model: harness.workerSettings.model,

@@ -288,6 +288,9 @@ export {
   renderTodoListDigest,
   parseTodoUpdatePatches,
   parseTodoGoal,
+  TODO_GUARD_NUDGE,
+  hasUnsettledTodoTasks,
+  convergeUnconfirmedRunningTasks,
 } from './agent/todoList';
 export type { TodoUpdatePatch } from './agent/todoList';
 export { createTaskSlot, withTaskSlot, TASK_PARALLEL_CONCURRENCY } from './agent/taskSlot';

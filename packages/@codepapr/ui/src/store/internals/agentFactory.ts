@@ -19,6 +19,7 @@ import {
   type PruneOptions,
   SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
   PERMISSION_WAITING_TOOL_TIMEOUTS,
+  hasUnsettledTodoTasks,
 } from '@codepapr/core';
 import type { PromptMode } from '@codepapr/core';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
@@ -37,6 +38,7 @@ import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTo
 import { registerMcpTools } from '../../tools/mcpTools';
 import { registerMemoryTools } from '../../tools/memoryTools';
 import { registerTodoListTools } from '../../tools/todoListTool';
+import { getTodoListContext } from '../../tools/todoListRegistry';
 import { mcpSearchHidesNativeWeb } from '../../utils/mcpTypes';
 import {
   buildProviderInstance,
@@ -536,6 +538,7 @@ function _createLocalAgent(
     },
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
     toolContextConfig: buildToolContextConfig(settings),
+    todoListGuard: () => hasUnsettledTodoTasks(getTodoListContext(sessionId)),
     contextCompaction: createContextCompactionHandler(
       settings,
       parts.providerName,
