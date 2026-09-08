@@ -15,6 +15,7 @@ export function toWorkerAgentSettings(settings: Settings): WorkerAgentSettings {
     baseURL: settings.baseURL,
     apiKey: settings.apiKey,
     model: settings.model,
+    extraHeaders: settings.extraHeaders,
     agentToolProfile: settings.agentToolProfile,
     temperature: settings.temperature,
     maxTokens: settings.maxTokens,

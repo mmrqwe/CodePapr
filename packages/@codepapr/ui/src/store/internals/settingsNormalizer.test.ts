@@ -477,3 +477,52 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     expect(settings220k.maxContextTokens).toBe(200_000);
   });
 });
+
+describe('normalizeSettings extraHeaders（自定义请求头）', () => {
+  const profileWith = (extra: Partial<ModelProfile>): ModelProfile => ({
+    ...createDefaultProfile('p1', 'custom'),
+    ...extra,
+  });
+
+  it('主配置档的合法头透传到扁平 extraHeaders', () => {
+    const settings = normalizeSettings({
+      modelProfiles: [profileWith({ extraHeaders: { 'X-Tenant-Id': 'acme', '  ': 'skip' } })],
+    });
+    expect(settings.extraHeaders).toEqual({ 'X-Tenant-Id': 'acme' });
+  });
+
+  it('剥离保留头与空值；全被剥离时回退 undefined', () => {
+    const settings = normalizeSettings({
+      modelProfiles: [
+        profileWith({
+          extraHeaders: {
+            Authorization: 'Bearer evil',
+            'content-type': 'text/plain',
+            'X-Empty': '  ',
+          },
+        }),
+      ],
+    });
+    expect(settings.extraHeaders).toBeUndefined();
+    const primary = resolvePrimaryProfile(settings);
+    expect(primary.extraHeaders).toBeUndefined();
+  });
+
+  it('非主配置档的头不进入扁平 extraHeaders', () => {
+    const primary = profileWith({ id: 'p-primary', extraHeaders: { 'X-A': '1' } });
+    const fast = profileWith({ id: 'p-fast', extraHeaders: { 'X-B': '2' } });
+    const settings = normalizeSettings({
+      modelProfiles: [primary, fast],
+      primaryProfileId: 'p-primary',
+      fastProfileId: 'p-fast',
+    });
+    expect(settings.extraHeaders).toEqual({ 'X-A': '1' });
+  });
+
+  it('无配置档时清洗扁平输入 extraHeaders', () => {
+    const settings = normalizeSettings({
+      extraHeaders: { 'x-ok': 'v', Host: 'evil' },
+    });
+    expect(settings.extraHeaders).toEqual({ 'x-ok': 'v' });
+  });
+});

@@ -45,6 +45,35 @@ export interface ProviderConfig {
   sessionId?: string;
   /** x-opencode-client 客户端标识（仅 opencode.ai 域名生效），缺省 codepapr。 */
   sessionClient?: string;
+  /** 自定义附加请求头（如企业网关的私有鉴权/路由头）。
+   *  仅追加请求里不存在的键：Authorization、Content-Type、x-opencode-* 等
+   *  provider 内置头永不被覆盖（防止凭证错发与会话路由头被意外破坏）。
+   *  注意：浏览器/Worker 运行时 fetch 会静默丢弃 forbidden header
+   *  （User-Agent、Cookie 等），仅桌面 sidecar（Node fetch）保证生效。 */
+  extraHeaders?: Record<string, string>;
+}
+
+/** 把 extraHeaders 合并进请求头：只新增、不覆盖（键名按小写比较），
+ *  空键/空值跳过。provider 内置头（含 opencode 契约头）因此天然受保护。 */
+export function mergeExtraHeaders(
+  headers: Record<string, string>,
+  extra: Record<string, string> | undefined
+): Record<string, string> {
+  if (!extra) {
+    return headers;
+  }
+  const taken = new Set(Object.keys(headers).map((k) => k.toLowerCase()));
+  const merged = { ...headers };
+  for (const [rawKey, rawValue] of Object.entries(extra)) {
+    const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+    const value = typeof rawValue === 'string' ? rawValue.trim() : '';
+    if (!key || !value || taken.has(key.toLowerCase())) {
+      continue;
+    }
+    merged[key] = value;
+    taken.add(key.toLowerCase());
+  }
+  return merged;
 }
 
 /** 请求级默认重试次数（连接层失败，如 DNS/TCP/TLS 无法建立连接）。 */
@@ -170,6 +199,20 @@ export abstract class BaseLLMProvider implements ILLMProvider {
     const maxRetries = this.config.maxRetries ?? DEFAULT_REQUEST_MAX_RETRIES;
     const notifyRetry = onRequestRetry ?? this.config.onRequestRetry;
     const retryDelayMs = this.config.requestRetryDelayMs ?? defaultRequestRetryDelayMs;
+    if (
+      this.config.extraHeaders &&
+      options.headers &&
+      !(options.headers instanceof Headers) &&
+      !Array.isArray(options.headers)
+    ) {
+      options = {
+        ...options,
+        headers: mergeExtraHeaders(
+          options.headers as Record<string, string>,
+          this.config.extraHeaders
+        ),
+      };
+    }
     let lastError: Error | null = null;
     const fetchFn = this.config.fetchFn ?? getGlobalFetchFn();
 

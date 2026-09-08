@@ -25,6 +25,10 @@ import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPay
 
 const log = new Logger('ResponseProvider');
 
+/** OpenCode Go 契约要求专属 User-Agent（形如 my-coding-agent/1.0）。
+ *  版本号与应用发布版本同步 bump（见根 package.json）。 */
+export const CODEPAPR_OPENCODE_USER_AGENT = 'codepapr/0.1.0';
+
 interface ResponseUsage {
   input_tokens?: number;
   output_tokens?: number;
@@ -391,7 +395,8 @@ export class ResponseProvider extends BaseLLMProvider {
     return base.includes('opencode.ai');
   }
 
-  /** OpenCode Go 网关强制要求会话路由头（缺失 → 400 MissingSessionID）；
+  /** OpenCode Go 网关强制要求会话路由头（缺失 → 400 MissingSessionID），
+   *  并要求客户端以专属 User-Agent 标识自己（而非通用 HTTP 库默认值）。
    *  其余 Responses 兼容网关不注入任何额外头。 */
   private requestHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
@@ -401,6 +406,7 @@ export class ResponseProvider extends BaseLLMProvider {
     if (this.isOpencodeGo) {
       headers['x-opencode-session'] = this.opencodeSessionId;
       headers['x-opencode-client'] = String(this.config.sessionClient ?? '').trim() || 'codepapr';
+      headers['User-Agent'] = CODEPAPR_OPENCODE_USER_AGENT;
     }
     return headers;
   }

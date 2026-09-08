@@ -157,7 +157,12 @@ export async function runSubagent(
     let provider = context.provider;
     let providerName: 'deepseek' | 'openai' | 'claude' | 'response' = context.providerName;
     if (exec.mentor) {
-      const config = { apiKey: exec.mentor.apiKey, ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}) };
+      const mentorSessionId = context.sessionId ? `${context.sessionId}:mentor` : undefined;
+      const config = {
+        apiKey: exec.mentor.apiKey,
+        ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}),
+        ...(mentorSessionId ? { sessionId: mentorSessionId } : {}),
+      };
       if (exec.mentor.apiFormat === 'claude') {
         provider = new ClaudeProvider(config);
         providerName = 'claude';

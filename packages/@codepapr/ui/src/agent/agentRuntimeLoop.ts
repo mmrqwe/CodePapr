@@ -510,18 +510,29 @@ function mergeTwoCacheStats(
   };
 }
 
-function buildProvider(settings: WorkerAgentSettings) {
+/** sessionId：对话级稳定标识，透传给 OpenCode Go 网关做会话级缓存路由
+ *  （provider 实例每回合重建，缺省会回退为随机 id，破坏缓存亲和性）。 */
+function buildProvider(settings: WorkerAgentSettings, sessionId?: string) {
   if (settings.apiMode === 'local') {
     return new LocalProvider({
       apiKey: settings.apiKey.trim() || 'local',
       baseURL: settings.baseURL.trim().replace(/\/+$/, '') || DEFAULT_LOCAL_BASE_URL,
       idleTimeoutMs: settings.streamIdleTimeoutMs,
+      ...(settings.extraHeaders ? { extraHeaders: settings.extraHeaders } : {}),
     });
   }
 
-  const config: { apiKey: string; baseURL?: string; idleTimeoutMs?: number } = {
+  const config: {
+    apiKey: string;
+    baseURL?: string;
+    idleTimeoutMs?: number;
+    sessionId?: string;
+    extraHeaders?: Record<string, string>;
+  } = {
     apiKey: settings.apiKey.trim(),
     idleTimeoutMs: settings.streamIdleTimeoutMs,
+    ...(sessionId ? { sessionId } : {}),
+    ...(settings.extraHeaders ? { extraHeaders: settings.extraHeaders } : {}),
   };
   if (settings.apiMode === 'custom') {
     config.baseURL = settings.baseURL.trim().replace(/\/+$/, '');
@@ -898,10 +909,23 @@ async function runSubagent(
     fallbackBaseURL: s.baseURL,
   });
 
-  let subagentProvider: ILLMProvider = buildProvider(payload.settings);
+  const runId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `subagent-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // 子代理是一次独立的子对话：会话路由 id 在父对话下按 run 派生，
+  // run 内多轮工具调用稳定复用（provider 每 run 只建一次）。
+  let subagentProvider: ILLMProvider = buildProvider(
+    payload.settings,
+    `${payload.sessionId}:subagent:${runId}`
+  );
   let subagentProviderName: 'deepseek' | 'openai' | 'claude' | 'response' = payload.providerName;
   if (exec.mentor) {
-    const config = { apiKey: exec.mentor.apiKey, ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}) };
+    const config = {
+      apiKey: exec.mentor.apiKey,
+      ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}),
+      sessionId: `${payload.sessionId}:subagent:${runId}:mentor`,
+    };
     if (exec.mentor.apiFormat === 'claude') {
       subagentProvider = new ClaudeProvider(config);
       subagentProviderName = 'claude';
@@ -914,10 +938,6 @@ async function runSubagent(
     }
   }
 
-  const runId =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `subagent-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   postMessageToMain({
     type: 'subagent-progress',
     requestId,
@@ -1247,7 +1267,10 @@ async function handleRunAppAgent(
       : cachedSettings.model;
   }
 
-  let agentProvider: ILLMProvider = buildProvider(cachedSettings);
+  // app 子代理是一次独立对话：run 内稳定（provider 与 AppendOnlyLog 共用同一 id），
+  // 供 OpenCode Go 网关做会话级缓存路由。
+  const appAgentSessionId = `app-agent-${payload.appId}-${Date.now()}`;
+  let agentProvider: ILLMProvider = buildProvider(cachedSettings, appAgentSessionId);
   let agentProviderName: 'deepseek' | 'openai' | 'claude' | 'response' = cachedSettings.provider;
 
   const isMentor = payload.model === 'mentor' && cachedSettings.mentorEnabled;
@@ -1258,7 +1281,11 @@ async function handleRunAppAgent(
       const apiKey = s.mentorApiKey.trim() || s.apiKey.trim();
       const mentorBaseURL = s.mentorBaseURL.trim().replace(/\/+$/, '');
       const baseURL = mentorBaseURL || s.baseURL.trim().replace(/\/+$/, '') || undefined;
-      const config = { apiKey, ...(baseURL ? { baseURL } : {}) };
+      const config = {
+        apiKey,
+        ...(baseURL ? { baseURL } : {}),
+        sessionId: `${appAgentSessionId}:mentor`,
+      };
       if (s.mentorApiFormat === 'claude') {
         agentProvider = new ClaudeProvider(config);
         agentProviderName = 'claude';
@@ -1297,7 +1324,7 @@ async function handleRunAppAgent(
       : cachedSettings.thinkingPayload,
   };
 
-  const log = new AppendOnlyLog(`app-agent-${payload.appId}-${Date.now()}`);
+  const log = new AppendOnlyLog(appAgentSessionId);
 
   if (ctx && (ctx.skills || ctx.customPrompt || ctx.projectMemory) && cachedRuntimeConfig) {
     const skillsSection = ctx.skills
@@ -1350,7 +1377,7 @@ async function handleRunAppAgent(
   }
 
   const session = new Session({
-    sessionId: `app-agent-${payload.appId}-${Date.now()}`,
+    sessionId: appAgentSessionId,
     prefix,
     toolRegistry: registry,
     log,
@@ -1546,7 +1573,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   });
   const agent = new Agent({
     session,
-    provider: buildProvider(payload.settings),
+    provider: buildProvider(payload.settings, payload.sessionId),
     providerName: payload.providerName,
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),

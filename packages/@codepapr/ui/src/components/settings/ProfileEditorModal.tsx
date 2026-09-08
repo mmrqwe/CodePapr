@@ -23,7 +23,24 @@ import {
   profileModelsCacheKey,
 } from './listProfileModels';
 import { buildProviderForProfile } from '../../store/internals/providerFactory';
-import { resolveProviderName, resolveThinkingPayload } from '../../store/internals/settingsNormalizer';
+import { isReservedHeaderName, resolveProviderName, resolveThinkingPayload } from '../../store/internals/settingsNormalizer';
+
+interface HeaderRow {
+  key: string;
+  value: string;
+}
+
+function rowsToHeaders(rows: HeaderRow[]): Record<string, string> | undefined {
+  const merged: Record<string, string> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    const value = row.value.trim();
+    if (key && value && !isReservedHeaderName(key)) {
+      merged[key] = value;
+    }
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
 
 export interface ProfileEditorModalProps {
   profile: ModelProfile;
@@ -48,6 +65,7 @@ export function ProfileEditorModal({
   currentLang,
 }: ProfileEditorModalProps) {
   const [draft, setDraft] = useState<ModelProfile>({ ...profile });
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>([]);
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [modelFilter, setModelFilter] = useState('');
   const [fetchStatus, setFetchStatus] = useState<'idle' | 'fetching'>('idle');
@@ -61,6 +79,9 @@ export function ProfileEditorModal({
     abortRef.current = null;
     catalogCacheRef.current = new Map();
     setDraft({ ...profile });
+    setHeaderRows(
+      Object.entries(profile.extraHeaders ?? {}).map(([key, value]) => ({ key, value }))
+    );
     setFetchedModels(null);
     setModelFilter('');
     setFetchStatus('idle');
@@ -269,7 +290,7 @@ export function ProfileEditorModal({
       );
     }
 
-    const provider = buildProviderForProfile(draft);
+    const provider = buildProviderForProfile({ ...draft, extraHeaders: rowsToHeaders(headerRows) });
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
@@ -647,6 +668,60 @@ export function ProfileEditorModal({
           />
         </div>
 
+        {/* Extra Request Headers */}
+        <div className="rounded-xl border border-line bg-base p-4 space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
+            {t.extraHeadersLabel}
+          </div>
+          <p className="text-xs leading-relaxed text-fg-dim">{t.extraHeadersHint}</p>
+          {headerRows.map((row, index) => {
+            const reserved = isReservedHeaderName(row.key);
+            return (
+              <div key={index} className="flex items-center gap-2">
+                <input
+                  value={row.key}
+                  onChange={(e) =>
+                    setHeaderRows((prev) =>
+                      prev.map((r, i) => (i === index ? { ...r, key: e.target.value } : r))
+                    )
+                  }
+                  placeholder={t.extraHeadersKeyPlaceholder}
+                  className={`min-w-0 flex-1 rounded-lg border bg-base px-3 py-1.5 text-xs text-fg focus:outline-none ${
+                    reserved ? 'border-danger text-danger' : 'border-line focus:border-accent-soft'
+                  }`}
+                />
+                <input
+                  value={row.value}
+                  onChange={(e) =>
+                    setHeaderRows((prev) =>
+                      prev.map((r, i) => (i === index ? { ...r, value: e.target.value } : r))
+                    )
+                  }
+                  placeholder={t.extraHeadersValuePlaceholder}
+                  className="min-w-0 flex-1 rounded-lg border border-line bg-base px-3 py-1.5 text-xs text-fg focus:border-accent-soft focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setHeaderRows((prev) => prev.filter((_, i) => i !== index))}
+                  className="shrink-0 rounded-lg p-1.5 text-fg-muted hover:bg-raised hover:text-fg transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+          {headerRows.some((row) => isReservedHeaderName(row.key)) && (
+            <p className="text-xs text-danger">{t.extraHeadersReserved}</p>
+          )}
+          <button
+            type="button"
+            onClick={() => setHeaderRows((prev) => [...prev, { key: '', value: '' }])}
+            className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-muted hover:border-line-strong hover:text-fg transition-colors"
+          >
+            + {t.extraHeadersAdd}
+          </button>
+        </div>
+
         {/* Context & Sampling Parameters */}
         <div className="rounded-xl border border-line bg-base p-4 space-y-4">
           <div className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
@@ -776,7 +851,7 @@ export function ProfileEditorModal({
             </button>
             <button
               type="button"
-              onClick={() => onSave(draft)}
+              onClick={() => onSave({ ...draft, extraHeaders: rowsToHeaders(headerRows) })}
               className="rounded-xl bg-accent px-5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
             >
               {t.saveProfile}

@@ -34,6 +34,9 @@ export interface ModelProfile {
   baseURL: string;
   apiKey: string;
   model: string;
+  /** 自定义附加请求头（企业网关私有鉴权/路由头等）。仅追加、不覆盖内置头；
+   *  见 @codepapr/api ProviderConfig.extraHeaders 语义。 */
+  extraHeaders?: Record<string, string>;
   maxTokens: number;
   maxContextTokens?: number;
   thinkingEnabled?: boolean;
@@ -66,6 +69,8 @@ export interface Settings {
   model: string;
   fastModel: string;
   apiKey: string;
+  /** 自定义附加请求头（派生自主配置文件 primaryProfile.extraHeaders）。 */
+  extraHeaders?: Record<string, string>;
   fastModelEnabled: boolean;
   systemPrompt: string;
   thinkingEnabled: boolean;

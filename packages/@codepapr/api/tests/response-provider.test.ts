@@ -878,6 +878,7 @@ describe('ResponseProvider: OpenCode Go gateway contract', () => {
     const init = fetchMock.mock.calls[0][1] as { headers: Record<string, string>; body: string };
     expect(init.headers['x-opencode-session']).toMatch(/\S/);
     expect(init.headers['x-opencode-client']).toBe('codepapr');
+    expect(init.headers['User-Agent']).toBe('codepapr/0.1.0');
     const body = JSON.parse(init.body);
     expect(body.prompt_cache_key).toBe(true);
     expect(body.store).toBe(false);
@@ -896,6 +897,25 @@ describe('ResponseProvider: OpenCode Go gateway contract', () => {
     expect(init.headers['x-opencode-session']).toBe('sess-fixed');
   });
 
+  it('keeps session id stable across per-turn provider rebuilds', async () => {
+    // 真实事故回归：agentRuntime 每个回合重建 provider。缺省随机 id 会让
+    // 同一对话在网关眼里变成多个会话，会话级缓存路由失效。接线对话级
+    // sessionId 后，不同实例必须发出完全相同的路由头。
+    const fetchA = okFetch();
+    const fetchB = okFetch();
+    const opts = {
+      apiKey: 'sk-test',
+      baseURL: 'https://opencode.ai/zen/go/v1',
+      sessionId: 'conv-42',
+    };
+    await new ResponseProvider({ ...opts, fetchFn: fetchA as unknown as typeof fetch }).chat(chat);
+    await new ResponseProvider({ ...opts, fetchFn: fetchB as unknown as typeof fetch }).chat(chat);
+    const a = fetchA.mock.calls[0][1] as { headers: Record<string, string> };
+    const b = fetchB.mock.calls[0][1] as { headers: Record<string, string> };
+    expect(a.headers['x-opencode-session']).toBe('conv-42');
+    expect(b.headers['x-opencode-session']).toBe(a.headers['x-opencode-session']);
+  });
+
   it('sends no opencode headers or cache fields to other gateways', async () => {
     const fetchMock = okFetch();
     const provider = new ResponseProvider({
@@ -907,8 +927,54 @@ describe('ResponseProvider: OpenCode Go gateway contract', () => {
     const init = fetchMock.mock.calls[0][1] as { headers: Record<string, string>; body: string };
     expect(init.headers['x-opencode-session']).toBeUndefined();
     expect(init.headers['x-opencode-client']).toBeUndefined();
+    expect(init.headers['User-Agent']).toBeUndefined();
     const body = JSON.parse(init.body);
     expect(body.prompt_cache_key).toBeUndefined();
     expect(body.store).toBeUndefined();
+  });
+
+  it('appends extraHeaders without ever overriding built-in headers', async () => {
+    const fetchMock = okFetch();
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://opencode.ai/zen/go/v1',
+      sessionId: 'sess-fixed',
+      fetchFn: fetchMock as unknown as typeof fetch,
+      extraHeaders: {
+        'X-Tenant-Id': 'acme',
+        'x-opencode-session': 'hijacked',
+        'X-OPENCODE-CLIENT': 'hijacked',
+        Authorization: 'Bearer evil',
+        'Content-Type': 'text/plain',
+        'User-Agent': 'hijacked',
+        '  ': 'blank key ignored',
+        'blank-value': '  ',
+      },
+    });
+    await provider.chat(chat);
+    const init = fetchMock.mock.calls[0][1] as { headers: Record<string, string> };
+    expect(init.headers['X-Tenant-Id']).toBe('acme');
+    expect(init.headers['x-opencode-session']).toBe('sess-fixed');
+    expect(init.headers['x-opencode-client']).toBe('codepapr');
+    expect(init.headers['Authorization']).toBe('Bearer sk-test');
+    expect(init.headers['Content-Type']).toBe('application/json');
+    expect(init.headers['User-Agent']).toBe('codepapr/0.1.0');
+    expect(init.headers['blank-value']).toBeUndefined();
+    expect(Object.keys(init.headers).some((k) => k.trim() === '')).toBe(false);
+  });
+
+  it('lets extraHeaders carry x-opencode-* through custom-domain proxies', async () => {
+    // 经自定义域名反代 OpenCode Go 网关时，域名门控识别不到内置注入，
+    // 用户必须能显式配置会话头（此时没有内置同名头，合并自然生效）。
+    const fetchMock = okFetch();
+    const provider = new ResponseProvider({
+      apiKey: 'sk-test',
+      baseURL: 'https://proxy.example.com/v1',
+      fetchFn: fetchMock as unknown as typeof fetch,
+      extraHeaders: { 'x-opencode-session': 'proxy-session' },
+    });
+    await provider.chat(chat);
+    const init = fetchMock.mock.calls[0][1] as { headers: Record<string, string> };
+    expect(init.headers['x-opencode-session']).toBe('proxy-session');
   });
 });

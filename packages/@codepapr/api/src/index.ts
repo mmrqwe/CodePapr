@@ -3,11 +3,11 @@
  */
 
 // Providers
-export { BaseLLMProvider, ProviderRequestError, setGlobalFetchFn, getGlobalFetchFn } from './providers/ILLMProvider';
+export { BaseLLMProvider, ProviderRequestError, setGlobalFetchFn, getGlobalFetchFn, mergeExtraHeaders } from './providers/ILLMProvider';
 export type { ProviderConfig } from './providers/ILLMProvider';
 export { DeepSeekProvider } from './providers/DeepSeekProvider';
 export { OpenAIProvider } from './providers/OpenAIProvider';
-export { ResponseProvider } from './providers/ResponseProvider';
+export { ResponseProvider, CODEPAPR_OPENCODE_USER_AGENT } from './providers/ResponseProvider';
 export { ClaudeProvider } from './providers/ClaudeProvider';
 export { LocalProvider, DEFAULT_LOCAL_BASE_URL } from './providers/LocalProvider';
 export {

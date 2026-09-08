@@ -26,6 +26,8 @@ export interface WorkerAgentSettings {
   baseURL: string;
   apiKey: string;
   model: string;
+  /** 自定义附加请求头（来自模型配置档，见 ProviderConfig.extraHeaders 语义）。 */
+  extraHeaders?: Record<string, string>;
   /** Agent 工具面档位（极简时 worker 不补建 task 工具）。 */
   agentToolProfile?: AgentToolProfile;
   fastModelEnabled: boolean;

@@ -9,8 +9,18 @@ import {
 import { resolveProviderName } from './settingsNormalizer';
 import type { ApiFormat, ApiMode, ModelProfile } from './types';
 
+interface ProviderBuildInput {
+  apiMode: ApiMode;
+  apiFormat: ApiFormat;
+  apiKey: string;
+  baseURL: string;
+  streamIdleTimeoutMs?: number;
+  extraHeaders?: Record<string, string>;
+}
+
 export function buildProviderInstance(
-  s: { apiMode: ApiMode; apiFormat: ApiFormat; apiKey: string; baseURL: string; streamIdleTimeoutMs?: number }
+  s: ProviderBuildInput,
+  sessionId?: string
 ) {
   const idleTimeoutMs = s.streamIdleTimeoutMs ?? 30000;
   if (s.apiMode === 'local') {
@@ -18,12 +28,21 @@ export function buildProviderInstance(
       apiKey: s.apiKey.trim() || 'local',
       baseURL: s.baseURL.trim().replace(/\/+$/, '') || DEFAULT_LOCAL_BASE_URL,
       idleTimeoutMs,
+      ...(s.extraHeaders ? { extraHeaders: s.extraHeaders } : {}),
     });
   }
 
-  const cfg: { apiKey: string; baseURL?: string; idleTimeoutMs?: number } = {
+  const cfg: {
+    apiKey: string;
+    baseURL?: string;
+    idleTimeoutMs?: number;
+    sessionId?: string;
+    extraHeaders?: Record<string, string>;
+  } = {
     apiKey: s.apiKey.trim(),
     idleTimeoutMs,
+    ...(sessionId ? { sessionId } : {}),
+    ...(s.extraHeaders ? { extraHeaders: s.extraHeaders } : {}),
   };
   if (s.apiMode === 'custom') {
     cfg.baseURL = s.baseURL.trim().replace(/\/+$/, '');
@@ -39,15 +58,20 @@ export function buildProviderInstance(
 
 export function buildProviderForProfile(
   profile: ModelProfile,
-  streamIdleTimeoutMs: number = 30000
+  streamIdleTimeoutMs: number = 30000,
+  sessionId?: string
 ) {
-  return buildProviderInstance({
-    apiMode: profile.apiMode,
-    apiFormat: profile.apiFormat,
-    apiKey: profile.apiKey,
-    baseURL: profile.baseURL,
-    streamIdleTimeoutMs,
-  });
+  return buildProviderInstance(
+    {
+      apiMode: profile.apiMode,
+      apiFormat: profile.apiFormat,
+      apiKey: profile.apiKey,
+      baseURL: profile.baseURL,
+      streamIdleTimeoutMs,
+      extraHeaders: profile.extraHeaders,
+    },
+    sessionId
+  );
 }
 
 export { toWorkerAgentSettings, resolveWorkerMultimodalEnabled } from './workerSettings';

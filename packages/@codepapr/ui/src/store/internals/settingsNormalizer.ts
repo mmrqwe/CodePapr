@@ -25,6 +25,36 @@ export function resolveThinkingPayload(
   return apiMode === 'deepseek' ? 'thinking' : 'reasoning';
 }
 
+/** 额外请求头清洗：仅保留非空字符串键值；剥离传输层保留头（凭证/Content-Type
+ *  类，覆盖它们要么是错的要么是无效的）。
+ *  x-opencode-* / User-Agent 不在存储保留之列：直连 opencode.ai 时内置头已
+ *  存在，运行时合并天然不会覆盖；而经由自定义域名反代 OpenCode Go 网关时，
+ *  用户恰恰需要手动携带这些头（域名门控识别不到）。 */
+const RESERVED_HEADER_NAMES = /^(authorization|proxy-authorization|content-type|content-length|host|connection)$/i;
+
+export function isReservedHeaderName(key: string): boolean {
+  return RESERVED_HEADER_NAMES.test(key.trim());
+}
+
+export function sanitizeExtraHeaders(input: unknown): Record<string, string> | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return undefined;
+  }
+  const result: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(input as Record<string, unknown>)) {
+    const key = rawKey.trim();
+    const value = typeof rawValue === 'string' ? rawValue.trim() : '';
+    if (!key || !value || RESERVED_HEADER_NAMES.test(key)) {
+      continue;
+    }
+    result[key] = value;
+    if (Object.keys(result).length >= 20) {
+      break;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile | null {
   if (!input || typeof input !== 'object') {
     return null;
@@ -72,6 +102,7 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     typeof obj.multimodalEnabled === 'boolean'
       ? obj.multimodalEnabled
       : undefined;
+  const extraHeaders = sanitizeExtraHeaders(obj.extraHeaders);
 
   return {
     id,
@@ -90,6 +121,7 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     ...(temperature !== undefined ? { temperature } : {}),
     ...(topP !== undefined ? { topP } : {}),
     ...(multimodalEnabled !== undefined ? { multimodalEnabled } : {}),
+    ...(extraHeaders !== undefined ? { extraHeaders } : {}),
   };
 }
 
@@ -923,6 +955,9 @@ export function normalizeSettings(
   const effectiveFastModel = hasExplicitProfiles ? activeFastProfile.model : fastModel;
   const effectiveApiKey = hasExplicitProfiles ? activePrimaryProfile.apiKey : apiKey;
   const effectiveBaseURL = hasExplicitProfiles ? activePrimaryProfile.baseURL : baseURL;
+  const effectiveExtraHeaders = hasExplicitProfiles
+    ? activePrimaryProfile.extraHeaders
+    : sanitizeExtraHeaders(input.extraHeaders);
   const effectiveThinkingEnabled = hasExplicitProfiles
     ? (activePrimaryProfile.thinkingEnabled ?? false)
     : thinkingEnabled;
@@ -1033,6 +1068,7 @@ export function normalizeSettings(
     fastModel: effectiveFastModel,
     apiKey: effectiveApiKey,
     baseURL: effectiveBaseURL,
+    extraHeaders: effectiveExtraHeaders,
     systemPrompt,
     thinkingEnabled: effectiveThinkingEnabled,
     thinkingEffort: effectiveThinkingEffort,

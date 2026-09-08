@@ -306,7 +306,7 @@ export function buildUiTaskToolContext(
   const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
 
   const baseModel = (overrides.model ?? settings.model).trim();
-  const provider = buildProviderInstance(settings);
+  const provider = buildProviderInstance(settings, sessionId);
   const providerName = resolveProviderName(settings);
 
   // Filter out mentor agent when mentor is not enabled
@@ -458,7 +458,7 @@ export function buildAgentSessionParts(
   applyMinimalToolProfile(toolRegistry, settings.agentToolProfile);
 
   const baseModel = currentModel;
-  const provider = buildProviderInstance(settings);
+  const provider = buildProviderInstance(settings, sessionId);
   const providerName = resolveProviderName(settings);
 
   const prefix = new ImmutablePrefix({
