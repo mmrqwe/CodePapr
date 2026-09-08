@@ -85,7 +85,7 @@ interface MessageListProps {
   bottomSpacerHeight: number;
   subagentRuns: SubAgentRun[];
   renderedMessages: UIMessage[];
-  tailExecutionProcessGroup: ExecutionProcessGroup | null;
+  processGroupsBySummaryId: Map<string, ExecutionProcessGroup>;
   latestPlanAssistantMessageId: string | null;
   tailMessageId: string | null;
   lang: Lang;
@@ -128,7 +128,7 @@ export const MessageList = memo(function MessageList({
   bottomSpacerHeight,
   subagentRuns,
   renderedMessages,
-  tailExecutionProcessGroup,
+  processGroupsBySummaryId,
   latestPlanAssistantMessageId,
   tailMessageId,
   lang,
@@ -202,10 +202,11 @@ export const MessageList = memo(function MessageList({
           m.role === 'assistant' && !m.synthetic && Boolean(m.content) && !m.isStreaming;
         const showActionBar = showUserActions || showReplay;
 
-        const bubble = m.id === tailExecutionProcessGroup?.summaryMessageId ? (
-          <div key={`process-group:${tailExecutionProcessGroup.summaryMessageId}`}>
+        const processGroup = processGroupsBySummaryId.get(m.id);
+        const bubble = processGroup ? (
+          <div key={`process-group:${processGroup.summaryMessageId}`}>
             <ExecutionProcessPanel
-              group={tailExecutionProcessGroup}
+              group={processGroup}
               lang={lang}
               onOpenWorkspacePath={onOpenWorkspacePath}
               characterAvatar={characterAvatar ?? undefined}

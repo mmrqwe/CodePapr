@@ -10,7 +10,7 @@ import {
   inferImageMediaType,
   looksLikeBinaryText,
   partitionIncomingFiles,
-  buildTailExecutionProcessGroup,
+  buildExecutionProcessGroups,
 } from './utils';
 
 describe('slashCommandNameFilter', () => {
@@ -135,7 +135,7 @@ describe('formatBytesAsMbLabel', () => {
   });
 });
 
-describe('buildTailExecutionProcessGroup', () => {
+describe('buildExecutionProcessGroups', () => {
   it('groups intermediate execution steps and sets summaryMessage to the final assistant message', () => {
     const messages = [
       {
@@ -160,16 +160,17 @@ describe('buildTailExecutionProcessGroup', () => {
       },
     ];
 
-    const group = buildTailExecutionProcessGroup(messages);
-    expect(group).not.toBeNull();
-    expect(group?.userMessageId).toBe('u-1');
-    expect(group?.summaryMessageId).toBe('a-2');
-    expect(group?.messages).toHaveLength(1);
-    expect(group?.messages[0]?.id).toBe('a-1');
-    expect(group?.durationMs).toBe(2000);
+    const groups = buildExecutionProcessGroups(messages);
+    expect(groups).toHaveLength(1);
+    const group = groups[0]!;
+    expect(group.userMessageId).toBe('u-1');
+    expect(group.summaryMessageId).toBe('a-2');
+    expect(group.messages).toHaveLength(1);
+    expect(group.messages[0]?.id).toBe('a-1');
+    expect(group.durationMs).toBe(2000);
   });
 
-  it('returns null if there are fewer than 3 messages (single round / direct reply)', () => {
+  it('returns no groups if there are fewer than 3 messages (single round / direct reply)', () => {
     const messages = [
       {
         id: 'u-1',
@@ -186,10 +187,10 @@ describe('buildTailExecutionProcessGroup', () => {
       },
     ];
 
-    expect(buildTailExecutionProcessGroup(messages)).toBeNull();
+    expect(buildExecutionProcessGroups(messages)).toEqual([]);
   });
 
-  it('returns null while the summary message is still streaming', () => {
+  it('skips a round whose summary message is still streaming', () => {
     const messages = [
       {
         id: 'u-1',
@@ -214,10 +215,10 @@ describe('buildTailExecutionProcessGroup', () => {
       },
     ];
 
-    expect(buildTailExecutionProcessGroup(messages)).toBeNull();
+    expect(buildExecutionProcessGroups(messages)).toEqual([]);
   });
 
-  it('returns null for non-execution tasks in ask mode', () => {
+  it('skips non-execution rounds in ask mode', () => {
     const messages = [
       {
         id: 'u-1',
@@ -241,6 +242,100 @@ describe('buildTailExecutionProcessGroup', () => {
       },
     ];
 
-    expect(buildTailExecutionProcessGroup(messages)).toBeNull();
+    expect(buildExecutionProcessGroups(messages)).toEqual([]);
+  });
+
+  it('keeps earlier rounds grouped once a new round starts', () => {
+    const messages = [
+      {
+        id: 'u-1',
+        role: 'user' as const,
+        content: '重构这个模块',
+        timestamp: 1000,
+      },
+      {
+        id: 'a-1',
+        role: 'assistant' as const,
+        content: '第一轮过程消息。',
+        workMode: 'agent' as const,
+        timestamp: 2000,
+      },
+      {
+        id: 'a-2',
+        role: 'assistant' as const,
+        content: '第一轮总结。',
+        workMode: 'agent' as const,
+        timestamp: 3000,
+      },
+      {
+        id: 'u-2',
+        role: 'user' as const,
+        content: '再补一些测试',
+        timestamp: 4000,
+      },
+      {
+        id: 'a-3',
+        role: 'assistant' as const,
+        content: '第二轮正在输出...',
+        workMode: 'agent' as const,
+        isStreaming: true,
+        timestamp: 5000,
+      },
+    ];
+
+    const groups = buildExecutionProcessGroups(messages);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.summaryMessageId).toBe('a-2');
+    expect(groups[0]?.messages.map((message) => message.id)).toEqual(['a-1']);
+  });
+
+  it('groups every completed agent round independently', () => {
+    const messages = [
+      {
+        id: 'u-1',
+        role: 'user' as const,
+        content: '第一轮任务',
+        timestamp: 1000,
+      },
+      {
+        id: 'a-1',
+        role: 'assistant' as const,
+        content: '第一轮过程。',
+        workMode: 'agent' as const,
+        timestamp: 2000,
+      },
+      {
+        id: 'a-2',
+        role: 'assistant' as const,
+        content: '第一轮总结。',
+        workMode: 'agent' as const,
+        timestamp: 3000,
+      },
+      {
+        id: 'u-2',
+        role: 'user' as const,
+        content: '第二轮任务',
+        timestamp: 4000,
+      },
+      {
+        id: 'a-3',
+        role: 'assistant' as const,
+        content: '第二轮过程。',
+        workMode: 'agent' as const,
+        timestamp: 5000,
+      },
+      {
+        id: 'a-4',
+        role: 'assistant' as const,
+        content: '第二轮总结。',
+        workMode: 'agent' as const,
+        timestamp: 6000,
+      },
+    ];
+
+    const groups = buildExecutionProcessGroups(messages);
+    expect(groups.map((group) => group.summaryMessageId)).toEqual(['a-2', 'a-4']);
+    expect(groups[0]?.messages.map((message) => message.id)).toEqual(['a-1']);
+    expect(groups[1]?.messages.map((message) => message.id)).toEqual(['a-3']);
   });
 });

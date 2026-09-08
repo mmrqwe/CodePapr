@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { getTranslation } from '../../utils/i18n';
 import {
-  buildTailExecutionProcessGroup,
+  buildExecutionProcessGroups,
   formatProcessDuration,
   getProcessGroupCopy,
   type ExecutionProcessGroup,
@@ -9,7 +9,7 @@ import {
 } from './utils';
 import { MessageBubble } from './MessageBubble';
 
-export { buildTailExecutionProcessGroup, type ExecutionProcessGroup };
+export { buildExecutionProcessGroups, type ExecutionProcessGroup };
 
 export function ExecutionProcessPanel({
   group,

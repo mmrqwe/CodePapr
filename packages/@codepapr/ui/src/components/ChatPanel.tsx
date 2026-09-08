@@ -60,7 +60,7 @@ import { subscribeSubagentProgress, getSubagentRunsForSession, toggleSubagentCol
 import { ConversationRoundsIndicator } from './ConversationRoundsIndicator';
 import { toast } from '../store/toastStore';
 import type { PlanFollowUpAction } from '../utils/planMode';
-import { buildTailExecutionProcessGroup } from './chat/ExecutionProcessPanel';
+import { buildExecutionProcessGroups } from './chat/ExecutionProcessPanel';
 import { MessageList } from './chat/MessageList';
 import { ModeSelector } from './chat/ModeSelector';
 import { ChatInputTextarea } from './chat/ChatInputTextarea';
@@ -295,9 +295,17 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     () => messages.filter((message) => !message.hidden && !(message.synthetic && message.carryForwardInContext)),
     [messages]
   );
-  const tailExecutionProcessGroup = useMemo(
-    () => buildTailExecutionProcessGroup(visibleMessages),
+  const executionProcessGroups = useMemo(
+    () => buildExecutionProcessGroups(visibleMessages),
     [visibleMessages]
+  );
+  const processGroupsBySummaryId = useMemo(
+    () => new Map(executionProcessGroups.map((group) => [group.summaryMessageId, group])),
+    [executionProcessGroups]
+  );
+  const hiddenProcessMessageIds = useMemo(
+    () => new Set(executionProcessGroups.flatMap((group) => group.messages.map((message) => message.id))),
+    [executionProcessGroups]
   );
   const hasStreamingMessage = useMemo(
     () => visibleMessages.some(
@@ -868,21 +876,11 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   }, [pendingChatJump, scrollToMessageInView]);
 
   const renderedMessages = useMemo(() => {
-    if (!tailExecutionProcessGroup) {
+    if (hiddenProcessMessageIds.size === 0) {
       return windowedMessages;
     }
-    return windowedMessages.filter((message) => {
-      if (message.id === tailExecutionProcessGroup.summaryMessageId) {
-        return true;
-      }
-      if (message.id === tailExecutionProcessGroup.userMessageId) {
-        return true;
-      }
-      return !tailExecutionProcessGroup.messages.some(
-        (processMessage) => processMessage.id === message.id
-      );
-    });
-  }, [windowedMessages, tailExecutionProcessGroup]);
+    return windowedMessages.filter((message) => !hiddenProcessMessageIds.has(message.id));
+  }, [windowedMessages, hiddenProcessMessageIds]);
 
   useLayoutEffect(() => {
     lastVisibleMessageIdRef.current = tailMessageId;
@@ -1539,7 +1537,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
             bottomSpacerHeight={bottomSpacerHeight}
             subagentRuns={subagentRuns}
             renderedMessages={renderedMessages}
-            tailExecutionProcessGroup={tailExecutionProcessGroup}
+            processGroupsBySummaryId={processGroupsBySummaryId}
             latestPlanAssistantMessageId={latestPlanAssistantMessageId}
             tailMessageId={tailMessageId}
             lang={settings.lang ?? 'zh-CN'}

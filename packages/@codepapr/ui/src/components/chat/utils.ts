@@ -592,32 +592,41 @@ export interface ExecutionProcessGroup {
   durationMs: number;
 }
 
-export function buildTailExecutionProcessGroup(messages: UIMessage[]): ExecutionProcessGroup | null {
-  if (messages.length < 3) {
-    return null;
+/**
+ * 按回合（user 消息切分）折叠所有已结束的 agent 执行过程，而不只是最后一轮：
+ * 否则新消息一发出，上一轮的执行过程就会重新铺满屏幕。
+ */
+export function buildExecutionProcessGroups(messages: UIMessage[]): ExecutionProcessGroup[] {
+  const groups: ExecutionProcessGroup[] = [];
+  let roundStart = -1;
+  for (let index = 0; index <= messages.length; index += 1) {
+    const isRoundBoundary = index === messages.length || messages[index].role === 'user';
+    if (!isRoundBoundary) continue;
+    if (roundStart >= 0) {
+      const group = buildRoundExecutionProcessGroup(messages, roundStart, index);
+      if (group) groups.push(group);
+    }
+    roundStart = index;
   }
+  return groups;
+}
 
-  const summaryMessage = messages[messages.length - 1];
-  if (
-    !summaryMessage ||
-    summaryMessage.role !== 'assistant' ||
-    summaryMessage.isStreaming
-  ) {
-    return null;
-  }
-
-  const userIndex = [...messages]
-    .slice(0, -1)
-    .map((message, index) => ({ message, index }))
-    .reverse()
-    .find(({ message }) => message.role === 'user')?.index;
-
-  if (typeof userIndex !== 'number') {
+function buildRoundExecutionProcessGroup(
+  messages: UIMessage[],
+  userIndex: number,
+  roundEnd: number,
+): ExecutionProcessGroup | null {
+  if (roundEnd - userIndex < 3) {
     return null;
   }
 
   const userMessage = messages[userIndex];
-  if (!userMessage) {
+  const summaryMessage = messages[roundEnd - 1];
+  if (!userMessage || !summaryMessage) {
+    return null;
+  }
+
+  if (summaryMessage.role !== 'assistant' || summaryMessage.isStreaming) {
     return null;
   }
 
@@ -628,7 +637,7 @@ export function buildTailExecutionProcessGroup(messages: UIMessage[]): Execution
   }
 
   const processMessages = messages
-    .slice(userIndex + 1, -1)
+    .slice(userIndex + 1, roundEnd - 1)
     .filter((message) => message.role !== 'user');
   if (processMessages.length === 0) {
     return null;

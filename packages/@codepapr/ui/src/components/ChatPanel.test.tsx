@@ -691,6 +691,69 @@ describe('ChatPanel', () => {
     expect(container.textContent).toContain('总结：系统分层清晰。');
   });
 
+  it('keeps earlier rounds collapsed once a new round starts or streams', async () => {
+    const round1Messages = [
+      {
+        id: 'user-1',
+        role: 'user' as const,
+        content: '把回复布局改成 VS Code 那样',
+        timestamp: 10,
+      },
+      {
+        id: 'assistant-round1-process',
+        role: 'assistant' as const,
+        workMode: 'agent' as const,
+        content: '第一轮执行细节应当保持折叠。',
+        timestamp: 11,
+      },
+      {
+        id: 'assistant-round1-summary',
+        role: 'assistant' as const,
+        workMode: 'agent' as const,
+        content: '执行总结：第一轮完成。',
+        synthetic: true,
+        timestamp: 12,
+      },
+    ];
+    const messages = [
+      ...round1Messages,
+      {
+        id: 'user-2',
+        role: 'user' as const,
+        content: '再跑一遍测试',
+        timestamp: 13,
+      },
+      {
+        id: 'assistant-round2-streaming',
+        role: 'assistant' as const,
+        workMode: 'agent' as const,
+        content: '第二轮正在进行中……',
+        isStreaming: true,
+        timestamp: 14,
+      },
+    ];
+    useAgentStore.setState((state) => ({
+      ...state,
+      messages,
+      sessionMessages: {
+        'session-1': messages,
+      },
+      isLoading: true,
+      loadingSessionId: 'session-1',
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const panels = container.querySelectorAll('[data-process-group-state]');
+    expect(panels).toHaveLength(1);
+    expect(panels[0]?.getAttribute('data-process-group-state')).toBe('closed');
+    expect(container.textContent).toContain('执行总结：第一轮完成。');
+    expect(container.textContent).not.toContain('第一轮执行细节应当保持折叠。');
+    expect(container.textContent).toContain('第二轮正在进行中……');
+  });
+
   it('shows compact help in the placeholder and removes the footer tip line', async () => {
     await act(async () => {
       root.render(<ChatPanel />);
