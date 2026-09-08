@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStore } from './store/agentStore';
 import { useAppRuntimeStore } from './store/appRuntimeStore';
-import { isPluginApp, pluginIsEnabled, pluginShouldAutostartOverlay, readAppManifest } from './papr/pluginSurface';
+import { isPluginApp, pluginIsEnabled, readAppManifest } from './papr/pluginSurface';
 import { loadPluginUi } from './papr/pluginUiStorage';
 import { findPreviewProcessForPort, processPreviewUrl } from './utils/loopbackPreview';
 
@@ -91,7 +91,9 @@ export async function restoreWorkspaceApps(
         const chrome = runtime.pluginChrome[app.app_id];
         if (pluginIsEnabled(manifest, chrome)) {
           runtime.enablePlugin(app.app_id);
-          if (pluginShouldAutostartOverlay(manifest, chrome)) {
+          // 只有该项目已明确记录 visible=true 才恢复 overlay；
+          // 新项目（无 chrome 记录）不自动弹出，即开即用一次后由 pinPlugin 持久化。
+          if (chrome?.visible === true) {
             runtime.pinPlugin(app.app_id);
           }
         }
