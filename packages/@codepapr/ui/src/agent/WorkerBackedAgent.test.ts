@@ -10,6 +10,7 @@ import {
   WorkerCrashError,
   type AgentRuntimeStreamEvent,
 } from './WorkerBackedAgent';
+import { getSubagentRunsForSession, resetSubagentProgress } from '../utils/subagentProgress';
 import type { AgentRuntimeTransport } from './agentRuntimeHost';
 
 function makeMcpSearchSettings(): McpSettings {
@@ -1149,5 +1150,105 @@ describe('WorkerBackedAgent', () => {
       warnSpy.mockRestore();
       errorSpy.mockRestore();
     }
+  });
+
+  describe('子代理进度残留清除', () => {
+    beforeEach(() => {
+      resetSubagentProgress();
+    });
+
+    function subagentStart(requestId: string) {
+      return {
+        type: 'subagent-progress',
+        requestId,
+        action: 'start',
+        runId: 'mentor-run-1',
+        agent: 'mentor',
+        prompt: '架构评审',
+      } as const;
+    }
+
+    async function startChatWithMentorRun(): Promise<{
+      agent: WorkerBackedAgent;
+      worker: MockWorker;
+      requestId: string;
+      chatPromise: Promise<IAgentResponse>;
+    }> {
+      const agent = createAgent();
+      const chatPromise = agent.chat('hello');
+      const worker = MockWorker.instances[0];
+      const chatMessage = chatMessages(worker)[0];
+      if (chatMessage?.type !== 'chat') throw new Error('expected chat message');
+      worker.emit(subagentStart(chatMessage.payload.requestId));
+      expect(getSubagentRunsForSession('session-1')).toHaveLength(1);
+      return { agent, worker, requestId: chatMessage.payload.requestId, chatPromise };
+    }
+
+    it('complete 帧到达：进度条目即时消失', async () => {
+      const { worker, requestId, chatPromise } = await startChatWithMentorRun();
+
+      worker.emit({
+        type: 'subagent-progress',
+        requestId,
+        action: 'complete',
+        runId: 'mentor-run-1',
+      });
+      expect(getSubagentRunsForSession('session-1')).toHaveLength(0);
+
+      worker.emit({
+        type: 'result',
+        requestId,
+        response: { role: 'assistant', content: 'ok' },
+        deltaMessages: [],
+        logLength: 0,
+      });
+      await chatPromise;
+    });
+
+    it('complete 帧丢失：result 帧兜底收尾，杜绝「永远正在思考」', async () => {
+      const { worker, requestId, chatPromise } = await startChatWithMentorRun();
+
+      worker.emit({
+        type: 'result',
+        requestId,
+        response: { role: 'assistant', content: 'ok' },
+        deltaMessages: [],
+        logLength: 0,
+      });
+      await chatPromise;
+      expect(getSubagentRunsForSession('session-1')).toHaveLength(0);
+    });
+
+    it('complete 帧丢失：error 帧兜底收尾', async () => {
+      const { worker, requestId, chatPromise } = await startChatWithMentorRun();
+
+      worker.emit({ type: 'error', requestId, error: 'boom' });
+      await expect(chatPromise).rejects.toThrow('boom');
+      expect(getSubagentRunsForSession('session-1')).toHaveLength(0);
+    });
+
+    it('取消 ACK 兜底收尾在飞进度', async () => {
+      const { agent, worker, requestId, chatPromise } = await startChatWithMentorRun();
+
+      agent.cancelSession();
+      worker.emit({ type: 'cancelled', requestId });
+      await expect(chatPromise).rejects.toBeInstanceOf(DOMException);
+      expect(getSubagentRunsForSession('session-1')).toHaveLength(0);
+    });
+
+    it('worker 崩溃兜底收尾在飞进度', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const { worker, chatPromise } = await startChatWithMentorRun();
+
+        worker.emitError('fatal');
+        await expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+        expect(getSubagentRunsForSession('session-1')).toHaveLength(0);
+      } finally {
+        errorSpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    });
   });
 });

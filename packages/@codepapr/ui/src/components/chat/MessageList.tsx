@@ -11,16 +11,10 @@ import { ExecutionProcessPanel } from './ExecutionProcessPanel';
 import { TaskChecklist } from '../TaskChecklist';
 
 function subagentRunLabel(run: SubAgentRun): string {
-  if (run.agent === 'explore') {
-    return run.state === 'running' ? 'Explore 正在分析代码...' : 'Explore 分析完成';
-  }
-  if (run.agent === 'scout') {
-    return run.state === 'running' ? 'Scout 正在搜索网络...' : 'Scout 搜索完成';
-  }
-  if (run.agent === 'mentor') {
-    return run.state === 'running' ? 'Mentor 正在思考...' : 'Mentor 思考完成';
-  }
-  return run.state === 'running' ? `${run.agent} 正在执行...` : `${run.agent} 执行完成`;
+  if (run.agent === 'explore') return 'Explore 正在分析代码...';
+  if (run.agent === 'scout') return 'Scout 正在搜索网络...';
+  if (run.agent === 'mentor') return 'Mentor 正在思考...';
+  return `${run.agent} 正在执行...`;
 }
 
 function SubagentRunPanels({
@@ -43,7 +37,7 @@ function SubagentRunPanels({
             className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-base/50"
             onClick={() => onToggle(run.id)}
           >
-            <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${run.state === 'running' ? 'animate-pulse bg-info' : 'bg-ok'}`} />
+            <span className="inline-block h-2 w-2 rounded-full flex-shrink-0 animate-pulse bg-info" />
             <span className="flex-1 min-w-0">
               <span className="text-xs font-semibold text-info">{subagentRunLabel(run)}</span>
               {run.prompt && (
@@ -56,11 +50,6 @@ function SubagentRunPanels({
           </button>
           {!run.collapsed && (
             <div className="border-t border-info-bg px-3.5 py-2.5">
-              {run.content && run.state === 'completed' && (
-                <div className="mb-2 max-h-32 overflow-y-auto rounded-lg bg-base px-3 py-2 text-[11px] leading-relaxed text-fg-muted whitespace-pre-wrap">
-                  {run.content.length > 600 ? `${run.content.slice(0, 600)}...` : run.content}
-                </div>
-              )}
               {run.steps.length > 0 && (
                 <div className="space-y-0.5">
                   {run.steps.map((step, i) => (

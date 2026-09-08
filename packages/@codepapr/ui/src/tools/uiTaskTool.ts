@@ -95,81 +95,81 @@ export async function runSubagent(
 ): Promise<SubagentSessionResult> {
   const runId = startSubagentProgress(definition.name, prompt, undefined, context.sessionId);
 
-  const exec = resolveSubagentExecution({
-    definition,
-    currentDepth: context.currentDepth ?? 0,
-    taskPrompt: prompt,
-    baseModel: context.baseModel,
-    fastModel: context.fastModel,
-    fastModelEnabled: context.fastModelEnabled,
-    defaultMaxTokens: context.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
-    globalMaxToolRounds: context.maxToolRounds,
-    thinkingFallback: context.thinkingEnabled ?? true,
-    reasoningEffort: context.reasoningEffort ?? '',
-    thinkingBudgetTokens: context.thinkingBudgetTokens ?? 0,
-    thinkingPayload: context.thinkingPayload,
-    explore: {
-      topP: context.exploreTopP,
-      maxTokens: context.exploreMaxTokens,
-      thinkingEnabled: context.exploreThinkingEnabled,
-      temperature: context.exploreTemperature,
-      maxToolRounds: context.exploreMaxToolRounds,
-      maxDepth: context.exploreMaxDepth,
-    },
-    scout: {
-      topP: context.scoutTopP,
-      maxTokens: context.scoutMaxTokens,
-      thinkingEnabled: context.scoutThinkingEnabled,
-      temperature: context.scoutTemperature,
-      maxToolRounds: context.scoutMaxToolRounds,
-      maxDepth: context.scoutMaxDepth,
-    },
-    mentor: context.mentor,
-    fallbackApiKey: context.apiKey ?? '',
-    fallbackBaseURL: context.baseURL ?? '',
-  });
-
-  const subagentModel = exec.route.model;
-  const registry = new ToolRegistry();
-  registerWorkspaceTools(
-    registry,
-    context.workspacePath,
-    context.editHistory,
-    context.onWorkspaceMutated,
-    {
-      multimodalEnabled: context.readImageEnabledForModel
-        ? context.readImageEnabledForModel(subagentModel)
-        : context.multimodalEnabled,
-      exposeGraphToLlm: true,
-      mode: context.mode,
-    }
-  );
-  if (context.transformToolResultForModel) {
-    const originalExecute = registry.execute.bind(registry);
-    registry.execute = async (name, args, execContext) => {
-      const result = await originalExecute(name, args, execContext);
-      return context.transformToolResultForModel!(result, subagentModel);
-    };
-  }
-  const tools = filterToolsForAgent(registry.getAll(), definition.tools);
-
-  let provider = context.provider;
-  let providerName: 'deepseek' | 'openai' | 'claude' | 'response' = context.providerName;
-  if (exec.mentor) {
-    const config = { apiKey: exec.mentor.apiKey, ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}) };
-    if (exec.mentor.apiFormat === 'claude') {
-      provider = new ClaudeProvider(config);
-      providerName = 'claude';
-    } else if (exec.mentor.apiFormat === 'response') {
-      provider = new ResponseProvider(config);
-      providerName = 'response';
-    } else {
-      provider = new OpenAIProvider(config);
-      providerName = 'openai';
-    }
-  }
-
   try {
+    const exec = resolveSubagentExecution({
+      definition,
+      currentDepth: context.currentDepth ?? 0,
+      taskPrompt: prompt,
+      baseModel: context.baseModel,
+      fastModel: context.fastModel,
+      fastModelEnabled: context.fastModelEnabled,
+      defaultMaxTokens: context.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
+      globalMaxToolRounds: context.maxToolRounds,
+      thinkingFallback: context.thinkingEnabled ?? true,
+      reasoningEffort: context.reasoningEffort ?? '',
+      thinkingBudgetTokens: context.thinkingBudgetTokens ?? 0,
+      thinkingPayload: context.thinkingPayload,
+      explore: {
+        topP: context.exploreTopP,
+        maxTokens: context.exploreMaxTokens,
+        thinkingEnabled: context.exploreThinkingEnabled,
+        temperature: context.exploreTemperature,
+        maxToolRounds: context.exploreMaxToolRounds,
+        maxDepth: context.exploreMaxDepth,
+      },
+      scout: {
+        topP: context.scoutTopP,
+        maxTokens: context.scoutMaxTokens,
+        thinkingEnabled: context.scoutThinkingEnabled,
+        temperature: context.scoutTemperature,
+        maxToolRounds: context.scoutMaxToolRounds,
+        maxDepth: context.scoutMaxDepth,
+      },
+      mentor: context.mentor,
+      fallbackApiKey: context.apiKey ?? '',
+      fallbackBaseURL: context.baseURL ?? '',
+    });
+
+    const subagentModel = exec.route.model;
+    const registry = new ToolRegistry();
+    registerWorkspaceTools(
+      registry,
+      context.workspacePath,
+      context.editHistory,
+      context.onWorkspaceMutated,
+      {
+        multimodalEnabled: context.readImageEnabledForModel
+          ? context.readImageEnabledForModel(subagentModel)
+          : context.multimodalEnabled,
+        exposeGraphToLlm: true,
+        mode: context.mode,
+      }
+    );
+    if (context.transformToolResultForModel) {
+      const originalExecute = registry.execute.bind(registry);
+      registry.execute = async (name, args, execContext) => {
+        const result = await originalExecute(name, args, execContext);
+        return context.transformToolResultForModel!(result, subagentModel);
+      };
+    }
+    const tools = filterToolsForAgent(registry.getAll(), definition.tools);
+
+    let provider = context.provider;
+    let providerName: 'deepseek' | 'openai' | 'claude' | 'response' = context.providerName;
+    if (exec.mentor) {
+      const config = { apiKey: exec.mentor.apiKey, ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}) };
+      if (exec.mentor.apiFormat === 'claude') {
+        provider = new ClaudeProvider(config);
+        providerName = 'claude';
+      } else if (exec.mentor.apiFormat === 'response') {
+        provider = new ResponseProvider(config);
+        providerName = 'response';
+      } else {
+        provider = new OpenAIProvider(config);
+        providerName = 'openai';
+      }
+    }
+
     const result = await runSubagentSession({
       definition,
       prompt,
@@ -199,10 +199,11 @@ export async function runSubagent(
         });
       },
     });
-    completeSubagentProgress(runId, result.content);
+    completeSubagentProgress(runId);
     return result;
   } catch (error) {
-    completeSubagentProgress(runId, error instanceof Error ? error.message : String(error));
+    // start 之后任何环节（setup/执行）抛错都必须收尾，否则面板永远「正在思考」。
+    completeSubagentProgress(runId);
     throw error;
   }
 }

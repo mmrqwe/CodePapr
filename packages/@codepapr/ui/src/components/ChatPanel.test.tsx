@@ -1469,25 +1469,39 @@ describe('ChatPanel', () => {
   });
 
   it('does not show leftover mentor progress on a newly created empty session', async () => {
-    const runId = startSubagentProgress('mentor', '架构评审', undefined, 'session-1');
-    completeSubagentProgress(runId, 'done');
+    startSubagentProgress('mentor', '架构评审', undefined, 'session-1');
 
     await act(async () => {
       root.render(<ChatPanel />);
     });
-    expect(container.textContent).toContain('Mentor 思考完成');
+    expect(container.textContent).toContain('Mentor 正在思考');
 
     await act(async () => {
       useAgentStore.getState().newSession();
     });
 
-    expect(container.textContent).not.toContain('Mentor 思考完成');
+    expect(container.textContent).not.toContain('Mentor 正在思考');
     expect(container.textContent).toContain('CodePapr');
   });
 
-  it('does not carry mentor progress into another session that already has messages', async () => {
+  it('hides the mentor panel as soon as the run completes', async () => {
     const runId = startSubagentProgress('mentor', '架构评审', undefined, 'session-1');
-    completeSubagentProgress(runId, 'done');
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+    expect(container.textContent).toContain('Mentor 正在思考');
+
+    await act(async () => {
+      completeSubagentProgress(runId);
+    });
+
+    expect(container.textContent).not.toContain('Mentor 正在思考');
+    expect(container.querySelector('[data-subagent-run="mentor"]')).toBeNull();
+  });
+
+  it('does not carry mentor progress into another session that already has messages', async () => {
+    startSubagentProgress('mentor', '架构评审', undefined, 'session-1');
     setTwoSessions({
       messages: [
         {
@@ -1520,20 +1534,19 @@ describe('ChatPanel', () => {
     await act(async () => {
       root.render(<ChatPanel />);
     });
-    expect(container.textContent).toContain('Mentor 思考完成');
+    expect(container.textContent).toContain('Mentor 正在思考');
     expect(container.textContent).toContain('会话 1 的问题');
 
     await act(async () => {
       useAgentStore.getState().selectSession('session-2');
     });
 
-    expect(container.textContent).not.toContain('Mentor 思考完成');
+    expect(container.textContent).not.toContain('Mentor 正在思考');
     expect(container.textContent).toContain('会话 2 的问题');
   });
 
   it('renders explore progress after the conversation, not above it', async () => {
-    const runId = startSubagentProgress('explore', '查找入口', undefined, 'session-1');
-    completeSubagentProgress(runId, 'found it');
+    startSubagentProgress('explore', '查找入口', undefined, 'session-1');
 
     await act(async () => {
       root.render(<ChatPanel />);
@@ -1541,7 +1554,7 @@ describe('ChatPanel', () => {
 
     const text = container.textContent ?? '';
     const userAt = text.indexOf('把回复布局改成 VS Code 那样');
-    const exploreAt = text.indexOf('Explore 分析完成');
+    const exploreAt = text.indexOf('Explore 正在分析代码');
     expect(userAt).toBeGreaterThan(-1);
     expect(exploreAt).toBeGreaterThan(userAt);
     expect(container.querySelector('[data-subagent-run="explore"]')).not.toBeNull();

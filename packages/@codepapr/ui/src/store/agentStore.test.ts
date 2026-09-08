@@ -4289,11 +4289,11 @@ describe('useAgentStore.closeWorkspace', () => {
   });
 
   it('closeWorkspace 清空进程级 UI 状态，避免跨项目把折叠块/Goal/确认框带进新对话', async () => {
-    const { startSubagentProgress, completeSubagentProgress, getSubagentRuns } = await import(
+    const { startSubagentProgress, getSubagentRuns } = await import(
       '../utils/subagentProgress'
     );
-    const runId = startSubagentProgress('mentor', '架构评审', undefined, 's1');
-    completeSubagentProgress(runId, 'done');
+    startSubagentProgress('mentor', '架构评审', undefined, 's1');
+    // 在飞条目（complete 帧丢失/未到时）也必须被 closeWorkspace 清掉。
     expect(getSubagentRuns()).toHaveLength(1);
 
     useGoalStore.getState().setGoalActive(parseGoalCondition('exec:npm test'), '跨项目 goal');

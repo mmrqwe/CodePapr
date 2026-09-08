@@ -41,6 +41,8 @@ import {
   startSubagentProgress,
   pushSubagentStep,
   completeSubagentProgress,
+  finalizeSubagentRunsForRequest,
+  finalizeSubagentRunsForSession,
 } from '../utils/subagentProgress';
 import type { AgentRuntimeTransport } from './agentRuntimeHost';
 import { WorkerTransport } from './workerTransport';
@@ -600,6 +602,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
         this.clearHeartbeat();
       }
       this.transport.terminate({ kill: true });
+      // 强杀后 cancel ACK/complete 帧永不到达：兜底清掉该回合的子代理进度。
+      finalizeSubagentRunsForRequest(requestId);
       pending.reject(new DOMException('Agent was terminated', 'AbortError'));
       this.pendingRequests.delete(requestId);
       this.activeRequestId = null;
@@ -651,6 +655,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       pending.reject(destroyError);
       this.pendingRequests.delete(requestId);
     }
+    // transport 即将 terminate：该会话在飞的子代理进度帧就此绝迹，清掉残留。
+    finalizeSubagentRunsForSession(this.config.sessionId);
     this.activeRequestId = null;
     this.crashed = true;
     if (typeof document !== 'undefined') {
@@ -924,11 +930,17 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
     if (message.type === 'subagent-progress') {
       if (message.action === 'start' && message.agent) {
-        startSubagentProgress(message.agent, message.prompt, message.runId, this.config.sessionId);
+        startSubagentProgress(
+          message.agent,
+          message.prompt,
+          message.runId,
+          this.config.sessionId,
+          message.requestId
+        );
       } else if (message.action === 'step' && message.step) {
         pushSubagentStep(message.runId, message.step);
       } else if (message.action === 'complete') {
-        completeSubagentProgress(message.runId, message.content ?? '');
+        completeSubagentProgress(message.runId);
       }
       return;
     }
@@ -946,6 +958,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     }
 
     if (message.type === 'cancelled') {
+      // 取消的回合不会再有 complete/result 帧：兜底清掉该回合在飞的子代理进度。
+      finalizeSubagentRunsForRequest(message.requestId);
       const pending = this.pendingRequests.get(message.requestId);
       if (pending) {
         this.clearCancelTimer();
@@ -1181,6 +1195,13 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       return;
     }
 
+    // 出错回合的结算兜底：子代理 complete 帧丢失时，error 帧同样收尾该回合
+    // 在飞的进度条目。放在 pending 校验之前——迟到/重复的 error 帧可能已无
+    // pending 记录，但残留的进度条目仍需清除。
+    if (message.type === 'error') {
+      finalizeSubagentRunsForRequest(message.requestId);
+    }
+
     const pending = this.pendingRequests.get(message.requestId);
     if (!pending) {
       return;
@@ -1272,6 +1293,9 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     }
 
     if (message.type === 'result') {
+      // 回合已结算：该回合在飞的子代理进度不会再有 complete 帧（丢失/迟到的
+      // 兜底），无论正常与否都收尾，杜绝「子代理结束但面板永远转圈」。
+      finalizeSubagentRunsForRequest(message.requestId);
       this.clearCancelTimer();
       this.clearSnapshotTimer();
       this.flushDeltas(pending);
@@ -1345,6 +1369,8 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       this.pendingRequests.delete(requestId);
     }
     this.activeRequestId = null;
+    // worker 已死：不会再有 complete/result 帧，按会话清掉在飞的子代理进度。
+    finalizeSubagentRunsForSession(this.config.sessionId);
 
     this.abortAllPendingFetches();
 

@@ -584,7 +584,6 @@ export type AgentWorkerToMainMessage =
       agent?: string;
       prompt?: string;
       step?: { name: string; status: 'success' | 'error'; summary: string };
-      content?: string;
     }
   | {
       /** Best-effort diagnostic emitted by the worker before it dies (global

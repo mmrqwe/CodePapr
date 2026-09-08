@@ -228,7 +228,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
 
   // 按当前会话在渲染时派生，不能放进 useState + useEffect：ChatPanel 不随
   // 新会话卸载，effect 要等绘制之后才过滤，空对话欢迎页会顶着上一会话的
-  // 「Mentor 思考完成」。进度变更只用来触发重渲染。
+  // 「Mentor 正在思考」。进度变更只用来触发重渲染。
   const [, setSubagentProgressEpoch] = useState(0);
   useEffect(() => {
     return subscribeSubagentProgress(() => {

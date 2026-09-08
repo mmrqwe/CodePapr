@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   startSubagentProgress,
   completeSubagentProgress,
-  clearSubagentProgress,
+  finalizeSubagentRunsForRequest,
+  finalizeSubagentRunsForSession,
   resetSubagentProgress,
   getSubagentRuns,
   getSubagentRunsForSession,
@@ -13,23 +14,27 @@ beforeEach(() => {
   resetSubagentProgress();
 });
 
-describe('subagentProgress 有界裁剪', () => {
-  // 回归 #7：runs 数组只增不减会随子代理调用次数无限增长；
-  // clear 会把运行中的条目标记完成并裁剪最旧的已完成条目。
-  it('caps completed runs while preserving the newest ones', () => {
+describe('subagentProgress 完成即移除', () => {
+  it('complete 后条目从面板数据中消失，不留下已完成残留', () => {
     for (let i = 0; i < 60; i += 1) {
       const id = startSubagentProgress(`agent-${i}`);
-      completeSubagentProgress(id, `out-${i}`);
+      completeSubagentProgress(id);
     }
     startSubagentProgress('still-running');
-    clearSubagentProgress();
 
     const runs = getSubagentRuns();
-    expect(runs).toHaveLength(50);
-    // 全部已结算（clear 语义），裁剪保留最新完成的条目（UI 可见的近期记录）
-    expect(runs.every((run) => run.state === 'completed')).toBe(true);
-    expect(runs[runs.length - 1]?.agent).toBe('still-running');
-    expect(runs[0]?.agent).toBe('agent-11');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.agent).toBe('still-running');
+  });
+
+  it('重复 start 帧（同 runId）复用条目，complete 一次即清空', () => {
+    const first = startSubagentProgress('mentor', 'a', 'dup-id');
+    const second = startSubagentProgress('mentor', 'a', 'dup-id');
+    expect(second).toBe(first);
+    expect(getSubagentRuns()).toHaveLength(1);
+
+    completeSubagentProgress('dup-id');
+    expect(getSubagentRuns()).toHaveLength(0);
   });
 });
 
@@ -38,16 +43,46 @@ describe('subagentProgress runId 隔离', () => {
     const first = startSubagentProgress('explore', 'a');
     const second = startSubagentProgress('scout', 'b');
     pushSubagentStep(second, { name: 'websearch', status: 'success', summary: 'ok' });
-    completeSubagentProgress(first, 'explore-done');
+    completeSubagentProgress(first);
 
     const runs = getSubagentRuns();
-    expect(runs).toHaveLength(2);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.agent).toBe('scout');
+    expect(runs[0]?.steps.map((step) => step.name)).toEqual(['websearch']);
+  });
+});
+
+describe('subagentProgress 兜底收尾', () => {
+  it('finalizeSubagentRunsForRequest 清掉指定回合的在飞条目', () => {
+    const doomed = startSubagentProgress('mentor', 'a', undefined, 's1', 'req-1');
+    startSubagentProgress('explore', 'b', undefined, 's1', 'req-2');
+
+    finalizeSubagentRunsForRequest('req-1');
+
+    const runs = getSubagentRuns();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.id).not.toBe(doomed);
     expect(runs[0]?.agent).toBe('explore');
-    expect(runs[0]?.steps).toEqual([]);
-    expect(runs[0]?.state).toBe('completed');
-    expect(runs[1]?.agent).toBe('scout');
-    expect(runs[1]?.steps.map((step) => step.name)).toEqual(['websearch']);
-    expect(runs[1]?.state).toBe('running');
+  });
+
+  it('finalizeSubagentRunsForSession 只清指定会话的条目', () => {
+    startSubagentProgress('mentor', 'a', undefined, 'session-old');
+    startSubagentProgress('mentor', 'b', undefined, 'session-new');
+
+    finalizeSubagentRunsForSession('session-old');
+
+    const runs = getSubagentRuns();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.prompt).toBe('b');
+  });
+
+  it('complete 帧丢失时，回合结算兜底杜绝「永远正在思考」', () => {
+    startSubagentProgress('mentor', '架构评审', 'lost-frame', 's1', 'req-1');
+    expect(getSubagentRunsForSession('s1')).toHaveLength(1);
+
+    // worker 没有发出 complete（丢帧/被强杀），result 帧到达触发兜底：
+    finalizeSubagentRunsForRequest('req-1');
+    expect(getSubagentRunsForSession('s1')).toHaveLength(0);
   });
 });
 
@@ -63,11 +98,11 @@ describe('subagentProgress 会话隔离', () => {
     expect(getSubagentRuns()).toHaveLength(3);
   });
 
-  it('新会话 id 看不到上一会话已完成的 mentor 条目', () => {
+  it('mentor 结束后新会话与旧会话都看不到残留', () => {
     const runId = startSubagentProgress('mentor', '架构评审', undefined, 'session-old');
-    completeSubagentProgress(runId, 'done');
+    completeSubagentProgress(runId);
 
-    expect(getSubagentRunsForSession('session-old')).toHaveLength(1);
+    expect(getSubagentRunsForSession('session-old')).toHaveLength(0);
     expect(getSubagentRunsForSession('session-new')).toEqual([]);
   });
 });

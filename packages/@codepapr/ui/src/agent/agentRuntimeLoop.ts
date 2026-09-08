@@ -967,7 +967,6 @@ async function runSubagent(
       requestId,
       action: 'complete',
       runId,
-      content: result.content,
     });
     return result;
   } catch (error) {
@@ -976,7 +975,6 @@ async function runSubagent(
       requestId,
       action: 'complete',
       runId,
-      content: error instanceof Error ? error.message : String(error),
     });
     throw error;
   }
