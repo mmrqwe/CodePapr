@@ -54,10 +54,18 @@ export function QuestionCard({
     );
   };
 
+  const clearCustomInput = () => {
+    setCustomText('');
+    if (!multiple) {
+      setShowCustomInput(false);
+    }
+  };
+
   const handleOptionClick = (option: QuestionOption) => {
     if (answered || disabled) {
       return;
     }
+    clearCustomInput();
     if (multiple) {
       setSelected((current) =>
         current.includes(option.label)
@@ -66,23 +74,23 @@ export function QuestionCard({
       );
       return;
     }
-    submitSelection([option]);
+    setSelected((current) => (current.includes(option.label) ? [] : [option.label]));
   };
 
   const selectedOptions = (question.options ?? []).filter((option) =>
     selected.includes(option.label)
   );
 
-  const handleCustomSubmit = () => {
+  const handleConfirm = () => {
     if (answered || disabled) return;
-    if (!customText.trim() && (!multiple || selected.length === 0)) return;
+    if (selected.length === 0 && !customText.trim()) return;
     submitSelection(selectedOptions, customText);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      handleCustomSubmit();
+      handleConfirm();
     }
   };
 
@@ -112,7 +120,7 @@ export function QuestionCard({
         {hasOptions ? (
           <div className="space-y-2">
             {question.options!.map((option, index) => {
-              const isSelected = multiple && selected.includes(option.label);
+              const isSelected = selected.includes(option.label);
               return (
                 <button
                   key={`${question.question}-${index}`}
@@ -134,7 +142,7 @@ export function QuestionCard({
                     )}
                   </div>
                   <span className="flex-shrink-0 text-[11px] font-medium text-info">
-                    {multiple ? (isSelected ? '✓' : '') : t.planDecisionTag}
+                    {isSelected ? '✓' : multiple ? '' : t.planDecisionTag}
                   </span>
                 </button>
               );
@@ -169,23 +177,16 @@ export function QuestionCard({
                         placeholder={t.planCustomInputPlaceholder}
                         className="flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs text-fg placeholder:text-fg-dim focus:border-accent focus:outline-none disabled:opacity-50"
                       />
-                      {!multiple && (
-                        <button
-                          type="button"
-                          disabled={disabled || answered || !customText.trim()}
-                          onClick={handleCustomSubmit}
-                          className="rounded-lg border border-info-bg bg-info-bg px-3 py-1.5 text-xs font-semibold text-info transition-colors hover:border-info-bg hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t.planCustomInputSubmit}
-                        </button>
-                      )}
                     </div>
                   </div>
                 ) : (
                   <button
                     type="button"
                     disabled={disabled || answered}
-                    onClick={() => setShowCustomInput(true)}
+                    onClick={() => {
+                      setShowCustomInput(true);
+                      setSelected([]);
+                    }}
                     className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-info transition-colors"
                   >
                     <span>+</span>
@@ -195,11 +196,11 @@ export function QuestionCard({
               </div>
             )}
 
-            {multiple && !answered && (
+            {!answered && (
               <button
                 type="button"
                 disabled={disabled || answered || (selected.length === 0 && !customText.trim())}
-                onClick={handleCustomSubmit}
+                onClick={handleConfirm}
                 className="w-full rounded-xl border border-info-bg bg-info-bg px-3 py-2 text-sm font-semibold text-info transition-colors hover:border-info-bg hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t.planConfirmSelection}
@@ -222,7 +223,7 @@ export function QuestionCard({
                 <button
                   type="button"
                   disabled={disabled || answered || !customText.trim()}
-                  onClick={handleCustomSubmit}
+                  onClick={handleConfirm}
                   className="rounded-lg border border-info-bg bg-info-bg px-3 py-1.5 text-xs font-semibold text-info transition-colors hover:border-info-bg hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {t.planCustomInputSubmit}

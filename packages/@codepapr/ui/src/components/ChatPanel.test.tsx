@@ -1715,6 +1715,10 @@ describe('ChatPanel', () => {
 
       await clickText('rust+tauri');
 
+      // 点击选项只是选中，未确认前不提交
+      expect(sendSpy).not.toHaveBeenCalled();
+      await clickText('确认选择');
+
       // 回答必须携带完整问题文本（而非截断的 header）
       const callArgs = sendSpy.mock.calls[0];
       expect(callArgs?.[0]).toContain('你希望系统采用什么技术栈？React 还是 Vue，还是 Rust + Tauri？');
@@ -1822,6 +1826,7 @@ describe('ChatPanel', () => {
       expect(container.textContent).toContain('rust+tauri');
 
       await clickText('rust+tauri');
+      await clickText('确认选择');
       const callArgs = sendSpy.mock.calls[0];
       expect(callArgs?.[0]).toContain('你希望系统采用什么技术栈？');
       expect(callArgs?.[0]).toContain('rust+tauri');
@@ -1867,8 +1872,8 @@ describe('ChatPanel', () => {
         setInputValue(input, '我想用 Next.js + Tailwind');
       });
 
-      // 点击提交回答
-      await clickText('提交回答');
+      // 通过统一的「确认选择」按钮提交
+      await clickText('确认选择');
 
       const callArgs = sendSpy.mock.calls[0];
       expect(callArgs?.[0]).toContain('你希望系统采用什么技术栈？');
