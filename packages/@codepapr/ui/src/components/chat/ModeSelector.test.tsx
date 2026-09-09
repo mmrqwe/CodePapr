@@ -25,14 +25,15 @@ describe('ModeSelector (D-5)', () => {
     container.remove();
   });
 
-  it('中文界面显示 i18n appMode 文案而非硬编码 "App"', async () => {
+  it('中文界面显示 i18n appMode 文案（品牌名 App，与 Ask/Plan/Agent 一致）', async () => {
     await act(async () => {
       root.render(
         <ModeSelector mode="app" setMode={() => {}} isLoading={false} lang="zh-CN" sessionLock="app" />,
       );
     });
     expect(container.textContent).toContain(getTranslation('zh-CN').appMode);
-    expect(container.textContent).not.toContain('App');
+    expect(getTranslation('zh-CN').appMode).toBe('App');
+    expect(getTranslation('zh-TW').appMode).toBe('App');
   });
 
   it('锁定态 title 走 i18n 键；解锁态 title 展示当前模式', async () => {

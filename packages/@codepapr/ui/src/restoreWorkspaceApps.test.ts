@@ -68,9 +68,9 @@ function mountRecorder() {
     args?: string[];
     port?: number;
     scope?: 'workspace' | 'global';
-  }) => {
+  }, opts?: { silent?: boolean }) => {
     mounted.push(app.appId);
-    useAppRuntimeStore.getState().mountApp(app);
+    useAppRuntimeStore.getState().mountApp(app, opts);
   };
   return { mounted, mountApp };
 }
@@ -175,5 +175,16 @@ describe('restoreWorkspaceApps', () => {
 
     expect(mounted).toEqual([]);
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual([]);
+  });
+
+  it('mounts restored apps silently so the workbench keeps the folder tab', async () => {
+    stubInvoke([plainApp, weatherHud]);
+    useAppRuntimeStore.setState({ mountSignal: 0 });
+    const { mountApp } = mountRecorder();
+
+    await restoreWorkspaceApps('/ws', mountApp);
+
+    expect(useAppRuntimeStore.getState().apps.map((app) => app.appId)).toEqual(['dash', 'weather-hud']);
+    expect(useAppRuntimeStore.getState().mountSignal).toBe(0);
   });
 });

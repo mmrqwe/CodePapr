@@ -28,7 +28,7 @@ type MountApp = (app: {
   args?: string[];
   port?: number;
   scope?: 'workspace' | 'global';
-}) => void;
+}, opts?: { silent?: boolean }) => void;
 
 export async function restoreWorkspaceApps(
   workspacePath: string,
@@ -84,7 +84,7 @@ export async function restoreWorkspaceApps(
         args: app.args ?? undefined,
         port: app.port ?? undefined,
         scope: appScope,
-      });
+      }, { silent: true });
       if (isPluginApp({ manifestJson: app.manifest_json ?? undefined })) {
         const manifest = readAppManifest({ manifestJson: app.manifest_json ?? undefined });
         const runtime = useAppRuntimeStore.getState();

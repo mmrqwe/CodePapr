@@ -51,6 +51,19 @@ describe('appRuntimeStore plugins', () => {
     expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['ticker']);
   });
 
+  it('bumps mountSignal on mount but silent restores do not', () => {
+    useAppRuntimeStore.setState({ mountSignal: 0 });
+    useAppRuntimeStore.getState().mountApp(
+      { appId: 'dash', title: 'Dash', html: '', filePath: 'x' },
+      { silent: true },
+    );
+    expect(useAppRuntimeStore.getState().mountSignal).toBe(0);
+    expect(useAppRuntimeStore.getState().apps.map((app) => app.appId)).toEqual(['dash']);
+
+    useAppRuntimeStore.getState().mountApp({ appId: 'ticker', title: 'Ticker', html: '', filePath: 'y' });
+    expect(useAppRuntimeStore.getState().mountSignal).toBe(1);
+  });
+
   it('unpin keeps overlay geometry and stays enabled', () => {
     mountTicker();
     useAppRuntimeStore.getState().pinPlugin('ticker');

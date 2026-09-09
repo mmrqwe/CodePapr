@@ -61,7 +61,11 @@ interface AppRuntimeState {
   overlayLayouts: Record<string, OverlayLayout>;
   pluginChrome: Record<string, PluginChrome>;
   mountSignal: number;
-  mountApp: (input: Omit<AppInstance, 'createdAt' | 'updatedAt'> & { createdAt?: number; updatedAt?: number }) => void;
+  /** silent=true：冷启动/切换工作区恢复历史 app 时静默挂载，不触发 mountSignal（避免右侧面板自动跳到 App tab）。 */
+  mountApp: (
+    input: Omit<AppInstance, 'createdAt' | 'updatedAt'> & { createdAt?: number; updatedAt?: number },
+    opts?: { silent?: boolean },
+  ) => void;
   closeApp: (appId: string) => void;
   selectApp: (appId: string) => void;
   clearApps: () => void;
@@ -198,7 +202,7 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
   pluginChrome: {},
   mountSignal: 0,
 
-  mountApp: (input) => {
+  mountApp: (input, opts) => {
     set((state) => {
       const now = Date.now();
       const instance: AppInstance = {
@@ -241,7 +245,7 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
       return {
         apps: nextApps,
         activeAppId: input.appId,
-        mountSignal: state.mountSignal + 1,
+        mountSignal: opts?.silent ? state.mountSignal : state.mountSignal + 1,
       };
     });
   },
