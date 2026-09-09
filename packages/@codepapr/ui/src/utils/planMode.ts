@@ -227,6 +227,16 @@ export function parseDecisionOptionCards(content: string): ParsedDecisionCards {
   };
 }
 
+const APPROVAL_LABEL_PATTERN =
+  /(批准|開始實施|开始实施|确认实施|確認實施|开始执行|開始執行|立即执行|立即執行|确认执行|確認執行|执行方案|執行方案|执行计划|執行計畫|同意执行|同意執行|按计划执行|直接执行|直接執行|approve|proceed|go\s*ahead|start\s+executing|execute\s+the\s+plan)/i;
+const APPROVAL_NEGATION_PATTERN =
+  /(不批准|暂不|暫不|尚未|拒绝|拒絕|反对|反對|不要执行|先不|不可|no[tn]\s+(approve|proceed|execute)|don'?t|never|reject|deny|hold\s+off)/i;
+
+/** 选中的选项 label 是否携带「批准/开始执行」语义（自定义文本不算授权） */
+export function isApprovalAnswer(labels: string[]): boolean {
+  return labels.some((label) => APPROVAL_LABEL_PATTERN.test(label) && !APPROVAL_NEGATION_PATTERN.test(label));
+}
+
 /**
  * 统一的「回答后续动作」构建器：question 工具与旧版决策卡片共用。
  * 使用完整问题文本（而非截断的 header），支持单选与多选。
@@ -246,20 +256,24 @@ export function buildQuestionAnswerAction(params: {
 
   const hasOptions = labels.length > 0;
   const hasCustom = trimmedCustom.length > 0;
+  const approved = hasOptions && isApprovalAnswer(labels);
 
   switch (lang ?? 'zh-CN') {
     case 'zh-TW': {
       let label = '';
       let prompt = '';
-      if (hasOptions && hasCustom) {
+      if (approved) {
+        label = `選擇了「${joined}」${hasCustom ? `，補充：「${trimmedCustom}」` : ''}`;
+        prompt = `用戶對問題「${question.question}」的回答：選擇了「${joined}」${hasCustom ? `，並補充了想法：「${trimmedCustom}」` : ''}。該選擇即為執行授權：用戶已批准當前方案，請立即按既定 Plan${hasCustom ? '（結合補充想法）' : ''}開始實施——不要重複輸出 Plan，不要再調用 question 請求確認，直到完成或遇到真實阻塞為止。`;
+      } else if (hasOptions && hasCustom) {
         label = `選擇了「${joined}」，補充：「${trimmedCustom}」`;
-        prompt = `用戶對問題「${question.question}」的回答：選擇了「${joined}」，並補充了想法：「${trimmedCustom}」。請基於這些輸入繼續收斂最終 Plan；如果仍存在會影響實施方向的關鍵分歧，再提出新的問題。不要開始執行。`;
+        prompt = `用戶對問題「${question.question}」的回答：選擇了「${joined}」，並補充了想法：「${trimmedCustom}」。請基於這些輸入收斂並輸出最終 Plan，然後停止並等待用戶指示；不要開始執行，也不要就同一決策反覆提問。`;
       } else if (hasCustom) {
         label = `自訂回答：「${trimmedCustom}」`;
-        prompt = `用戶對問題「${question.question}」的自訂回答：「${trimmedCustom}」。請基於該回答繼續收斂最終 Plan；如果仍存在會影響實施方向的關鍵分歧，再提出新的問題。不要開始執行。`;
+        prompt = `用戶對問題「${question.question}」的自訂回答：「${trimmedCustom}」。請基於該回答收斂並輸出最終 Plan，然後停止並等待用戶指示；不要開始執行，也不要就同一決策反覆提問。`;
       } else {
         label = `選擇了「${joined}」`;
-        prompt = `用戶對問題「${question.question}」的回答：選擇了「${joined}」。請基於這個選擇繼續收斂最終 Plan；如果仍存在會影響實施方向的關鍵分歧，再提出新的問題。不要開始執行。`;
+        prompt = `用戶對問題「${question.question}」的回答：選擇了「${joined}」。請基於這個選擇收斂並輸出最終 Plan，然後停止並等待用戶指示；不要開始執行，也不要就同一決策反覆提問。`;
       }
       return {
         id: `question-${question.question}-${joined}-${trimmedCustom}`,
@@ -272,15 +286,18 @@ export function buildQuestionAnswerAction(params: {
     case 'en': {
       let label = '';
       let prompt = '';
-      if (hasOptions && hasCustom) {
+      if (approved) {
+        label = `Approved: "${joinedEn}"${hasCustom ? ` with note: "${trimmedCustom}"` : ''}`;
+        prompt = `Answer to question "${question.question}": chose "${joinedEn}"${hasCustom ? `, with note: "${trimmedCustom}"` : ''}. This selection IS the approval to execute — start implementing the agreed plan${hasCustom ? ' incorporating the note' : ''} immediately: do not restate the plan, do not ask again via the question tool, and keep going until done or genuinely blocked.`;
+      } else if (hasOptions && hasCustom) {
         label = `Chose "${joinedEn}" with note: "${trimmedCustom}"`;
-        prompt = `Answer to question "${question.question}": chose "${joinedEn}", and added custom note: "${trimmedCustom}". Continue refining the final plan based on this input; if another decision still materially changes implementation direction, ask again. Do not start execution.`;
+        prompt = `Answer to question "${question.question}": chose "${joinedEn}", and added custom note: "${trimmedCustom}". Refine and output the final plan based on this input, then stop and wait for the user's instruction. Do not start execution, and do not re-ask about the same decision.`;
       } else if (hasCustom) {
         label = `Custom answer: "${trimmedCustom}"`;
-        prompt = `Custom answer to question "${question.question}": "${trimmedCustom}". Continue refining the final plan based on this answer; if another decision still materially changes implementation direction, ask again. Do not start execution.`;
+        prompt = `Custom answer to question "${question.question}": "${trimmedCustom}". Refine and output the final plan based on this answer, then stop and wait for the user's instruction. Do not start execution, and do not re-ask about the same decision.`;
       } else {
-        label = labels.length > 1 ? `Chose "${joinedEn}"` : `Chose "${joinedEn}"`;
-        prompt = `Answer to question "${question.question}": chose "${joinedEn}". Continue refining the final plan based on that choice; if another decision still materially changes implementation direction, ask again. Do not start execution.`;
+        label = `Chose "${joinedEn}"`;
+        prompt = `Answer to question "${question.question}": chose "${joinedEn}". Refine and output the final plan based on that choice, then stop and wait for the user's instruction. Do not start execution, and do not re-ask about the same decision.`;
       }
       return {
         id: `question-${question.question}-${joinedEn}-${trimmedCustom}`,
@@ -294,15 +311,18 @@ export function buildQuestionAnswerAction(params: {
     default: {
       let label = '';
       let prompt = '';
-      if (hasOptions && hasCustom) {
+      if (approved) {
+        label = `选择了「${joined}」${hasCustom ? `，补充：「${trimmedCustom}」` : ''}`;
+        prompt = `用户对问题「${question.question}」的回答：选择了「${joined}」${hasCustom ? `，并补充了想法：「${trimmedCustom}」` : ''}。该选择即为执行授权：用户已批准当前方案，请立即按既定 Plan${hasCustom ? '（结合补充想法）' : ''}开始实施——不要重复输出 Plan，不要再调用 question 请求确认，直到完成或遇到真实阻塞为止。`;
+      } else if (hasOptions && hasCustom) {
         label = `选择了「${joined}」，补充：「${trimmedCustom}」`;
-        prompt = `用户对问题「${question.question}」的回答：选择了「${joined}」，并补充了想法：「${trimmedCustom}」。请基于这些输入继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的问题。不要开始执行。`;
+        prompt = `用户对问题「${question.question}」的回答：选择了「${joined}」，并补充了想法：「${trimmedCustom}」。请基于这些输入收敛并输出最终 Plan，然后停止并等待用户指示；不要开始执行，也不要就同一决策反复提问。`;
       } else if (hasCustom) {
         label = `自定义回答：「${trimmedCustom}」`;
-        prompt = `用户对问题「${question.question}」的自定义回答：「${trimmedCustom}」。请基于该回答继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的问题。不要开始执行。`;
+        prompt = `用户对问题「${question.question}」的自定义回答：「${trimmedCustom}」。请基于该回答收敛并输出最终 Plan，然后停止并等待用户指示；不要开始执行，也不要就同一决策反复提问。`;
       } else {
         label = `选择了「${joined}」`;
-        prompt = `用户对问题「${question.question}」的回答：选择了「${joined}」。请基于这个选择继续收敛最终 Plan；如果仍存在会影响实施方向的关键分歧，再提出新的问题。不要开始执行。`;
+        prompt = `用户对问题「${question.question}」的回答：选择了「${joined}」。请基于这个选择收敛并输出最终 Plan，然后停止并等待用户指示；不要开始执行，也不要就同一决策反复提问。`;
       }
       return {
         id: `question-${question.question}-${joined}-${trimmedCustom}`,

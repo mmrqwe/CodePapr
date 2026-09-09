@@ -138,8 +138,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
     plan: [
       '你处于 Plan 模式。',
       '先用必要的只读上下文理解问题，再输出任务清单、影响文件、执行顺序、验证方式、风险和验收标准。',
-      '当需求模糊或必须让用户做关键选择时，优先调用 `question` 工具向用户提问（可提供预定义选项）。',
-      '默认只规划不执行；只有用户明确说开始执行时，才进入实施。',
+      '仅当存在会改变实施方向、且无法从上下文推断的关键分歧时，才调用 `question`；不要把它当常规审批门禁或逐步骤确认工具，用户已明确决策的事项不得再次提问。',
+      '默认只规划不执行；用户明确说开始执行、或在 question 中选择了带批准语义的选项（如「批准实施」），即为执行授权——立即按 Plan 实施，不要重复输出 Plan，不要再提问请求确认。',
     ],
     agent: [
       '你处于 Agent 模式。面向真实编程工作流，不要退化成普通聊天。',
@@ -393,8 +393,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
     plan: [
       '你處於 Plan 模式。',
       '先用必要的只讀上下文理解問題，再輸出任務清單、影響文件、執行順序、驗證方式、風險和驗收標準。',
-      '當需求模糊或必須讓用戶做關鍵選擇時，優先調用 `question` 工具向用戶提問（可提供預定義選項）。',
-      '默認只規劃不執行；只有用戶明確說開始執行時，才進入實施。',
+      '僅當存在會改變實施方向、且無法從上下文推斷的關鍵分歧時，才調用 `question`；不要把它當常規審批門禁或逐步驟確認工具，用戶已明確決策的事項不得再次提問。',
+      '默認只規劃不執行；用戶明確說開始執行、或在 question 中選擇了帶批准語義的選項（如「批准實施」），即為執行授權——立即按 Plan 實施，不要重複輸出 Plan，不要再提問請求確認。',
     ],
     agent: [
       '你處於 Agent 模式。面向真實編程工作流，不要退化成普通聊天。',
@@ -645,8 +645,8 @@ const MODE_INTROS: Record<PromptLang, Record<PromptMode, string[]>> = {
     plan: [
       'You are in Plan mode.',
       'Read only the minimum context needed, then produce a concrete task list, impacted files, execution order, validation plan, risks, and acceptance criteria.',
-      'When requirements are ambiguous or the user must make a key decision, prefer calling the `question` tool (with optional predefined choices).',
-      'Plan only by default. Move into execution only when the user explicitly says to start.',
+      'Call `question` only for key divergences that change implementation direction and cannot be inferred from context; never use it as a routine approval gate or per-step confirmation tool, and never re-ask a decision the user has already made.',
+      'Plan only by default. The user explicitly saying "start" or picking an approval-style option in `question` (e.g. "approve") counts as execution authorization — implement immediately, without restating the plan or asking again.',
     ],
     agent: [
       'You are in Agent mode. Stay grounded in a real coding workflow rather than generic chat.',
@@ -1422,10 +1422,10 @@ function buildToolConstraints(
   if (hasTool(toolNames, 'question') && mode === 'plan') {
     special.push(
       lang === 'en'
-        ? '- [question] When requirements are ambiguous, call `question` with a clear question and optional options. Users can choose from options or enter their own custom thoughts. Wait for user response.'
+        ? '- [question] Only for genuinely ambiguous requirements: call `question` with a clear question and optional options. Users can choose an option or enter custom thoughts. Wait for the user response. If the chosen option carries approval intent (approve / start execution), that IS the authorization — start implementing immediately and do not re-ask or restate the plan. Never use it as a per-step approval gate.'
         : lang === 'zh-TW'
-        ? '- [question] 需求模糊時調用 `question` 提出明確問題（可附帶 options 供選擇，用戶可選或輸入自訂想法）。等待用戶回應。'
-        : '- [question] 需求模糊时调用 `question` 提出明确问题（可附带 options 供选择，用户可选或输入自定义想法）。等待用户回应。'
+        ? '- [question] 僅在需求真正模糊時調用 `question` 提出明確問題（可附帶 options 供選擇，用戶可選或輸入自訂想法），等待用戶回應。用戶選中帶批准語義的選項（如「批准實施/開始執行」）即為執行授權——立即開始實施，不要再提問、不要重複輸出 Plan。禁止把它當逐步驟審批門禁。'
+        : '- [question] 仅在需求真正模糊时调用 `question` 提出明确问题（可附带 options 供选择，用户可选或输入自定义想法），等待用户回应。用户选中带批准语义的选项（如「批准实施/开始执行」）即为执行授权——立即开始实施，不要再提问、不要重复输出 Plan。禁止把它当步骤审批门禁。'
     );
   }
   if (special.length > 0) {

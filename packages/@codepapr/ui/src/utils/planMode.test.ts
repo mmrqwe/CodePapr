@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildQuestionAnswerAction,
+  isApprovalAnswer,
   parseDecisionOptionCards,
 } from './planMode';
 
@@ -217,5 +218,61 @@ describe('buildQuestionAnswerAction', () => {
     });
     expect(actionTw.label).toBe('自訂回答：「使用 SQLite 即可」');
     expect(actionTw.prompt).toContain('用戶對問題「資料庫選擇？」的自訂回答：「使用 SQLite 即可」');
+  });
+});
+
+describe('isApprovalAnswer / approval semantics in question answers', () => {
+  it('detects approval-style option labels and rejects negations', () => {
+    expect(isApprovalAnswer(['批准实施'])).toBe(true);
+    expect(isApprovalAnswer(['开始执行'])).toBe(true);
+    expect(isApprovalAnswer(['Approve and proceed'])).toBe(true);
+    expect(isApprovalAnswer(['继续T5/T6工作'])).toBe(false);
+    expect(isApprovalAnswer(['不批准'])).toBe(false);
+    expect(isApprovalAnswer(["Don't approve"])).toBe(false);
+    expect(isApprovalAnswer([])).toBe(false);
+  });
+
+  it('turns an approval-style option into execution authorization (zh-CN)', () => {
+    const action = buildQuestionAnswerAction({
+      question: {
+        question: '是否批准按下方Plan进入实施？',
+        header: 'T5/T6 Plan确认',
+        options: [{ label: '批准实施' }, { label: '只做T6验证' }],
+      },
+      selected: [{ label: '批准实施' }],
+      lang: 'zh-CN',
+    });
+    expect(action.prompt).toContain('执行授权');
+    expect(action.prompt).toContain('开始实施');
+    expect(action.prompt).not.toContain('不要开始执行');
+    expect(action.prompt).toContain('不要再调用 question');
+  });
+
+  it('authorizes execution in en and zh-TW too', () => {
+    const actionEn = buildQuestionAnswerAction({
+      question: { question: 'Proceed with the plan?', header: 'Plan', options: [{ label: 'Approve' }] },
+      selected: [{ label: 'Approve' }],
+      lang: 'en',
+    });
+    expect(actionEn.prompt).toContain('approval to execute');
+    expect(actionEn.prompt).not.toContain('Do not start execution');
+
+    const actionTw = buildQuestionAnswerAction({
+      question: { question: '是否批准進入實施？', header: 'Plan', options: [{ label: '批准實施' }] },
+      selected: [{ label: '批准實施' }],
+      lang: 'zh-TW',
+    });
+    expect(actionTw.prompt).toContain('執行授權');
+    expect(actionTw.prompt).not.toContain('不要開始執行');
+  });
+
+  it('custom text alone never counts as approval', () => {
+    const action = buildQuestionAnswerAction({
+      question: { question: '怎么继续？', header: '继续' },
+      customText: '批准实施',
+      lang: 'zh-CN',
+    });
+    expect(action.prompt).toContain('不要开始执行');
+    expect(action.prompt).not.toContain('执行授权');
   });
 });
