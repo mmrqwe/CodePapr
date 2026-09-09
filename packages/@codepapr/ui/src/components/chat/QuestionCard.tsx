@@ -94,22 +94,41 @@ export function QuestionCard({
     }
   };
 
+  const renderIndicator = (isSelected: boolean) => (
+    <span
+      className={`mt-0.5 flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center border transition-colors ${
+        multiple ? 'rounded' : 'rounded-full'
+      } ${isSelected ? 'bg-info text-white border-info' : 'border-line-strong'}`}
+    >
+      {isSelected &&
+        (multiple ? (
+          <svg viewBox="0 0 10 10" className="h-2 w-2" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M1.5 5.5 4 8 8.5 2.5" />
+          </svg>
+        ) : (
+          <span className="h-1.5 w-1.5 rounded-full bg-white" />
+        ))}
+    </span>
+  );
+
+  const canConfirm = selected.length > 0 || customText.trim().length > 0;
+
   return (
     <div className="mb-3">
-      <div className="rounded-xl border border-info-bg bg-base/55 px-3.5 py-3">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full border border-info-bg bg-info-bg px-2 py-0.5 text-[10px] font-semibold text-info">
+      <div className="overflow-hidden rounded-xl border border-line bg-raised">
+        <div className="flex items-center gap-2 border-b border-line bg-base/60 px-3.5 py-2">
+          <span className="inline-flex flex-shrink-0 items-center rounded bg-info-bg px-1.5 py-0.5 text-[10px] font-semibold text-info">
             {answered ? t.planQuestionAnswered : t.planDecisionTag}
           </span>
-          <h4 className="text-sm font-semibold text-fg">{question.question}</h4>
+          <h4 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-fg">{question.question}</h4>
           {multiple && !answered && (
-            <span className="rounded-full border border-slate-600/60 px-2 py-0.5 text-[10px] text-fg-muted">
+            <span className="flex-shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-fg-muted">
               {t.planMultiSelectHint}
             </span>
           )}
         </div>
         {question.note && (
-          <div className="mb-3 rounded-lg border border-line bg-base px-3 py-2">
+          <div className="border-b border-line px-3.5 py-2">
             <MessageContent
               content={question.note}
               lang={lang}
@@ -118,7 +137,7 @@ export function QuestionCard({
           </div>
         )}
         {hasOptions ? (
-          <div className="space-y-2">
+          <div className="p-1.5">
             {question.options!.map((option, index) => {
               const isSelected = selected.includes(option.label);
               return (
@@ -127,33 +146,31 @@ export function QuestionCard({
                   type="button"
                   disabled={disabled || answered}
                   onClick={() => handleOptionClick(option)}
-                  className={`flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    isSelected
-                      ? 'border-info-bg bg-info-bg'
-                      : 'border-info-bg bg-info-bg hover:border-info-bg hover:bg-info-bg'
+                  className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isSelected ? 'bg-info-bg' : 'hover:bg-hover'
                   }`}
                 >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-info">{option.label}</div>
+                  {renderIndicator(isSelected)}
+                  <span className="min-w-0 flex-1">
+                    <span className={`block text-[13px] font-medium ${isSelected ? 'text-info' : 'text-fg'}`}>
+                      {option.label}
+                    </span>
                     {option.description && (
-                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-fg-soft">
+                      <span className="mt-0.5 block whitespace-pre-wrap text-xs leading-relaxed text-fg-muted">
                         {option.description}
-                      </p>
+                      </span>
                     )}
-                  </div>
-                  <span className="flex-shrink-0 text-[11px] font-medium text-info">
-                    {isSelected ? '✓' : multiple ? '' : t.planDecisionTag}
                   </span>
                 </button>
               );
             })}
 
             {!answered && (
-              <div className="mt-2.5 pt-1">
+              <div className="mt-0.5">
                 {showCustomInput || multiple ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs text-fg-muted">
-                      <span>{t.planCustomInputOptionalHint}</span>
+                  <div className="rounded-lg px-2.5 py-2">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <span className="text-xs text-fg-muted">{t.planCustomInputOptionalHint}</span>
                       {!multiple && (
                         <button
                           type="button"
@@ -167,17 +184,15 @@ export function QuestionCard({
                         </button>
                       )}
                     </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={customText}
-                        disabled={disabled || answered}
-                        onChange={(e) => setCustomText(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder={t.planCustomInputPlaceholder}
-                        className="flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs text-fg placeholder:text-fg-dim focus:border-accent focus:outline-none disabled:opacity-50"
-                      />
-                    </div>
+                    <input
+                      type="text"
+                      value={customText}
+                      disabled={disabled || answered}
+                      onChange={(e) => setCustomText(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder={t.planCustomInputPlaceholder}
+                      className="w-full rounded-lg border border-line bg-input px-2.5 py-1.5 text-xs text-fg placeholder:text-fg-dim focus:border-accent focus:outline-none disabled:opacity-50"
+                    />
                   </div>
                 ) : (
                   <button
@@ -187,9 +202,11 @@ export function QuestionCard({
                       setShowCustomInput(true);
                       setSelected([]);
                     }}
-                    className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-info transition-colors"
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <span>+</span>
+                    <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-[10px] leading-none">
+                      +
+                    </span>
                     <span>{t.planCustomInputToggle}</span>
                   </button>
                 )}
@@ -197,18 +214,25 @@ export function QuestionCard({
             )}
 
             {!answered && (
-              <button
-                type="button"
-                disabled={disabled || answered || (selected.length === 0 && !customText.trim())}
-                onClick={handleConfirm}
-                className="w-full rounded-xl border border-info-bg bg-info-bg px-3 py-2 text-sm font-semibold text-info transition-colors hover:border-info-bg hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {t.planConfirmSelection}
-              </button>
+              <div className="px-1 pb-1 pt-2">
+                <button
+                  type="button"
+                  disabled={disabled || !canConfirm}
+                  onClick={handleConfirm}
+                  className={`w-full rounded-lg px-3 py-2 text-[13px] font-semibold transition-opacity ${
+                    canConfirm
+                      ? 'bg-accent text-white hover:opacity-90'
+                      : 'border border-line bg-base text-fg-dim'
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {t.planConfirmSelection}
+                  {multiple && selected.length > 0 ? `（${selected.length}）` : ''}
+                </button>
+              </div>
             )}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="p-2.5">
             {!answered ? (
               <div className="flex gap-2">
                 <input
@@ -218,13 +242,13 @@ export function QuestionCard({
                   onChange={(e) => setCustomText(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={t.planCustomInputPlaceholder}
-                  className="flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs text-fg placeholder:text-fg-dim focus:border-accent focus:outline-none disabled:opacity-50"
+                  className="flex-1 rounded-lg border border-line bg-input px-2.5 py-1.5 text-xs text-fg placeholder:text-fg-dim focus:border-accent focus:outline-none disabled:opacity-50"
                 />
                 <button
                   type="button"
-                  disabled={disabled || answered || !customText.trim()}
+                  disabled={disabled || !customText.trim()}
                   onClick={handleConfirm}
-                  className="rounded-lg border border-info-bg bg-info-bg px-3 py-1.5 text-xs font-semibold text-info transition-colors hover:border-info-bg hover:bg-info-bg disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {t.planCustomInputSubmit}
                 </button>
