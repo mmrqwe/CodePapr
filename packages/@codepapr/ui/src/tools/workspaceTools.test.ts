@@ -121,10 +121,12 @@ describe('registerWorkspaceTools (domain split)', () => {
     // Execute with `path` parameter instead of `relativePath`
     const result = (await registry.execute('read_image', {
       path: 'assets/logo.png',
-    })) as { path: string; mediaType: string; bytes: number; __images: Array<{ mediaType: string; data: string }> };
+    })) as { path: string; mediaType: string; bytes: number; __images: Array<{ mediaType: string; data: string; path?: string }> };
     expect(result.path).toBe('assets/logo.png');
     expect(result.mediaType).toBe('image/png');
     expect(result.__images?.[0]?.data).toContain('iVBORw0KGgoAAAANSUhEUg');
+    // 转录持久化只留源文件引用，base64 不进 DB（见 redactTranscriptOutputString）。
+    expect(result.__images?.[0]?.path).toBe('assets/logo.png');
   });
 
   it('keeps hidden fine-grained tools executable (handler survives hideFromLlm)', async () => {

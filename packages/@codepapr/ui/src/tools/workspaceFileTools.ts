@@ -290,6 +290,10 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     const images: IImageContent[] = [{
       mediaType: result.mediaType,
       data: result.data,
+      // 工具读图的原文件本就在工作区内：引用源路径即可（不落副本），
+      // 转录持久化时 data 会被 redactImagePayloadsForTranscript 置空，
+      // path 留作历史溯源。
+      path: result.path,
     }];
     return {
       path: result.path,

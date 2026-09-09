@@ -166,3 +166,47 @@ describe('sanitizeMessageForPersistence', () => {
     ]);
   });
 });
+
+describe('sanitizeMessageForPersistence 工具图片转录 redact（存量 base64 防御）', () => {
+  const legacyOutput = JSON.stringify({
+    path: 'assets/x.png',
+    mediaType: 'image/png',
+    bytes: 780000,
+    __images: [{ mediaType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUg'.repeat(50), path: 'assets/x.png' }],
+  });
+
+  it('output 字符串里的 __images[].data 落盘前置空，引用字段保留', () => {
+    const message: UIMessage = {
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      toolInvocations: [
+        { id: 't1', name: 'read_image', status: 'success', arguments: {}, output: legacyOutput },
+      ],
+    };
+    const output = sanitizeMessageForPersistence(message).toolInvocations?.[0]?.output as string;
+    expect(output).not.toContain('iVBORw0KGgo');
+    expect(output).toContain('"data":""');
+    expect(output).toContain('assets/x.png');
+    expect(output).toContain('"bytes":780000');
+  });
+
+  it('纯文本与坏 JSON 的 output 原样保留', () => {
+    const message: UIMessage = {
+      id: 'a2',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      toolInvocations: [
+        { id: 't1', name: 'bash', status: 'success', arguments: {}, output: 'plain output' },
+        { id: 't2', name: 'bash', status: 'success', arguments: {}, output: '{"broken": ' },
+        { id: 't3', name: 'bash', status: 'success', arguments: {}, output: '__images 出现在普通文本里' },
+      ],
+    };
+    const sanitized = sanitizeMessageForPersistence(message);
+    expect(sanitized.toolInvocations?.[0]?.output).toBe('plain output');
+    expect(sanitized.toolInvocations?.[1]?.output).toBe('{"broken": ');
+    expect(sanitized.toolInvocations?.[2]?.output).toBe('__images 出现在普通文本里');
+  });
+});

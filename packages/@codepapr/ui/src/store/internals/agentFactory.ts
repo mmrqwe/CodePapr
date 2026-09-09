@@ -447,7 +447,7 @@ export function buildAgentSessionParts(
     // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
     registerMemoryTools(toolRegistry, workspacePath, sessionId);
 
-    registerMcpTools(toolRegistry, settings.mcp, runtime.mcpToolDefinitions ?? [], runtime.mcpToolMappings);
+    registerMcpTools(toolRegistry, settings.mcp, runtime.mcpToolDefinitions ?? [], runtime.mcpToolMappings, workspacePath);
   }
 
   const uiTaskToolContext = buildUiTaskToolContext(settings, workspacePath, runtime, overrides, sessionId);

@@ -255,7 +255,7 @@ export {
   asSafeSkillName,
   boundedNumber,
 } from './tool/workspace/toolArgHelpers';
-export { MessageFactory, stripInternalFields } from './message/Message';
+export { MessageFactory, stripInternalFields, redactImagePayloadsForTranscript, redactTranscriptOutputString } from './message/Message';
 
 // 项目规则 / 声明式子代理 / 自定义聊天命令（纯逻辑，IO 由各入口注入）
 export {

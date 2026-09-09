@@ -13,7 +13,8 @@ export interface IImageContent {
   /** 图片的 base64 编码数据（不含 data URI 前缀）。
    *  持久化场景下可为空（见 path，加载后回填）。 */
   data: string;
-  /** 落盘引用的工作区相对路径（.CodePapr/chat-images/...）。
+  /** 落盘引用的工作区相对路径（用户附件为 .CodePapr/chat-images/...；
+   *  工具读图可为图片源文件本身的路径）。
    *  base64 体积大不直接进 DB：发送时写盘得到此路径，加载消息后
    *  凭路径回填 data。无 path 的图片不会被持久化。 */
   path?: string;

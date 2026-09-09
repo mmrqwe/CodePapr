@@ -2,6 +2,7 @@ import type { CompactionTrigger, IImageContent, IMessage } from '@codepapr/types
 import { estimateTokens, sortedStringify } from '@codepapr/common';
 import {
   stripInternalFields,
+  redactTranscriptOutputString,
   pruneOldToolResults,
   applyHistoryToolSummaries,
   TOOL_SUMMARY_METADATA_KEY,
@@ -235,8 +236,12 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
           ...(typeof message.durationMs === 'number' ? { durationMs: message.durationMs } : {}),
         };
         const toolMsgs: IMessage[] = message.toolInvocations.map((ti) => {
+          // 存量转录可能嵌着修复前的 __images base64：重建进模型前 redact
+          // 成路径引用，避免每回合把几 MB 的乱码文本当工具结果重发。
           const cleanedOutput =
-            typeof ti.output === 'string' ? ti.output : stripInternalFields(ti.output);
+            typeof ti.output === 'string'
+              ? redactTranscriptOutputString(ti.output)
+              : stripInternalFields(ti.output);
           // Prefer contextContent: the byte-exact content appended to the live
           // log (already truncated + sortedStringify'd). Falling back to
           // sortedStringify(cleanedOutput) only matches the live path for

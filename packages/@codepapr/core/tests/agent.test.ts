@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { IChatRequest, IChatResponse, IContextSnapshot, ILLMProvider, IMessage } from '@codepapr/types';
+import type { IChatRequest, IChatResponse, IChatStreamEvent, IContextSnapshot, ILLMProvider, IMessage } from '@codepapr/types';
 import {
   Agent,
   CONTINUATION_NUDGE,
@@ -1482,5 +1482,85 @@ describe('Agent todoListGuard（回合结束任务清单同步守卫）', () => 
     expect(chatFn).toHaveBeenCalledTimes(4);
     const nudges = session.logStore.getAllMessages().filter((m) => m.content === TODO_GUARD_NUDGE);
     expect(nudges).toHaveLength(2);
+  });
+});
+
+describe('Agent 图片工具输出转录投影（base64 不进转录）', () => {
+  it('tool-call-end 的 output 只留图片引用；当轮 [Image from tool] 消息保留真实数据', async () => {
+    const bigData = 'iVBORw0KGgoAAAANSUhEUg'.repeat(100);
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(
+      {
+        name: 'read_image',
+        description: 'Read an image',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+      async () => ({
+        path: 'assets/x.png',
+        mediaType: 'image/png',
+        bytes: 780000,
+        __images: [{ mediaType: 'image/png', data: bigData, path: 'assets/x.png' }],
+      })
+    );
+
+    const provider: ILLMProvider = {
+      name: 'openai',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi
+        .fn<(_: IChatRequest) => Promise<IChatResponse>>()
+        .mockResolvedValueOnce(
+          createResponse('', { toolCalls: [{ id: 'img-1', name: 'read_image', arguments: {} }] })
+        )
+        .mockResolvedValueOnce(createResponse('图看完了')),
+    };
+
+    const session = new Session({
+      sessionId: 'session-images',
+      prefix: new ImmutablePrefix({
+        systemPrompt: '你是测试助手',
+        tools: toolRegistry.getAll(),
+        model: 'test-model',
+        parameters: { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
+      }),
+      toolRegistry,
+    });
+    const agent = new Agent({
+      session,
+      provider,
+      providerName: 'openai',
+      requestBuilder: { build: ({ model }) => ({ model, messages: [] }) },
+      cacheValidator: {
+        validate: () => ({
+          prefixCached: false,
+          prefixCreated: false,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          newInputTokens: 1,
+          outputTokens: 1,
+          cacheHitRate: 0,
+        }),
+      },
+    });
+
+    const events: IChatStreamEvent[] = [];
+    const response = await agent.chat('看这张图', (event) => events.push(event));
+    expect(response.content).toBe('图看完了');
+
+    const end = events.find((e) => e.type === 'tool-call-end') as { output?: string } | undefined;
+    expect(end, '应有 tool-call-end 事件').toBeDefined();
+    // 转录事件（UI store 与持久化的唯一来源）绝不带 base64
+    expect(end!.output).not.toContain(bigData);
+    expect(end!.output).toContain('"data":""');
+    expect(end!.output).toContain('assets/x.png');
+
+    // 当轮模型视觉不受影响：独立图片 user 消息仍带真实 base64
+    const logged = session.logStore.getAllMessages();
+    const imageMsg = logged.find((m) => (m.content ?? '').startsWith('[Image from tool'));
+    expect(imageMsg, '日志应含 [Image from tool] 消息').toBeDefined();
+    expect(imageMsg!.images?.[0]?.data).toBe(bigData);
+    // 工具消息本体（stringifyToolResult）此前已不含 __images——保持不变
+    const toolMsg = logged.find((m) => m.role === 'tool');
+    expect(toolMsg!.content).not.toContain('__images');
   });
 });

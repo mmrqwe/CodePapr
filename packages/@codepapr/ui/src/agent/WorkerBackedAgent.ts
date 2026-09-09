@@ -253,7 +253,7 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
     // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
     registerMemoryTools(registry, config.workspacePath, config.sessionId);
 
-    registerMcpTools(registry, config.settings.mcp, config.runtime.mcpToolDefinitions ?? [], config.runtime.mcpToolMappings);
+    registerMcpTools(registry, config.settings.mcp, config.runtime.mcpToolDefinitions ?? [], config.runtime.mcpToolMappings, config.workspacePath);
   }
 
   // mode 过滤（hideFromLlm / FilteringToolRegistry）之上叠加 profile → mode ∩ profile。

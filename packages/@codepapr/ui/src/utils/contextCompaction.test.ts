@@ -936,3 +936,47 @@ describe('contextCompaction', () => {
     });
   });
 });
+
+describe('buildEffectiveContextMessages 存量工具图片 base64 重建 redact', () => {
+  const legacyOutput = JSON.stringify({
+    path: 'assets/x.png',
+    __images: [{ mediaType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUg'.repeat(60), path: 'assets/x.png' }],
+  });
+
+  it('contextContent 缺失走 output 回退时，base64 不再进模型上下文', () => {
+    const messages: ContextMessageLike[] = [
+      createAssistantWithTools('a1', '看图', [
+        { id: 't1', name: 'read_image', arguments: {}, status: 'success', output: legacyOutput },
+      ]),
+    ];
+    const effective = buildEffectiveContextMessages(messages);
+    const toolMsg = effective.find((m) => m.role === 'tool') as IMessage;
+    expect(toolMsg.content).not.toContain('iVBORw0KGgo');
+    expect(toolMsg.content).toContain('"data":""');
+    expect(toolMsg.content).toContain('assets/x.png');
+  });
+
+  it('contextContent 存在（新路径优先）时行为不变', () => {
+    const messages: ContextMessageLike[] = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: '',
+        timestamp: 1,
+        toolInvocations: [
+          {
+            id: 't1',
+            name: 'read_image',
+            arguments: {},
+            status: 'success',
+            output: legacyOutput,
+            contextContent: '{"bytes":780000,"path":"assets/x.png"}',
+          },
+        ],
+      },
+    ];
+    const effective = buildEffectiveContextMessages(messages);
+    const toolMsg = effective.find((m) => m.role === 'tool') as IMessage;
+    expect(toolMsg.content).toBe('{"bytes":780000,"path":"assets/x.png"}');
+  });
+});

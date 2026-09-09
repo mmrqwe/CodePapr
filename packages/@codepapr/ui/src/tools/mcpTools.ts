@@ -19,6 +19,7 @@ import {
   type McpTestServerResult,
 } from '../utils/mcpTypes';
 import { cacheGet, cacheSet, cacheRemove } from '../utils/cacheStorage';
+import { persistChatImage } from '../utils/chatImageStore';
 
 export interface McpConfirmRequest {
   requestId: string;
@@ -413,7 +414,8 @@ function extractMcpImages(result: unknown): IImageContent[] {
 async function callMcpTool(
   settings: McpSettings,
   displayName: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  workspacePath?: string
 ): Promise<McpCallToolResult & { __images?: IImageContent[] }> {
   const resolved = await resolveOriginalToolName(displayName);
   if (!resolved) {
@@ -431,9 +433,15 @@ async function callMcpTool(
 
   const images = extractMcpImages(raw.result);
   if (images.length > 0) {
+    // MCP 生成类图片没有源文件可引用：落盘 .CodePapr/chat-images/ 换得
+    // path（persistChatImage 保留 data 供当轮视觉；转录持久化时 data 由
+    // redactImagePayloadsForTranscript 置空，只留路径引用）。
+    const persisted = workspacePath
+      ? await Promise.all(images.map((image) => persistChatImage(workspacePath, image)))
+      : images;
     return {
       ...raw,
-      __images: images,
+      __images: persisted,
     };
   }
 
@@ -497,6 +505,7 @@ export function registerMcpTools(
   settings: McpSettings,
   definitions: IToolDefinition[],
   toolMappings?: Array<{ serverId: string; toolName: string; displayName: string }>,
+  workspacePath?: string
 ): void {
   if (!settings.enabled || !settings.exposeTools) return;
 
@@ -519,7 +528,7 @@ export function registerMcpTools(
   for (const definition of definitions) {
     try {
       registry.register(definition, async (args) => {
-        return await callMcpTool(settings, definition.name, args);
+        return await callMcpTool(settings, definition.name, args, workspacePath);
       });
     } catch {
       // 单个工具注册失败（如重名）不能中断整批注册——旧实现直接抛出，

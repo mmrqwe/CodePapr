@@ -42,7 +42,7 @@ import { Logger, estimateTokens } from '@codepapr/common';
 import { PARALLEL_SAFE_TOOL_NAMES } from './agentConfig';
 import { TODO_GUARD_NUDGE } from './todoList';
 import { Session, mergeOptionalTokenCount } from './Session';
-import { MessageFactory } from '../message/Message';
+import { MessageFactory, redactTranscriptOutputString } from '../message/Message';
 import { Serializer } from '../cache/Serializer';
 import {
   truncateToolOutput,
@@ -1421,7 +1421,9 @@ export class Agent {
           toolName: call.name,
           success,
           error: errorMessage,
-          output: safeStringifyOutput(contextResult),
+          // 转录投影只留图片引用（data 置空）：事件输出会进 UI store 并被
+          // 持久化，base64 曾把兼容快照撑爆 20MB 上限（保存失败根因）。
+          output: redactTranscriptOutputString(safeStringifyOutput(contextResult)),
           contextContent: toolMsg.content,
           contextSummary:
             typeof toolMsg.metadata?.[TOOL_SUMMARY_METADATA_KEY] === 'string'

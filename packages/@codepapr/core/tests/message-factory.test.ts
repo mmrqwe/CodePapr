@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MessageFactory, stripInternalFields } from '../src';
+import { MessageFactory, stripInternalFields, redactImagePayloadsForTranscript, redactTranscriptOutputString } from '../src';
 
 describe('MessageFactory.tool', () => {
   it('strips __images from toolResult.result', () => {
@@ -97,5 +97,40 @@ describe('stripInternalFields', () => {
     expect(result[0].keep).toBe(1);
     expect(result[1].__question).toBeUndefined();
     expect(result[1].keep).toBe(2);
+  });
+});
+
+describe('redactImagePayloadsForTranscript / redactTranscriptOutputString（工具图片转录投影）', () => {
+  it('保留 __images 骨架与 path/mediaType，仅置空 data', () => {
+    const input = {
+      path: 'assets/a.png',
+      nested: { deep: [{ __images: [{ mediaType: 'image/png', data: 'iVBORw0kggo', path: '.CodePapr/chat-images/1.png' }] }] },
+    };
+    const out = redactImagePayloadsForTranscript(input) as typeof input & {
+      nested: { deep: Array<{ __images: Array<{ data: string; path?: string }> }> };
+    };
+    expect(out.path).toBe('assets/a.png');
+    const img = out.nested.deep[0]!.__images[0]!;
+    expect(img.data).toBe('');
+    expect(img.path).toBe('.CodePapr/chat-images/1.png');
+    expect((img as Record<string, unknown>).mediaType).toBe('image/png');
+  });
+
+  it('非 __images 字段原样；无 data 键的图片条目不动', () => {
+    expect(redactImagePayloadsForTranscript('plain')).toBe('plain');
+    const out = redactImagePayloadsForTranscript({
+      __images: [{ mediaType: 'image/png' }, null, 'weird'],
+    }) as { __images: unknown[] };
+    expect(out.__images).toEqual([{ mediaType: 'image/png' }, null, 'weird']);
+  });
+
+  it('字符串 output：含 base64 才重写，纯文本/非 JSON/不含图片原样返回', () => {
+    const big = JSON.stringify({ ok: true, __images: [{ mediaType: 'image/png', data: 'A'.repeat(5000) }] });
+    expect(redactTranscriptOutputString(big)).toContain('"data":""');
+    expect(redactTranscriptOutputString('plain text')).toBe('plain text');
+    expect(redactTranscriptOutputString('{"note":"no images"}')).toBe('{"note":"no images"}');
+    expect(redactTranscriptOutputString('{"broken": ')).toBe('{"broken": ');
+    // 字符串里偶然出现标记但整体非 JSON 对象：不炸
+    expect(redactTranscriptOutputString('"__images"')).toBe('"__images"');
   });
 });

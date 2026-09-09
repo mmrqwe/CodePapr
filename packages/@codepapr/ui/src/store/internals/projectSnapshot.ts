@@ -20,10 +20,22 @@ import { sessionActiveCharacterMap } from '../charactersStore';
 
 /** 项目状态落盘失败的可见提示。内部模块（无 store 依赖）直接 toast。 */
 function reportProjectStateSaveError(label: string, err: unknown): void {
-  const message = `${label}：${err instanceof Error ? err.message : String(err)}`;
+  const detail = err instanceof Error ? err.message : String(err);
+  const message = `${label}：${detail}`;
   console.warn('[CodePapr]', message);
+  if (COMPAT_OVERFLOW_RE.test(detail)) {
+    // 兼容快照只是旧版本回退用的全量副本（新格式表才是 source of truth），
+    // 超限后每次保存都会复发同一错误——toast 只提示一次，之后仅记 console，
+    // 避免每回合刷屏。转录图片引用化后正常不会再触发；仍触发说明纯文本
+    // 会话过长，考虑清理旧会话。
+    if (toastShownForOverflow) return;
+    toastShownForOverflow = true;
+  }
   toast.error(message, { title: '项目状态保存失败' });
 }
+
+const COMPAT_OVERFLOW_RE = /项目状态内容超过上限/;
+let toastShownForOverflow = false;
 
 export function toProjectSnapshot(state: AgentState): ProjectStateSnapshot {
   const todoContexts = getAllTodoListContexts();

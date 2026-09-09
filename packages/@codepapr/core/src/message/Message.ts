@@ -81,3 +81,49 @@ export function stripInternalFields(value: unknown): unknown {
   }
   return value;
 }
+
+/**
+ * 转录投影：保留 `__images` 条目（mediaType/path 等元数据）但把 base64
+ * `data` 置空。用于工具结果进入 UI 转录/持久化链路的 `output` 字段——
+ * 当轮模型视觉走日志里的独立图片消息（真实 base64，仅存内存），
+ * 而转录只留可溯源的路径引用，杜绝大体积 base64 撑爆 DB 与兼容快照。
+ * 无 path 的条目（落盘失败的生成类图片）数据即不可恢复，仅保留 mediaType。
+ */
+export function redactImagePayloadsForTranscript(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redactImagePayloadsForTranscript);
+  }
+  if (value !== null && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+      if (key === '__images' && Array.isArray(inner)) {
+        result[key] = (inner as unknown[]).map((img) => {
+          if (img && typeof img === 'object' && 'data' in (img as Record<string, unknown>)) {
+            return { ...(img as Record<string, unknown>), data: '' };
+          }
+          return img;
+        });
+      } else {
+        result[key] = redactImagePayloadsForTranscript(inner);
+      }
+    }
+    return result;
+  }
+  return value;
+}
+
+/**
+ * 字符串 output 的转录 redact：修复前的存量转录把 `__images` base64 直接
+ * 嵌在工具结果 JSON 字符串里。能 parse 且含 `__images` 才重写，否则原样
+ * 返回（字节稳定优先——output 参与重建历史的请求编译）。
+ */
+export function redactTranscriptOutputString(output: string): string {
+  if (!output.includes('"__images"')) return output;
+  try {
+    const parsed: unknown = JSON.parse(output);
+    if (!parsed || typeof parsed !== 'object') return output;
+    return JSON.stringify(redactImagePayloadsForTranscript(parsed));
+  } catch {
+    return output;
+  }
+}

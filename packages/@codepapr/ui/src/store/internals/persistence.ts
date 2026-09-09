@@ -1,8 +1,30 @@
 import { createEmptyProjectState, type ProjectSessionMeta, type ProjectStateSnapshot } from '../../utils/projectStorage';
 import { buildTaskTitle } from '../../utils/taskTitle';
+import { redactImagePayloadsForTranscript, redactTranscriptOutputString } from '@codepapr/core';
 import { createEmptyStats, createEmptyConversationStats } from './defaults';
 import { cloneStats, cloneConversationStats, migrateCumulativeToConversationStats } from './stats';
 import type { ProviderName, SessionMeta, UIMessage } from './types';
+
+/**
+ * 存量转录防御：修复前的会话把工具图片的 `__images` base64 全量嵌在
+ * toolInvocations.output 里（撑爆兼容快照 20MB 上限的根因）。落盘前
+ * parse → redact（data 置空，保留 mediaType/path 引用）→ 回写；非 JSON
+ * 或不含图片的结果原样返回。与 core Agent 事件侧的同名投影配合，覆盖
+ * 新旧数据两条链路。
+ */
+export function redactToolInvocationOutput<
+  T extends { output?: unknown }
+>(invocation: T): T {
+  const output = invocation.output;
+  if (typeof output === 'string') {
+    const redacted = redactTranscriptOutputString(output);
+    return redacted === output ? invocation : { ...invocation, output: redacted };
+  }
+  if (output && typeof output === 'object') {
+    return { ...invocation, output: redactImagePayloadsForTranscript(output) };
+  }
+  return invocation;
+}
 
 /** 图片的持久化投影：只保留落盘引用（path + mediaType），base64 payload
  *  不进存储（体积大）。无 path 的图片（写盘失败/旧数据）被丢弃。 */
@@ -95,7 +117,7 @@ export function sanitizeMessageForPersistence(message: UIMessage): UIMessage {
           .filter((img) => img.path)
           .map((img) => ({ mediaType: img.mediaType, data: '', path: img.path }))
       : undefined,
-    toolInvocations: message.toolInvocations?.map((ti) => ({
+    toolInvocations: message.toolInvocations?.map((ti) => redactToolInvocationOutput({
       ...ti,
       statusText: undefined,
       status: ti.status === 'running' ? 'error' : ti.status,
