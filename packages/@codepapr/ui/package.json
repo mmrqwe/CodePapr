@@ -52,8 +52,8 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.0.2",
-    "adm-zip": "^0.6.0",
     "autoprefixer": "^10.4.0",
+    "fflate": "^0.8.3",
     "esbuild": "^0.28.0",
     "jsdom": "^29.1.1",
     "postcss": "^8.4.0",
@@ -61,6 +61,6 @@
     "tar": "^7.5.19",
     "typescript": "^5.9.3",
     "vite": "^8.0.13",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.11"
   }
 }

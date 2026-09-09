@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve, sep } from 'path';
 import {
   createWriteStream, mkdirSync, existsSync, writeFileSync, readFileSync,
   createReadStream, readdirSync, statSync, copyFileSync, rmSync, cpSync
@@ -12,10 +12,10 @@ import os from 'os';
 import zlib from 'zlib';
 import https from 'https';
 import { createRequire } from 'module';
+import { unzipSync } from 'fflate';
 
 const require = createRequire(import.meta.url);
 const tar = require('tar');
-const AdmZip = require('adm-zip');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -234,27 +234,45 @@ async function extractTarGzKeepRoot(filePath, targetDir) {
   rmDirRecursive(staging);
 }
 
-async function extractZip(filePath, targetDir) {
-  const zip = new AdmZip(filePath);
-  const entries = zip.getEntries();
-  mkdirSync(targetDir, { recursive: true });
-
-  if (entries.length === 0) return;
-
-  const rootDir = entries[0].entryName.split('/')[0];
-  const allInRoot = entries.every((e) => e.entryName.startsWith(rootDir + '/'));
-
-  if (allInRoot && entries.length > 1) {
-    const staging = join(GENERATED_DIR, `.stage-zip-${Date.now()}`);
-    zip.extractAllTo(staging, true);
-    const extractedDir = join(staging, rootDir);
-    if (existsSync(extractedDir)) {
-      rmDirRecursive(targetDir);
-      copyDirRecursive(extractedDir, targetDir);
+function writeZipEntries(files, targetDir, stripPrefix) {
+  let written = 0;
+  for (const [entryName, bytes] of Object.entries(files)) {
+    // zip 目录条目以 '/' 结尾且无内容，跳过（目录由写文件时按需创建）。
+    if (entryName.endsWith('/')) continue;
+    const rel = stripPrefix ? entryName.slice(stripPrefix) : entryName;
+    if (!rel) continue;
+    const resolved = join(targetDir, rel);
+    // 解压安全（GHSA-vwc7-r8mq-g2x9 的根治）：目录穿越必须仍在 targetDir 内；
+    // fflate 只还原常规文件内容（zip 的 symlink/特殊 mode 条目在此结构上
+    // 被当普通数据写出，也不会经目标端 symlink 逃逸写外链）。
+    if (resolved !== targetDir && !resolved.startsWith(targetDir + sep)) {
+      console.warn(`Skipping unsafe zip entry: ${entryName}`);
+      continue;
     }
-    rmDirRecursive(staging);
+    mkdirSync(dirname(resolved), { recursive: true });
+    writeFileSync(resolved, bytes);
+    written += 1;
+  }
+  return written;
+}
+
+async function extractZip(filePath, targetDir) {
+  const files = unzipSync(new Uint8Array(readFileSync(filePath)));
+  const names = Object.keys(files);
+  mkdirSync(targetDir, { recursive: true });
+  if (names.length === 0) return;
+
+  const rootDir = names[0].split('/')[0];
+  const allInRoot = names.length > 1 && names.every((name) => name.startsWith(rootDir + '/'));
+
+  if (allInRoot) {
+    // 单一根目录（GitHub/官方包常见）：拍平根目录直接写目标，
+    // 与旧的 staging→copy 路径产出一致的目录内容。
+    rmDirRecursive(targetDir);
+    mkdirSync(targetDir, { recursive: true });
+    writeZipEntries(files, targetDir, rootDir.length + 1);
   } else {
-    zip.extractAllTo(targetDir, true);
+    writeZipEntries(files, targetDir, 0);
   }
 }
 
@@ -495,4 +513,10 @@ async function main() {
   }
 }
 
-main();
+// 仅在作为脚本直接执行时跑完整下载/构建；被 import（如行为测试）时不触发
+// 数百 MB 下载，只导出纯函数 extractZip/writeZipEntries。
+const isDirectRun = process.argv[1]
+  && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (isDirectRun) main();
+
+export { extractZip, writeZipEntries };
