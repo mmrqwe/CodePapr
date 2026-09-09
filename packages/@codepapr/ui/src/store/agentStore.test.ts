@@ -188,6 +188,7 @@ import { useMcpConfirmStore } from './mcpConfirmStore';
 import { usePreviewStore } from './previewStore';
 import { useBrowserViewStore } from './browserViewStore';
 import { buildEffectiveContextMessages } from '../utils/contextCompaction';
+import { MAX_QUEUED_TURNS } from './internals/types';
 import { AgentDestroyedError, WorkerCrashError } from '../agent/WorkerBackedAgent';
 import { SESSION_MESSAGE_CACHE_LIMIT } from './internals/defaults';
 
@@ -303,9 +304,10 @@ describe('useAgentStore.sendMessage', () => {
       sessionConversationStats: {
         'session-1': createEmptyConversation(),
       },
-      projectDiagnosticsReport: null,
-        isLoading: false,
-      loadingSessionId: null,
+       projectDiagnosticsReport: null,
+         isLoading: false,
+       loadingSessionId: null,
+      queuedMessages: {},
       showSettings: false,
       settingsLoaded: true,
       _agent: null,
@@ -5292,5 +5294,161 @@ describe('useAgentStore.ensureAgentForApp', () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+});
+
+describe('同会话消息队列（queuedMessages / drain）', () => {
+  const originalSendMessage = useAgentStore.getState().sendMessage;
+
+  beforeEach(() => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({
+        apiKey: 'sk-test',
+        fastModelEnabled: false,
+      }),
+      workspacePath: '/tmp/codepapr-test',
+      sessions: [
+        {
+          id: 'session-1',
+          name: '任务 1',
+          provider: 'deepseek',
+          model: 'deepseek-v4-pro',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ],
+      activeSessionId: 'session-1',
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+      projectDiagnosticsReport: null,
+      isLoading: false,
+      loadingSessionId: null,
+      queuedMessages: {},
+      sessionMessagesLoading: false,
+      showSettings: false,
+      settingsLoaded: true,
+      _agent: null,
+      _agentModel: null,
+      _agentPromptKey: null,
+      _agentSessionId: null,
+      _sessionInputState: {},
+    }));
+  });
+
+  afterEach(() => {
+    useAgentStore.setState({
+      sendMessage: originalSendMessage,
+      queuedMessages: {},
+      isLoading: false,
+      loadingSessionId: null,
+    });
+  });
+
+  it('queueMessage 追加保序；removeQueuedMessage 单条移除；clearQueuedMessages 清空', () => {
+    const store = useAgentStore.getState();
+    store.queueMessage('session-1', 't1', 'd1', 'agent');
+    store.queueMessage('session-1', 't2', 'd2', 'ask');
+    let list = useAgentStore.getState().queuedMessages['session-1']!;
+    expect(list.map((item) => item.taskText)).toEqual(['t1', 't2']);
+
+    useAgentStore.getState().removeQueuedMessage(list[0].id);
+    list = useAgentStore.getState().queuedMessages['session-1']!;
+    expect(list.map((item) => item.taskText)).toEqual(['t2']);
+
+    useAgentStore.getState().clearQueuedMessages('session-1');
+    expect(useAgentStore.getState().queuedMessages['session-1']).toBeUndefined();
+  });
+
+  it('queueMessage 满 MAX_QUEUED_TURNS 后拒绝新条目', () => {
+    for (let i = 0; i < MAX_QUEUED_TURNS; i += 1) {
+      expect(useAgentStore.getState().queueMessage('session-1', `t${i}`, `d${i}`, 'agent')).toBe(true);
+    }
+    expect(useAgentStore.getState().queueMessage('session-1', 'overflow', 'overflow', 'agent')).toBe(false);
+    expect(useAgentStore.getState().queuedMessages['session-1']).toHaveLength(MAX_QUEUED_TURNS);
+  });
+
+  it('队列所属会话（前台）回合结束时自动发送队首，仅发一条', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      sendMessage: sendSpy,
+      isLoading: true,
+      loadingSessionId: 'session-1',
+    }));
+    useAgentStore.getState().queueMessage('session-1', 'q1', 'Q1', 'agent');
+    useAgentStore.getState().queueMessage('session-1', 'q2', 'Q2', 'ask');
+
+    // 模拟回合结束（与 sendMessage 收尾同构的 isLoading 跃迁）。
+    useAgentStore.setState({ isLoading: false, loadingSessionId: null });
+
+    await waitForCondition(() => sendSpy.mock.calls.length > 0, 20);
+    expect(sendSpy).toHaveBeenCalledWith('q1', 'Q1', 'agent', undefined, undefined);
+    const remaining = useAgentStore.getState().queuedMessages['session-1'] ?? [];
+    expect(remaining.map((item) => item.taskText)).toEqual(['q2']);
+  });
+
+  it('drain 的 sendMessage 被拒（返回 false）时队首原样放回', async () => {
+    const sendSpy = vi.fn(async () => false);
+    useAgentStore.setState((state) => ({
+      ...state,
+      sendMessage: sendSpy,
+      isLoading: true,
+      loadingSessionId: 'session-1',
+    }));
+    useAgentStore.getState().queueMessage('session-1', 'q1', 'Q1', 'agent');
+
+    useAgentStore.setState({ isLoading: false, loadingSessionId: null });
+
+    await waitForCondition(() => sendSpy.mock.calls.length > 0, 20);
+    // 拒绝路径在 sendMessage resolve 后放回队首。
+    await waitForCondition(
+      () => (useAgentStore.getState().queuedMessages['session-1'] ?? []).length === 1,
+      20,
+    );
+    expect(useAgentStore.getState().queuedMessages['session-1']![0].taskText).toBe('q1');
+  });
+
+  it('其他会话的回合结束不会消费本会话队列', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      sendMessage: sendSpy,
+      isLoading: true,
+      loadingSessionId: 'session-2',
+    }));
+    useAgentStore.getState().queueMessage('session-1', 'q1', 'Q1', 'agent');
+
+    useAgentStore.setState({ isLoading: false, loadingSessionId: null });
+    await waitForMacrotask();
+    await waitForMacrotask();
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().queuedMessages['session-1']).toHaveLength(1);
+  });
+
+  it('切回有队列且空闲的会话时触发 drain', async () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessions: [
+        ...state.sessions,
+        { id: 'session-2', name: '任务 2', provider: 'deepseek', model: 'm', createdAt: 1, updatedAt: 1 },
+      ],
+    }));
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState({ sendMessage: sendSpy });
+    useAgentStore.getState().queueMessage('session-2', 'q1', 'Q1', 'agent');
+
+    useAgentStore.setState({ activeSessionId: 'session-2' });
+    await waitForCondition(() => sendSpy.mock.calls.length > 0, 20);
+    expect(sendSpy).toHaveBeenCalledWith('q1', 'Q1', 'agent', undefined, undefined);
+  });
+
+  it('删除会话时其队列一并丢弃', () => {
+    useAgentStore.getState().queueMessage('session-1', 'q1', 'Q1', 'agent');
+    expect(useAgentStore.getState().queuedMessages['session-1']).toHaveLength(1);
+
+    useAgentStore.getState().deleteSession('session-1');
+
+    expect(useAgentStore.getState().queuedMessages['session-1']).toBeUndefined();
   });
 });

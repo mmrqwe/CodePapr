@@ -14,6 +14,7 @@ import {
 import {
   getSettingsError,
   useAgentStore,
+  MAX_QUEUED_TURNS,
   type ImagePreview,
   type SessionInputState,
   type TextFileAttachment,
@@ -118,6 +119,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     sessionMessagesLoading,
     messageLoadFailedSessions,
     retryLoadSessionMessages,
+    queuedMessages,
+    queueMessage,
+    removeQueuedMessage,
+    clearQueuedMessages,
   } = useAgentStore(
     useShallow((state) => ({
       messages: state.messages,
@@ -143,6 +148,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
       sessionMessagesLoading: state.sessionMessagesLoading,
       messageLoadFailedSessions: state._messageLoadFailedSessions,
       retryLoadSessionMessages: state.retryLoadSessionMessages,
+      queuedMessages: state.queuedMessages,
+      queueMessage: state.queueMessage,
+      removeQueuedMessage: state.removeQueuedMessage,
+      clearQueuedMessages: state.clearQueuedMessages,
     }))
   );
   // 输入框状态（模式/草稿/附件）按会话存取：切换会话自动换到对应会话的状态，
@@ -282,15 +291,19 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   const isConfigured = !settingsError;
   // Block sending while the session's history is still loading on demand —
   // submitting early would build context from an incomplete message list.
-  // 全局 isLoading 阻断发送：单执行模型下任一会话执行中都不允许开启新回合。
-  // 本地 slash（/help /commands /compact）零 token，回合中仍可执行。
+  // 全局 isLoading 阻断「立即开新回合」：单执行模型下任一会话执行中都不允许。
+  // 本地 slash（/help /commands /compact）零 token，回合中仍可执行；
+  // 同会话排队：当前会话执行中允许提交，消息进队列，回合结束自动发送。
   const localSlashReady = (() => {
     const slash = parseSlashInput(input.trim());
     return Boolean(slash && isLocalSlashCommand(slash.name));
   })();
-  const canSubmit = (!!input.trim() || pendingImages.length > 0 || pendingFiles.length > 0)
-    && (!isLoading || localSlashReady)
+  const hasDraft = !!input.trim() || pendingImages.length > 0 || pendingFiles.length > 0;
+  const canQueueDraft = hasDraft && isActiveLoading && activeSessionId !== null;
+  const canSubmit = hasDraft
+    && (!isLoading || localSlashReady || canQueueDraft)
     && !sessionMessagesLoading;
+  const activeQueuedMessages = (activeSessionId ? queuedMessages[activeSessionId] : undefined) ?? [];
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden && !(message.synthetic && message.carryForwardInContext)),
     [messages]
@@ -991,18 +1004,35 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     const isLocalSlash = Boolean(slash && isLocalSlashCommand(slash.name));
     if (
       (!userText && images.length === 0 && pendingFiles.length === 0)
-      || (!isLocalSlash && isLoading)
       || (!isLocalSlash && !isConfigured)
     ) {
       return;
     }
-    ttsStop();
     const files = pendingFiles;
     const promptText = buildUserPromptWithFiles(userText, files);
     const displayText = userText || files.map((f) => f.name).join(', ') || (images.length ? '🖼️' : '');
     const attachedFiles = files.map((file) => ({ name: file.name, size: file.size }));
     const sendImages = images.length ? images : undefined;
     const sendFiles = attachedFiles.length ? attachedFiles : undefined;
+
+    // 同会话排队：当前会话执行中提交 = 入队（回合结束自动发送），本地 slash
+    // 零 token 仍立即执行。不触发 ttsStop（当前回合还在播报）。其他会话在跑
+    // 仍阻断（单执行模型，P0 不做跨会话排队/并行）。
+    if (isActiveLoading && !isLocalSlash && activeSessionId) {
+      const queued = queueMessage(activeSessionId, promptText, displayText, mode, sendImages, sendFiles);
+      if (!queued) {
+        toast.warning(t.toastQueueFull.replace('{max}', String(MAX_QUEUED_TURNS)));
+        return;
+      }
+      setInput('');
+      setPendingImages([]);
+      setPendingFiles([]);
+      return;
+    }
+    if (!isLocalSlash && isLoading) {
+      return;
+    }
+    ttsStop();
 
     // #26：slash 命令先发送、成功后才清空草稿——模板展开/条件解析失败时
     // sendMessage 返回 false（消息未进入会话），此时保留草稿供用户修改重试。
@@ -1698,6 +1728,43 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
             </button>
           </div>
         )}
+          {activeQueuedMessages.length > 0 && (
+            <div className="mb-1.5 flex flex-col gap-1 rounded-xl border border-line bg-raised px-3 py-2" data-testid="queue-strip">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-fg-muted">
+                  {t.queueStripLabel.replace('{count}', String(activeQueuedMessages.length))}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { if (activeSessionId) clearQueuedMessages(activeSessionId); }}
+                  className="flex-shrink-0 text-[11px] text-fg-soft transition-colors hover:text-fg"
+                >
+                  {t.clearQueue}
+                </button>
+              </div>
+              {activeQueuedMessages.map((entry) => (
+                <div key={entry.id} className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-xs text-fg" title={entry.displayText}>
+                    {entry.images && entry.images.length > 0 ? '🖼️ ' : ''}{entry.displayText}
+                  </span>
+                  {entry.attachedFiles && entry.attachedFiles.length > 0 && (
+                    <span className="flex-shrink-0 text-[10px] text-fg-dim">📎{entry.attachedFiles.length}</span>
+                  )}
+                  <button
+                    type="button"
+                    aria-label={t.removeFromQueue}
+                    title={t.removeFromQueue}
+                    onClick={() => removeQueuedMessage(entry.id)}
+                    className="flex-shrink-0 rounded p-0.5 text-fg-soft transition-colors hover:text-danger"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div
             className="relative"
             ref={inputWrapperRef}
@@ -1781,9 +1848,11 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
                 ref={textareaRef}
                 value={input}
                 placeholder={
-                  isConfigured
-                    ? t.chatPlaceholderConfigured
-                    : t.chatPlaceholderUnconfigured
+                  isActiveLoading && activeSessionId
+                    ? t.queuePlaceholderHint
+                    : isConfigured
+                      ? t.chatPlaceholderConfigured
+                      : t.chatPlaceholderUnconfigured
                 }
                 onValueChange={handleDraftValueChange}
                 onKeyDown={handleKeyDown}

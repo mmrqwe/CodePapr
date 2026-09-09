@@ -99,7 +99,7 @@ import {
 } from './internals/agentFactory';
 import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
-import { createSendMessage, invalidateAgentHandle, resetSendMessageWorkspaceGuards } from './internals/sendMessage';
+import { createSendMessage, invalidateAgentHandle, isTurnInFlight, resetSendMessageWorkspaceGuards } from './internals/sendMessage';
 import { clearSessionBootstrapCache } from './internals/sessionBootstrapCache';
 import { resetWorkspaceEphemeralState } from './internals/workspaceEphemeralReset';
 import { loadMemoryBootstrapSection } from './internals/memoryLedgerStore';
@@ -121,7 +121,8 @@ import type {
   UIMessage,
   UndoConversationResetResult,
 } from './internals/types';
-
+import { MAX_QUEUED_TURNS } from './internals/types';
+import type { QueuedTurnMessage } from './internals/types';
 
 // Re-exports preserved for the public agentStore module surface
 export type {
@@ -134,6 +135,7 @@ export type {
   ModelProfile,
   PendingRestoreUndo,
   ProviderName,
+  QueuedTurnMessage,
   ResetToMessageResult,
   SessionInputState,
   SessionMeta,
@@ -145,6 +147,7 @@ export type {
   UndoConversationResetResult,
   WorkspaceEntry,
 } from './internals/types';
+export { MAX_QUEUED_TURNS } from './internals/types';
 export {
   createDefaultProfile,
   findProfileById,
@@ -272,9 +275,11 @@ function detachSessionFromUi(
     const sessionMessages = { ...s.sessionMessages };
     const sessionConversationStats = { ...s.sessionConversationStats };
     const sessionInputState = { ...s._sessionInputState };
+    const queuedMessages = { ...s.queuedMessages };
     delete sessionMessages[id];
     delete sessionConversationStats[id];
     delete sessionInputState[id];
+    delete queuedMessages[id];
     return {
       sessions,
       activeSessionId: isActive ? null : s.activeSessionId,
@@ -285,6 +290,9 @@ function detachSessionFromUi(
       conversationStats: isActive ? createEmptyConversationStats() : s.conversationStats,
       isLoading: wasLoading ? false : s.isLoading,
       loadingSessionId: wasLoading ? null : s.loadingSessionId,
+      // 队列与 loading 在同一 set 中清理：drain 订阅读到的 prevState 队列已为空，
+      // 不会向被删除的会话补发回合。
+      queuedMessages,
       _agent: isAgentOwner ? null : s._agent,
       _agentModel: isAgentOwner ? null : s._agentModel,
       _agentPromptKey: isAgentOwner ? null : s._agentPromptKey,
@@ -442,6 +450,7 @@ export function createWorkspaceResetPatch(path: string = '') {
     projectDiagnosticsReport: null,
     isLoading: false,
     loadingSessionId: null,
+    queuedMessages: {},
     _agent: null,
     _agentModel: null,
     _agentPromptKey: null,
@@ -482,6 +491,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       projectDiagnosticsReport: null,
       isLoading: false,
       loadingSessionId: null,
+      queuedMessages: {},
       projectGraphLoading: false,
       projectGraphPhase: null as null | { phase: string; current: number; total: number },
       showSettings: false,
@@ -1960,6 +1970,50 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         saveCurrentProjectState(get());
       },
 
+      queueMessage: (sessionId, taskText, displayText, mode, images, attachedFiles) => {
+        const current = get().queuedMessages[sessionId] ?? [];
+        if (current.length >= MAX_QUEUED_TURNS) return false;
+        const entry: QueuedTurnMessage = {
+          id: createId(),
+          sessionId,
+          taskText,
+          displayText,
+          mode,
+          images,
+          attachedFiles,
+          createdAt: Date.now(),
+        };
+        set((s) => ({
+          queuedMessages: {
+            ...s.queuedMessages,
+            [sessionId]: [...(s.queuedMessages[sessionId] ?? []), entry],
+          },
+        }));
+        return true;
+      },
+
+      removeQueuedMessage: (queuedId) => {
+        set((s) => {
+          const next: Record<string, QueuedTurnMessage[]> = {};
+          let changed = false;
+          for (const [sid, list] of Object.entries(s.queuedMessages)) {
+            const filtered = list.filter((item) => item.id !== queuedId);
+            if (filtered.length !== list.length) changed = true;
+            if (filtered.length > 0) next[sid] = filtered;
+          }
+          return changed ? { queuedMessages: next } : {};
+        });
+      },
+
+      clearQueuedMessages: (sessionId) => {
+        set((s) => {
+          if (!s.queuedMessages[sessionId]) return {};
+          const next = { ...s.queuedMessages };
+          delete next[sessionId];
+          return { queuedMessages: next };
+        });
+      },
+
       requestChatScrollToMessage: (messageId: string) => {
         if (!messageId) return;
         set((s) => ({
@@ -1993,5 +2047,82 @@ useAgentStore.subscribe((state, prevState) => {
   } else if (!state.isLoading && sleepBlockHeld) {
     sleepBlockHeld = false;
     void releaseSleepPrevention();
+  }
+});
+
+/** 同会话队列 drain 的在飞标志：同一会话至多一个 drain 循环，turn-end 与
+ *  切回会话两个触发源可能同时到达。 */
+const drainingSessions = new Set<string>();
+
+/** 回合结束（isLoading true→false）或用户切回带队列的会话时，把该会话队首
+ *  消息作为下一回合发送。sendMessage 绑定 activeSessionId（没有会话参数），
+ *  因此队列只会在「队列所属会话处于前台」时消费：用户切走时 drain 挂起等待，
+ *  切回后自动继续。sendMessage 返回 false（被单执行守卫/配置拒绝）时放回队首，
+ *  等下一次触发源重试。 */
+async function drainQueuedTurn(sessionId: string): Promise<void> {
+  if (drainingSessions.has(sessionId)) return;
+  drainingSessions.add(sessionId);
+  try {
+    const deadline = Date.now() + 5 * 60_000;
+    for (;;) {
+      const s = useAgentStore.getState();
+      if ((s.queuedMessages[sessionId]?.length ?? 0) === 0) return;
+      if (
+        !s.isLoading &&
+        s.activeSessionId === sessionId &&
+        !s.sessionMessagesLoading &&
+        !isTurnInFlight()
+      ) {
+        break;
+      }
+      if (Date.now() >= deadline) return;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const list = useAgentStore.getState().queuedMessages[sessionId] ?? [];
+    if (list.length === 0) return;
+    const [head] = list;
+    useAgentStore.setState((s) => {
+      const rest = (s.queuedMessages[sessionId] ?? []).filter((item) => item.id !== head.id);
+      const next = { ...s.queuedMessages };
+      if (rest.length > 0) next[sessionId] = rest;
+      else delete next[sessionId];
+      return { queuedMessages: next };
+    });
+    const consumed = await useAgentStore
+      .getState()
+      .sendMessage(head.taskText, head.displayText, head.mode, head.images, head.attachedFiles);
+    if (!consumed) {
+      // 放回队首（期间可能又有新消息入队或被用户清空，按 id 去重）。
+      useAgentStore.setState((s) => {
+        const current = s.queuedMessages[sessionId] ?? [];
+        if (current.some((item) => item.id === head.id)) return {};
+        return { queuedMessages: { ...s.queuedMessages, [sessionId]: [head, ...current] } };
+      });
+    }
+  } finally {
+    drainingSessions.delete(sessionId);
+  }
+}
+
+useAgentStore.subscribe((state, prevState) => {
+  // 触发源 1：回合结束。用 prevState 的归属会话（state 已复位为 null）。
+  const endedSessionId = prevState.loadingSessionId;
+  if (
+    prevState.isLoading &&
+    !state.isLoading &&
+    endedSessionId &&
+    (state.queuedMessages[endedSessionId]?.length ?? 0) > 0
+  ) {
+    void drainQueuedTurn(endedSessionId);
+  }
+  // 触发源 2：切回一个有队列且全局空闲的会话（drain 循环可能已超时退出）。
+  const nowActive = state.activeSessionId;
+  if (
+    nowActive &&
+    nowActive !== prevState.activeSessionId &&
+    !state.isLoading &&
+    (state.queuedMessages[nowActive]?.length ?? 0) > 0
+  ) {
+    void drainQueuedTurn(nowActive);
   }
 });

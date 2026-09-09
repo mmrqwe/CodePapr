@@ -188,6 +188,8 @@ describe('ChatPanel', () => {
       },
       projectDiagnosticsReport: null,
       isLoading: false,
+      loadingSessionId: null,
+      queuedMessages: {},
       showSettings: false,
     }));
 
@@ -919,6 +921,78 @@ describe('ChatPanel', () => {
       undefined,
       [{ name: 'a.ts', size: 18 }],
     );
+  });
+
+  it('当前会话执行中提交 Enter 入队而非直接发送，并清空草稿', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      isLoading: true,
+      loadingSessionId: 'session-1',
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+      _sessionInputState: {
+        'session-1': {
+          mode: 'agent',
+          draft: '排队消息',
+          images: [],
+          files: [],
+        },
+      },
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    const list = useAgentStore.getState().queuedMessages['session-1'] ?? [];
+    expect(list.map((item) => item.taskText)).toEqual(['排队消息']);
+    expect(textarea.value).toBe('');
+    expect(container.querySelector('[data-testid="queue-strip"]')?.textContent).toContain('排队消息');
+  });
+
+  it('队列 chips 可逐条移除与清空', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      isLoading: true,
+      loadingSessionId: 'session-1',
+      sendMessage: sendSpy,
+    }));
+    useAgentStore.getState().queueMessage('session-1', '第一条', '第一条', 'agent');
+    useAgentStore.getState().queueMessage('session-1', '第二条', '第二条', 'agent');
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const strip = container.querySelector('[data-testid="queue-strip"]');
+    expect(strip?.textContent).toContain('第一条');
+    expect(strip?.textContent).toContain('第二条');
+
+    const removeButtons = container.querySelectorAll<HTMLButtonElement>('button[aria-label="移出队列"]');
+    expect(removeButtons.length).toBe(2);
+    await act(async () => {
+      removeButtons[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(useAgentStore.getState().queuedMessages['session-1']?.map((item) => item.taskText)).toEqual(['第二条']);
+
+    const clearButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent === '清空队列',
+    );
+    expect(clearButton).toBeDefined();
+    await act(async () => {
+      clearButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(useAgentStore.getState().queuedMessages['session-1']).toBeUndefined();
+    expect(container.querySelector('[data-testid="queue-strip"]')).toBeNull();
   });
 
   it('shows sent file chips on user messages', async () => {

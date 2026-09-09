@@ -199,6 +199,12 @@ let compactCheckpointInFlight = false;
 // 完成（中间无 await），不存在 TOCTOU。置位/清理见 sendMessage 主体。
 let turnInFlight = false;
 
+/** 队列 drain 前检查：isLoading 已复位但回合异步尾巴（前置 await/收尾落盘）
+ *  可能仍在执行，此时启动新回合会撞单执行守卫。 */
+export function isTurnInFlight(): boolean {
+  return turnInFlight;
+}
+
 /** checkpoint 计划基于 base 消息数组计算（压缩模型调用期间 isLoading=false，
  *  用户可能 reset/清空/追加消息）。应用前校验当前数组是否仍是安全的插入基座：
  *  允许追加（长度增长且 insertIndex 之前的内容一致）；禁止删除/重排——旧

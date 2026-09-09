@@ -256,6 +256,22 @@ export interface SessionInputState {
   files: TextFileAttachment[];
 }
 
+/** 同会话排队消息（运行时，不持久化）：当前回合结束后自动作为下一回合发送。
+ *  payload 与 sendMessage 的参数一一对应，drain 时原样重放。 */
+export interface QueuedTurnMessage {
+  id: string;
+  sessionId: string;
+  taskText: string;
+  displayText: string;
+  mode: WorkMode;
+  images?: IImageContent[];
+  attachedFiles?: AttachedFileMeta[];
+  createdAt: number;
+}
+
+/** 单会话排队上限：防止无界内存增长（图片 data URL 体积不小）。 */
+export const MAX_QUEUED_TURNS = 20;
+
 export interface UIToolInvocation {
   id: string;
   name: string;
@@ -402,6 +418,9 @@ export interface AgentState {
   isLoading: boolean;
   /** 当前正在执行回合的会话 ID（单执行模型下至多一个）。与 isLoading 同步置位/清除。 */
   loadingSessionId: string | null;
+  /** 同会话待发送队列（sessionId → 排队消息）。仅在该会话回合结束（isLoading
+   *  true→false 且 loadingSessionId 命中）时逐条 drain；运行时状态，不持久化。 */
+  queuedMessages: Record<string, QueuedTurnMessage[]>;
   projectGraphLoading: boolean;
   projectGraphPhase: null | { phase: string; current: number; total: number };
   showSettings: boolean;
@@ -501,6 +520,18 @@ export interface AgentActions {
     attachedFiles?: AttachedFileMeta[]
   ) => Promise<boolean>;
   cancelMessage: () => void;
+  /** 将消息排入指定会话的待发送队列（当前回合结束后自动 drain）。队列满
+   *  （MAX_QUEUED_TURNS）返回 false，调用方据此提示且不草稿。 */
+  queueMessage: (
+    sessionId: string,
+    taskText: string,
+    displayText: string,
+    mode: WorkMode,
+    images?: IImageContent[],
+    attachedFiles?: AttachedFileMeta[]
+  ) => boolean;
+  removeQueuedMessage: (queuedId: string) => void;
+  clearQueuedMessages: (sessionId: string) => void;
   clearMessages: () => void;
   resetToMessage: (messageId: string) => Promise<ResetToMessageResult>;
   undoConversationReset: () => Promise<UndoConversationResetResult>;
