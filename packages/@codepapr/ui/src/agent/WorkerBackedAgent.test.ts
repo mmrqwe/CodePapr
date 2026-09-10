@@ -999,6 +999,45 @@ describe('WorkerBackedAgent', () => {
     await expect(runPromise).resolves.toMatchObject({ content: 'done' });
   });
 
+  it('treats streamed-but-not-yet-dispatched tool calls as in-flight for the idle watchdog', async () => {
+    // 解冻竞态回归：tool-call-start 已随流事件到达主线程、但 tool-request
+    // 仍在消息队列排队（睡眠冻结后定时器先于排队消息执行的场景）时，
+    // 在飞访问器必须为 true，store 层看门狗据此推迟而不是误杀回合。
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const chatMessage = chatMessages(worker)[0];
+    if (chatMessage?.type !== 'chat') {
+      throw new Error('expected chat message');
+    }
+    const { requestId } = chatMessage.payload;
+
+    expect(agent.hasInflightToolExecutions()).toBe(false);
+
+    worker.emit({
+      type: 'stream',
+      requestId,
+      event: {
+        type: 'tool-call-start',
+        toolCallId: 'call-1',
+        toolName: 'task',
+        arguments: { agent: 'mentor', prompt: 'go' },
+      },
+    });
+    expect(agent.hasInflightToolExecutions()).toBe(true);
+
+    worker.emit({
+      type: 'stream',
+      requestId,
+      event: { type: 'tool-call-end', toolCallId: 'call-1', toolName: 'task', success: true },
+    });
+    expect(agent.hasInflightToolExecutions()).toBe(false);
+
+    const response: IAgentResponse = { role: 'assistant', content: 'done' };
+    worker.emit({ type: 'result', requestId, response, deltaMessages: [], logLength: 0 });
+    await expect(chatPromise).resolves.toMatchObject({ content: 'done' });
+  });
+
   it('tracks rust-hosted tool activity for the idle watchdog', async () => {
     const agent = createAgent();
     const runPromise = agent.runAppAgent(

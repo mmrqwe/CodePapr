@@ -3389,6 +3389,93 @@ describe('useAgentStore.sendMessage', () => {
       expect(useAgentStore.getState().isLoading).toBe(false);
     });
 
+    it('idle watchdog cancels a silently stuck turn and surfaces a synthetic notice', async () => {
+      // 回归：看门狗强制取消此前完全静默（只有 cancelled 工具芯片），
+      // 用户以为回合"凭空停止"。现在必须追加一条不进模型上下文的提示消息。
+      let rejectChat: ((error: Error) => void) | undefined;
+      const chat = vi.fn(
+        () =>
+          new Promise<never>((_, reject) => {
+            rejectChat = reject;
+          }),
+      );
+      const cancel = vi.fn(() => {
+        rejectChat?.(new DOMException('Session was cancelled', 'AbortError'));
+      });
+      const stuck = createMockAgent({ chat, cancel, isCrashed: false });
+      setCrashRecoveryState(stuck);
+
+      vi.useFakeTimers();
+      try {
+        const sendPromise = useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+        // 330s 定时器在用户消息入会话时武装；推进过阈值触发看门狗。
+        await vi.advanceTimersByTimeAsync(330_000 + 500);
+        await sendPromise;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(cancel).toHaveBeenCalled();
+      expect(useAgentStore.getState().isLoading).toBe(false);
+      const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+      // 静默取消不再静默：有一条 synthetic 提示，但不是错误消息。
+      const notice = sessionMessages.find(
+        (message) => message.synthetic === true && message.content.includes('空闲超时')
+      );
+      expect(notice).toBeDefined();
+      expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
+    });
+
+    it('page thaw re-arms the idle watchdog instead of firing on the overdue timer', async () => {
+      // 回归：系统睡眠期间 setTimeout 超期，解冻瞬间旧实现让看门狗抢在
+      // 排队 tool-request 之前误杀活回合。解冻（visibilitychange）后阈值
+      // 从刷新时刻重新计。
+      let rejectChat: ((error: Error) => void) | undefined;
+      const chat = vi.fn(
+        () =>
+          new Promise<never>((_, reject) => {
+            rejectChat = reject;
+          }),
+      );
+      const cancel = vi.fn(() => {
+        rejectChat?.(new DOMException('Session was cancelled', 'AbortError'));
+      });
+      const stuck = createMockAgent({ chat, cancel, isCrashed: false });
+      setCrashRecoveryState(stuck);
+
+      // node 测试环境无 document：桩一个可捕获监听器的最小实现。
+      const listeners = new Map<string, () => void>();
+      vi.stubGlobal('document', {
+        visibilityState: 'visible',
+        addEventListener: (type: string, handler: () => void) => {
+          listeners.set(type, handler);
+        },
+        removeEventListener: (type: string) => {
+          listeners.delete(type);
+        },
+      });
+      vi.useFakeTimers();
+      try {
+        const sendPromise = useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+        await vi.advanceTimersByTimeAsync(200_000);
+        expect(cancel).not.toHaveBeenCalled();
+        expect(listeners.has('visibilitychange')).toBe(true);
+        listeners.get('visibilitychange')?.();
+        // 200s + 200s > 原阈值 330s：未重武装就会误触发；重武装后不应触发。
+        await vi.advanceTimersByTimeAsync(200_000);
+        expect(cancel).not.toHaveBeenCalled();
+        // 距解冻已超过一整段阈值 → 正常触发。
+        await vi.advanceTimersByTimeAsync(131_000);
+        await sendPromise;
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(useAgentStore.getState().isLoading).toBe(false);
+    });
+
     it('agent destroyed mid-turn stops silently: no rebuild, no re-run, no error message', async () => {
       // 用户切会话/新建/改设置导致 agent 被销毁：chat() 以 AgentDestroyedError
       // 拒绝（旧实现是 WorkerCrashError——崩溃恢复链会重建并重跑整个回合，

@@ -617,7 +617,19 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   }
 
   hasInflightToolExecutions(): boolean {
-    return this.inflightToolExecutions.size > 0;
+    if (this.inflightToolExecutions.size > 0) {
+      return true;
+    }
+    // 模型已流式给出 tool-call-start、但 tool-request 尚未跨桥（或仍在主线程
+    // 消息队列排队，如睡眠解冻瞬间）的窗口同样算工具在飞：否则 store 空闲
+    // 看门狗会在解冻竞态里把活着回合误判为静默并取消。条目随 tool-call-end
+    // 移除，chat resolve/reject 时 pending 整体删除，不会无限期膨胀。
+    for (const pending of this.pendingRequests.values()) {
+      if (pending.pendingToolCalls.length > 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** 标记该 agent 已被 store 替换：仍有 app-agent（papr.agent.run）在飞时

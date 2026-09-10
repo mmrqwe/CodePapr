@@ -988,8 +988,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (get()._agent) {
               invalidateAgentHandle(get, set);
             }
+            // 以实际执行回合的会话为准（用户可能已切换到别的会话查看）。
+            const watchdogSessionId = get().loadingSessionId ?? get().activeSessionId;
             set((s) => {
-              // 以实际执行回合的会话为准（用户可能已切换到别的会话查看）。
               const sessionId = s.loadingSessionId ?? s.activeSessionId;
               if (!sessionId) return { isLoading: false, loadingSessionId: null };
               const currentMessages = s.sessionMessages[sessionId] ?? s.messages;
@@ -1011,9 +1012,38 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 },
               };
             });
+            // 看门狗强制取消必须对用户可见：静默收尾会让用户以为回合
+            // "凭空停止、任务没做完"（只有 cancelled 工具芯片，无任何解释）。
+            if (watchdogSessionId) {
+              appendInfoMessage(
+                set,
+                getTranslation(normalizedSettings.lang ?? 'zh-CN').idleWatchdogStopped,
+                watchdogSessionId,
+                { resetLoading: false }
+              );
+            }
             saveCurrentProjectState(get());
           }, STORE_IDLE_TIMEOUT_MS);
         };
+
+        // 睡眠/隐藏解冻竞态防护：JS 冻结期间 setTimeout 超期，解冻瞬间
+        // 看门狗回调可能抢在主线程消息队列里排队的 tool-request 之前执行，
+        // defer 检查看到"还没送到"的空在飞集合而误杀活着回合。与 worker
+        // 心跳的解冻语义（WorkerBackedAgent.handleVisibilityChange）对齐：
+        // 页面恢复可见先刷新看门狗基线，真挂死仍由下一窗口兜底。
+        const resyncStoreIdleOnThaw = () => {
+          if (
+            typeof document !== 'undefined' &&
+            document.visibilityState === 'visible' &&
+            storeIdleTimer !== undefined
+          ) {
+            console.warn('[sendMessage] idle watchdog: page thawed; re-arming');
+            armStoreIdle();
+          }
+        };
+        if (typeof document !== 'undefined') {
+          document.addEventListener('visibilitychange', resyncStoreIdleOnThaw);
+        }
 
         // 累计本回合 Agent 实际执行时长（墙钟）：用户发送时刻 → 回合收尾时刻。
         // 正常结束在 finalize 的 set() 中与 tier 统计一并累加；取消/出错/Goal
@@ -2973,6 +3003,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // 释放单执行占位（与入口处 turnInFlight = true 配对）。
           turnInFlight = false;
           clearStoreIdle();
+          if (typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', resyncStoreIdleOnThaw);
+          }
           void (async () => {
             try {
               // #25：旧回合的 finally 可能晚于新回合启动才执行（取消 ACK 晚到后
