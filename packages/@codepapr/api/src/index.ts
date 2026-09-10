@@ -38,7 +38,10 @@ export {
 } from './providers/reasoningRoundTrip';
 
 // Request / Response
-export { RequestBuilder, stripConsumedImages, insertAnchoredContext } from './request/RequestBuilder';
+export { RequestBuilder, insertAnchoredContext } from './request/RequestBuilder';
+// stripConsumedImages 的权威实现已下沉到 core/context/wireShape（Agent 的预算
+// 估算与请求构造必须共用同一套「上线口径」规则），此处保持再导出兼容既有调用方。
+export { stripConsumedImages } from '@codepapr/core';
 export { CacheValidator } from './response/CacheValidator';
 export {
   DEFAULT_MAX_TOKENS,

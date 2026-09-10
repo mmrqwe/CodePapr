@@ -274,6 +274,7 @@ export async function commitContextCheckpoint(
     summaryMode: summaryInfo.kind,
     summaryProvider: summaryInfo.provider ?? null,
     summaryModel: summaryInfo.model ?? payload.modelName ?? null,
+    degradedReason: summaryInfo.failureCode ?? null,
     createdAt,
     nodes,
     renderParamsJson,

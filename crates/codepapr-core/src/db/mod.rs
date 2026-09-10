@@ -2768,6 +2768,11 @@ pub struct CompactionCommitInput {
     pub(crate) summary_mode: String,
     pub(crate) summary_provider: Option<String>,
     pub(crate) summary_model: Option<String>,
+    /// 压缩**成功提交**但摘要走了降级路径时的原因（写入 failure_code 供审计）：
+    /// compactor_unavailable / empty_output / parse_failed /
+    /// pinned_validation_failed / merge_failed / unspecified。None = 摘要质量正常。
+    #[serde(default)]
+    pub(crate) degraded_reason: Option<String>,
     pub(crate) created_at: i64,
     pub(crate) nodes: Vec<ContextSurfaceNodeInput>,
     pub(crate) render_params_json: String,
@@ -2833,9 +2838,9 @@ pub fn commit_context_compaction(
             source_start_message_id, source_end_message_id,
             retained_tail_start_message_id, source_message_count, retained_message_count,
             estimated_tokens_before, estimated_tokens_after, source_tokens, checkpoint_tokens,
-            summary_mode, summary_provider, summary_model, created_at)
+            summary_mode, summary_provider, summary_model, created_at, failure_code)
          VALUES (?1, ?2, 'started', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             input.id,
             input.session_id,
@@ -2857,6 +2862,7 @@ pub fn commit_context_compaction(
             input.summary_provider,
             input.summary_model,
             input.created_at,
+            input.degraded_reason,
         ],
     )
     .map_err(|err| format!("插入压缩记录失败: {err}"))?;
@@ -6137,6 +6143,39 @@ mod tests {
             .expect("retry of completed id");
         assert_eq!(again["compactionId"], "c1");
         assert_eq!(again["generation"], 1);
+    }
+
+    #[test]
+    fn commit_context_compaction_records_degraded_reason_as_failure_code() {
+        // F：压缩成功提交但摘要走了降级路径时，failure_code 必须留下原因，
+        // 否则审计端只能看到 summary_mode=local-fallback 而不知道为什么。
+        let workspace = TestWorkspace::new("compaction-degraded");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        let json = serde_json::Value::Object({
+            let mut base: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_str(&compaction_commit_json("c1", "s1", 0, 1)).expect("base json");
+            base.insert(
+                "degradedReason".to_string(),
+                serde_json::json!("pinned_validation_failed"),
+            );
+            base
+        });
+        commit_context_compaction(ws.clone(), json.to_string()).expect("commit degraded");
+
+        let rows = load_context_compactions(ws.clone(), "s1".to_string(), None).expect("load rows");
+        let row = rows.iter().find(|r| r.id == "c1").expect("row");
+        assert_eq!(row.status, "completed");
+        assert_eq!(row.failure_code.as_deref(), Some("pinned_validation_failed"));
+
+        // 未降级时不写 failure_code
+        commit_context_compaction(ws.clone(), compaction_commit_json("c2", "s2", 0, 1))
+            .expect("commit clean");
+        let rows = load_context_compactions(ws, "s2".to_string(), None).expect("load rows");
+        let clean = rows.iter().find(|r| r.id == "c2").expect("row");
+        assert_eq!(clean.status, "completed");
+        assert!(clean.failure_code.is_none());
     }
 
     #[test]

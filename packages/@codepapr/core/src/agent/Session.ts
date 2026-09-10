@@ -8,6 +8,7 @@ import { VolatileScratch } from '../cache/VolatileScratch';
 import { CachePartition } from '../cache/CachePartition';
 import { Serializer } from '../cache/Serializer';
 import { ToolRegistry } from '../tool/ToolRegistry';
+import { clearConsumedImageData } from '../context/wireShape';
 import { ICacheStatistics, IMessage } from '@codepapr/types';
 import { Logger } from '@codepapr/common';
 
@@ -121,13 +122,19 @@ export class Session {
     if (messages.length === 0) {
       return;
     }
-    const totalBytes = messages.reduce(
+    // epoch 重写：顺手把「已经不再上线」的图片 base64 清出 log（保留
+    // mediaType/path，需要时按 path 重新 hydrate）。它们本来就只随「消费它的
+    // 那一次请求」发送（RequestBuilder 的 stripConsumedImages 只改请求副本），
+    // 留在 log 里既白占内存/快照，又会被预算估算按字节计入——一张截图数百 KB，
+    // 足以让每一轮都误判超预算。epoch 已经重排，这里清数据不额外损失缓存。
+    const slimmed = clearConsumedImageData(messages);
+    const totalBytes = slimmed.reduce(
       (sum, message) => sum + Serializer.getByteLength(message),
       0
     );
     this.logStore.loadFromSnapshot({
-      messages,
-      lastMessageIndex: messages.length - 1,
+      messages: slimmed,
+      lastMessageIndex: slimmed.length - 1,
       totalBytes,
     });
   }

@@ -61,6 +61,7 @@ import {
   type ContextBudgetBreakdown,
 } from '../context/ContextBudget';
 import { pruneOldToolResults, type PruneOptions } from '../tool/pruneToolResults';
+import type { LogWireFootprint } from '../context/wireShape';
 
 const log = new Logger('Agent');
 
@@ -506,6 +507,19 @@ export interface AgentOptions {
 
 export const DEFAULT_AGENT_MAX_TOOL_ROUNDS = 500;
 
+/**
+ * C：mid-loop 压缩熔断阈值。压缩很贵（可能再花一次 LLM 调用），而历史上出现过
+ * 「压缩成功 → 下一轮仍然超限 → 再压缩」的死循环（估算把不再上线的图片 base64
+ * 计入时必然发生：压缩看不见那部分，永远缩不到预算以下；实测 2.7 小时里毁了 31
+ * 个上下文纪元，每次都把计划打断）。任一信号命中即本回合停止压缩：
+ *  - 单次 chat() 的压缩尝试次数上限；
+ *  - 连续 N 次压缩后 wire 体量降幅不足（无效缩容）。
+ */
+export const MAX_COMPACTIONS_PER_CHAT = 6;
+export const MAX_INEFFECTIVE_COMPACTIONS = 2;
+/** 压缩后仍 ≥ 压缩前 × 该比例即视为「无效缩容」。 */
+export const EFFECTIVE_SHRINK_RATIO = 0.9;
+
 function normalizeMaxToolRounds(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return DEFAULT_AGENT_MAX_TOOL_ROUNDS;
@@ -545,18 +559,22 @@ export class Agent {
   private lastCompactionFailed = false;
   /** PR3：provider 上下文溢出的 emergency-compact 至多一次（溢出重试 ≤1）。 */
   private overflowCompactionAttempted = false;
+  /** C：本回合压缩尝试次数 / 连续无效缩容次数 / 熔断已上报（每次 chat() 重置）。 */
+  private compactionsThisChat = 0;
+  private ineffectiveCompactions = 0;
+  private compactionBlockedReported = false;
   /** PR5（ADR-009 B3）：本回合 request-only 锚定插入（Recall Block）。 */
   private contextInsertions: RequestContextInsertion[] = [];
   /** 主线程 fallback 路径：memory_search 的 re-recall 每 chat 至多 push 一次
    *  （与 worker 侧 `reRecallPushedThisChat` 对齐）。 */
   private reRecallPushedThisChat = false;
-  /** PR2：provider 实测输入 token（上次成功响应的 usage.input_tokens）与
-   *  测量时的 log 状态（长度 + 末条消息 id）。仅当状态一致时用于对账覆盖
-   *  heuristic 估算（estimateSource='provider'）；replaceLog 后失效。 */
+  /** PR2：provider 实测的**入站总量**（usage.input_tokens + cache read +
+   *  cache creation——各家 provider 的 input_tokens 都只报未命中缓存的新输入，
+   *  直接当总量会低估一个数量级）与测量时的 log 长度。log 只在其后追加时用于
+   *  「实测 + 增量」对账；replaceLog / 截断后失效。 */
   private lastProviderUsage: {
-    inputTokens: number;
+    measuredTotalTokens: number;
     logLength: number;
-    lastMessageId: string | undefined;
   } | null = null;
 
   constructor(opts: AgentOptions) {
@@ -626,8 +644,14 @@ export class Agent {
 
   /**
    * Rough context size estimate (tokens) = prefix (system + tools, immutable so
-   * cached once) + current log bytes, using the bytes/4 heuristic. Used only to
-   * decide when to trigger mid-loop compaction; precision is not critical.
+   * cached once) + **上线口径**的 log 体量，用 bytes/4 heuristic + 图片 vision
+   * 权重。仅用于决定何时触发 mid-loop 压缩；精度不重要，重要的是**不能把已经不
+   * 会随请求发送的字节算进来**：
+   *
+   * log 的 totalBytes 永久包含 ①已被 stripConsumedImages 剥离的历史图片 base64
+   * （一张截图就是数百 KB → /4 ≈ 十万「伪 token」）②已被 applyHistoryToolSummaries
+   * 换成摘要的旧工具全文。按全量字节估算会系统性高估一个数量级，导致每轮都判定
+   * 超硬预算 → 压缩风暴（而压缩计划本身看不见图片，纸面缩容通过后立刻再触发）。
    *
    * ADR-009 第15条：request-only 插入（Recall Block）不进 log 但随每次请求
    * 发送，必须计入估算，否则预算决策会系统性低估。
@@ -638,11 +662,58 @@ export class Agent {
         Serializer.stringify(this.session.prefix.toJSON())
       );
     }
-    return (
-      this.cachedPrefixTokens +
-      Math.ceil(this.session.logStore.getContentBytes() / 4) +
-      this.estimateInsertionTokens()
-    );
+    return this.cachedPrefixTokens + this.logWireTokens() + this.estimateInsertionTokens();
+  }
+
+  /** log 的上线口径 token（无 wire 计量能力时回落全量字节）。 */
+  private logWireFootprint(): LogWireFootprint {
+    const footprint = this.session.logStore.getWireFootprint?.();
+    if (footprint) return footprint;
+    // 鸭子类型的测试 log 没有 wire 计量：只能按全量字节估，阶段全部摊进
+    // retainedTail（分工不细，但总量与 decideContextBudgetAction 一致）。
+    const bytes = this.session.logStore.getContentBytes();
+    return {
+      logBytes: bytes,
+      wireBytes: bytes,
+      imageTokens: 0,
+      summarySavingsBytes: 0,
+      offWireImageBytes: 0,
+      bootstrapBytes: 0,
+      checkpointBytes: 0,
+      lastUserBytes: 0,
+      lastUserHoldsLiveImages: false,
+    };
+  }
+
+  private logWireTokens(): number {
+    const footprint = this.logWireFootprint();
+    return Math.ceil(footprint.wireBytes / 4) + footprint.imageTokens;
+  }
+
+  /** C：本回合是否已不应再尝试压缩（熔断）。null = 可以继续。 */
+  private compactionBlockReason(): 'no-effective-shrink' | 'per-turn-limit' | null {
+    if (this.ineffectiveCompactions >= MAX_INEFFECTIVE_COMPACTIONS) {
+      return 'no-effective-shrink';
+    }
+    if (this.compactionsThisChat >= MAX_COMPACTIONS_PER_CHAT) {
+      return 'per-turn-limit';
+    }
+    return null;
+  }
+
+  /** C：记录一次压缩的结果（前后均为 wire 口径 token），驱动熔断判定。 */
+  private recordCompactionOutcome(tokensBefore: number, tokensAfter: number): void {
+    this.compactionsThisChat++;
+    const shrunk =
+      tokensBefore <= 0 || tokensAfter < tokensBefore * EFFECTIVE_SHRINK_RATIO;
+    this.ineffectiveCompactions = shrunk ? 0 : this.ineffectiveCompactions + 1;
+    if (!shrunk) {
+      log.warn('Compaction produced no effective shrink', {
+        tokensBefore,
+        tokensAfter,
+        ineffectiveAttempts: this.ineffectiveCompactions,
+      });
+    }
   }
 
   /** ADR-009 第15条：request-only 插入（Recall Block）的 token 估算。 */
@@ -657,19 +728,17 @@ export class Agent {
   /**
    * PR2：请求形态的 7 阶段 token 分解（heuristic，供 decideContextBudgetAction）。
    *
-   * 阶段划分与最终请求结构对齐：
+   * 阶段划分与最终请求结构对齐，全部取自 AppendOnlyLog 的 wire 计量（append 时
+   * 一次算好）：
    * - stablePrefixTokens = systemPrompt + fewShots（工具 schema 单独计）；
-   * - bootstrapTokens = log 中 sessionBootstrap 消息（memory.md / skills /
-   *   project-graph）；
-   * - checkpointTokens = log 中 checkpoint 消息（压缩摘要）；
-   * - currentUserInputTokens = 最后一条 user 消息；
-   * - retainedTailTokens = 其余 log 内容（tool 结果 / 历史对话），由总
-   *   log heuristic（bytes/4）减去已单独计量的阶段反推，保证各阶段之和
-   *   与 estimateContextTokens 的总量口径一致；
+   * - bootstrapTokens / checkpointTokens = log 中 sessionBootstrap / checkpoint
+   *   消息（memory.md / skills / project-graph、压缩摘要）；
+   * - currentUserInputTokens = 最后一条 user 消息（图片按 vision 权重计）；
+   * - retainedTailTokens = 其余 log 内容（tool 结果 / 历史对话）；
    * - suffixTokens = 续写 suffix（本次请求临时尾部）。
    *
-   * 总量 = stablePrefix + tools + bootstrap + checkpoint + retainedTail +
-   *         currentUserInput + suffix，与旧 estimateContextTokens 同口径。
+   * 这里刻意不再 getAllMessages()：那会对整个 log（含历史图片 base64）做一遍
+   * JSON 深拷贝，每轮一次；wire 计量把同样的信息在 append 时就摊平了。
    */
   private computeBudgetBreakdown(suffixTokens: number): ContextBudgetBreakdown {
     const prefix = this.session.prefix;
@@ -682,26 +751,14 @@ export class Agent {
       Serializer.stringify({ tools: prefix.getToolDefinitions() })
     );
 
-    const logMessages = this.session.logStore.getAllMessages();
-    let bootstrapTokens = 0;
-    let checkpointTokens = 0;
-    let currentUserInputTokens = 0;
-    for (const message of logMessages) {
-      const metadata = message.metadata ?? {};
-      if (metadata.sessionBootstrap === true) {
-        bootstrapTokens += estimateTokens(message.content ?? '');
-      } else if (metadata.contextCheckpoint === true) {
-        checkpointTokens += estimateTokens(message.content ?? '');
-      }
-    }
-    const lastUser = [...logMessages].reverse().find((m) => m.role === 'user');
-    if (lastUser) {
-      currentUserInputTokens = estimateTokens(
-        Serializer.stringify({ content: lastUser.content ?? '', images: lastUser.images ?? [] })
-      );
-    }
+    const footprint = this.logWireFootprint();
+    const bootstrapTokens = Math.ceil(footprint.bootstrapBytes / 4);
+    const checkpointTokens = Math.ceil(footprint.checkpointBytes / 4);
+    const currentUserInputTokens =
+      Math.ceil(footprint.lastUserBytes / 4) +
+      (footprint.lastUserHoldsLiveImages ? footprint.imageTokens : 0);
 
-    const totalLogTokens = Math.ceil(this.session.logStore.getContentBytes() / 4);
+    const totalLogTokens = Math.ceil(footprint.wireBytes / 4) + footprint.imageTokens;
     const retainedTailTokens = Math.max(
       0,
       totalLogTokens - bootstrapTokens - checkpointTokens - currentUserInputTokens
@@ -719,8 +776,17 @@ export class Agent {
         // ADR-009 第15条：request-only 插入（Recall Block）计入预算分解。
         insertionTokens: this.estimateInsertionTokens(),
       },
-      0
+      // 输出侧预留：请求的 max_tokens 是真实会占用的窗口额度，恒传 0 会让
+      // 「输入刚好、输出撑爆」的形态一路放行到 provider 侧才溢出。
+      this.outputReserveTokens()
     );
+  }
+
+  /** 本次会话参数里声明的输出额度（未声明则不预留）。 */
+  private outputReserveTokens(): number {
+    const params = this.session.prefix.getParameters() as { maxTokens?: unknown };
+    const maxTokens = typeof params.maxTokens === 'number' ? params.maxTokens : 0;
+    return Math.max(0, Math.floor(maxTokens));
   }
 
   /**
@@ -734,17 +800,20 @@ export class Agent {
   ): Promise<boolean> {
     if (!this.contextCompaction) return false;
     try {
+      const tokensBefore = this.logWireTokens();
       const compacted = await this.contextCompaction.handler(
         this.session.logStore.getAllMessages().slice(),
         'provider-overflow'
       );
       if (!compacted || compacted.messages.length === 0) {
+        this.compactionsThisChat++;
         return false;
       }
       this.lastCompactionFailed = false;
       this.session.replaceLog(compacted.messages);
       this.lastProviderUsage = null;
       this.requestBuilder.resetLogTracking?.();
+      this.recordCompactionOutcome(tokensBefore, this.logWireTokens());
       if (compacted.cacheStats) {
         this.session.recordStats(compacted.cacheStats);
       }
@@ -757,18 +826,28 @@ export class Agent {
   }
 
   /**
-   * PR2：provider 实测对账——上次成功响应的 usage.input_tokens 仅在 log
-   * 状态（长度 + 末条消息 id）与测量时一致才有效（典型场景：续写/空完成
-   * 重试，log 不变、suffix 是临时的；工具轮后 log 已增长则回落 heuristic）。
+   * PR2：provider 实测对账——上次成功响应的**入站总量**（input + cache read +
+   * cache creation）。两种有效场景：
+   *  - log 与测量时完全一致（续写/空完成重试：suffix 是临时消息）→ 直接用实测；
+   *  - log 只在测量之后追加（工具结果 / 图片消息，即每个工具轮的常态）→
+   *    实测 + 追加部分的 wire 口径增量。旧实现对任何增长都直接放弃实测，等于
+   *    把预算决策永久交给被图片 base64 抬高的 heuristic，这是压缩风暴的另一半
+   *    根因（压缩/prune 后 lastProviderUsage 被清空，实测再也赶不上）。
+   *  log 变短（replaceLog / truncateTo / pop）时实测作废，回落 heuristic。
    */
   private currentProviderMeasuredTokens(): number | undefined {
     const usage = this.lastProviderUsage;
     if (!usage) return undefined;
-    if (usage.logLength !== this.session.logStore.length()) return undefined;
-    if (usage.lastMessageId !== (this.session.logStore.getLastMessage()?.id ?? undefined)) {
-      return undefined;
-    }
-    return usage.inputTokens;
+    const logLength = this.session.logStore.length();
+    if (logLength < usage.logLength) return undefined;
+    if (logLength === usage.logLength) return usage.measuredTotalTokens;
+    const appended = this.session.logStore.getWireFootprintSince?.(usage.logLength);
+    if (!appended) return undefined;
+    return (
+      usage.measuredTotalTokens +
+      Math.ceil(appended.wireBytes / 4) +
+      appended.imageTokens
+    );
   }
 
   /** 可被取消的等待：空完成退避重试使用。取消立即抛 AbortError。 */
@@ -841,6 +920,9 @@ export class Agent {
       this.lastCompactionRound = -Infinity;
       this.lastCompactionFailed = false;
       this.overflowCompactionAttempted = false;
+      this.compactionsThisChat = 0;
+      this.ineffectiveCompactions = 0;
+      this.compactionBlockedReported = false;
 
       this.session.partition.validate();
 
@@ -876,7 +958,8 @@ export class Agent {
           breakdown,
           softBudgetTokens: this.contextCompaction.softMaxTokens,
           hardBudgetTokens: this.contextCompaction.maxContextTokens,
-          // PR2：provider 实测对账——log 状态与测量时一致才覆盖 heuristic。
+          // PR2：provider 实测对账——log 未回退时覆盖 heuristic（实测 + 追加
+          // 增量的 wire 口径）。
           providerMeasuredTotalTokens: this.currentProviderMeasuredTokens(),
           estimateSource: 'heuristic',
         });
@@ -908,7 +991,29 @@ export class Agent {
           // 软区间动作但未提供 prune 参数：降级为 compact。
           decision.action === 'prune-tool-results'
         ) {
-          if (!(this.lastCompactionFailed && round === this.lastCompactionRound + 1)) {
+          const blockedReason = this.compactionBlockReason();
+          if (blockedReason) {
+            // 熔断：本回合不再尝试压缩（见 compactionBlockReason）。请求照发，
+            // 真超限由 provider overflow 的 emergency 路径与 reject-request 兜底。
+            if (!this.compactionBlockedReported) {
+              this.compactionBlockedReported = true;
+              log.warn('Mid-loop compaction circuit opened; skipping further compaction this turn', {
+                reason: blockedReason,
+                attempts: this.compactionsThisChat,
+                ineffectiveAttempts: this.ineffectiveCompactions,
+                estimatedTokens: this.logWireTokens(),
+                hardBudgetTokens: this.contextCompaction.maxContextTokens,
+              });
+              onStreamEvent?.({
+                type: 'context-compaction-blocked',
+                round: roundNumber,
+                reason: blockedReason,
+                attempts: this.compactionsThisChat,
+                estimatedTokens: this.logWireTokens(),
+              });
+            }
+          } else if (!(this.lastCompactionFailed && round === this.lastCompactionRound + 1)) {
+            const tokensBefore = this.logWireTokens();
             const compacted = await this.contextCompaction.handler(
               this.session.logStore.getAllMessages().slice(),
               'token-limit'
@@ -923,11 +1028,13 @@ export class Agent {
                 this.session.recordStats(compacted.cacheStats);
                 aggregatedStats = accumulateStats(aggregatedStats, compacted.cacheStats);
               }
+              this.recordCompactionOutcome(tokensBefore, this.logWireTokens());
               onStreamEvent?.({ type: 'context-compacted', round: roundNumber });
             } else {
               // 无法压缩：本次请求只能超预算发出（别无选择），记录失败状态，
               // 下一轮冷却（不重复空试），再之后重试。
               this.lastCompactionFailed = true;
+              this.compactionsThisChat++;
             }
           }
         }
@@ -1028,7 +1135,6 @@ export class Agent {
         }
 
         const requestLogLength = this.session.logStore.length();
-        const requestLastMessageId = this.session.logStore.getLastMessage()?.id;
         request = this.requestBuilder.build({
           prefix: this.session.prefix,
           appendLog: this.session.logStore,
@@ -1057,13 +1163,17 @@ export class Agent {
             onStreamEvent && this.provider.streamChat
               ? await this.provider.streamChat(request, onStreamEvent, effectiveSignal)
               : await this.provider.chat(request, effectiveSignal);
-          // PR2：provider 实测记录（usage.input_tokens + 测量时 log 状态），
-          // 供后续状态一致的请求对账覆盖 heuristic 估算。
-          if (typeof response.usage?.input_tokens === 'number') {
+          // PR2：provider 实测记录（**入站总量** = input_tokens + cache read +
+          // cache creation；各家 provider 的 input_tokens 只报未命中缓存的新输入）
+          // + 测量时 log 长度，供后续请求对账覆盖 heuristic 估算。
+          const usage = response.usage;
+          if (typeof usage?.input_tokens === 'number') {
             this.lastProviderUsage = {
-              inputTokens: response.usage.input_tokens,
+              measuredTotalTokens:
+                usage.input_tokens +
+                (usage.cache_read_input_tokens ?? 0) +
+                (usage.cache_creation_input_tokens ?? 0),
               logLength: requestLogLength,
-              lastMessageId: requestLastMessageId,
             };
           }
         } catch (err) {

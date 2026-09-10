@@ -48,6 +48,22 @@ describe('metrics: 反馈闭环六尺', () => {
     expect(computeMetrics(fakeRun(loop2), { budgetRounds: 50 }).deadLoops).toBe(0);
   });
 
+  it('todo 失控重排：无 id 交集的全量覆盖才计，且超预算一票否决', () => {
+    const plans = [
+      { id: '1', name: 'todo', args: { tasks: [{ id: 'diagnose' }, { id: 'fix' }] } },
+      // 同 id 追加一步：正常推进，不算重排
+      { id: '2', name: 'todo', args: { tasks: [{ id: 'diagnose' }, { id: 'fix' }, { id: 'verify' }] } },
+      // 全新 id：把已完成的进度整份丢掉
+      { id: '3', name: 'todo', args: { tasks: [{ id: 'sun-diagnose' }, { id: 'sun-fix' }] } },
+      { id: '4', name: 'todo', args: { updates: [{ id: 'sun-fix', status: 'completed' }] } },
+    ];
+    const run = fakeRun(seq(plans));
+    const m = computeMetrics(run, { budgetRounds: 50 });
+    expect(m.todoReplans).toBe(1);
+    expect(m.pass).toBe(true);
+    expect(computeMetrics(run, { budgetRounds: 50, maxTodoReplans: 0 }).pass).toBe(false);
+  });
+
   it('死循环即使状态检查通过也一票否决', () => {
     const a = { id: 'x', name: 'bash', args: { c: 'git' }, ok: false };
     const run = fakeRun(seq([a, { ...a, id: 'y' }, { ...a, id: 'z' }]));

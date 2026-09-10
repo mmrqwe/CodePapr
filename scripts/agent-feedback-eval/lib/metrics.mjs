@@ -70,11 +70,33 @@ function deadLoopCount(calls) {
 }
 
 /**
+ * 失控重排：todo 的 tasks 全量覆盖，且新清单与上一份清单**没有任何 id 交集**
+ * （等于把已完成的进度整份扔掉、从零再规划一遍）。上下文被反复压缩时最容易
+ * 出现这种「每压一次就重排一次、永远收不了尾」的形态。
+ */
+function todoReplanCount(calls) {
+  let replans = 0;
+  let previous = null;
+  for (const call of calls) {
+    if (call.name !== 'todo') continue;
+    const tasks = call.arguments?.tasks;
+    if (!Array.isArray(tasks) || tasks.length === 0) continue;
+    const ids = new Set(tasks.map((t) => String(t?.id ?? '')).filter(Boolean));
+    if (previous && previous.size > 0 && [...ids].every((id) => !previous.has(id))) {
+      replans += 1;
+    }
+    previous = ids;
+  }
+  return replans;
+}
+
+/**
  * @param run   cliRunner.runCase 的结果
- * @param scenario { budgetRounds, expectToolAfterError?, avoidTool? }
+ * @param scenario { budgetRounds, expectToolAfterError?, avoidTool?, maxTodoReplans? }
  */
 export function computeMetrics(run, scenario) {
   const calls = toolPairs(run.events);
+  const todoReplans = todoReplanCount(calls);
   const first = calls[0];
   const firstCallSuccess = first ? first.ok === true : false;
 
@@ -110,6 +132,7 @@ export function computeMetrics(run, scenario) {
     run.exitCode === 0 &&
     rounds <= scenario.budgetRounds &&
     deadLoopCount(calls) === 0 &&
+    todoReplans <= (scenario.maxTodoReplans ?? 1) &&
     fallbackQuality !== false &&
     !avoidViolation &&
     (scenario.assert ? !!scenario.assert(run, calls) : true);
@@ -127,9 +150,10 @@ export function computeMetrics(run, scenario) {
     fallbackQuality,
     avoidViolation,
     contextPollutionChars: contextPollution,
+    todoReplans,
     elapsedMs: run.elapsedMs,
     toolSequence: calls.map((c) => `${c.name}${c.ok ? '' : '!'}`),
   };
 }
 
-export { toolPairs, roundCount };
+export { toolPairs, roundCount, todoReplanCount };

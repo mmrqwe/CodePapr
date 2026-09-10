@@ -16,6 +16,12 @@ import {
 } from '@codepapr/types';
 import { sha256, deepFreeze, generateUUID } from '@codepapr/common';
 import { Serializer } from './Serializer';
+import {
+  describeLogWireMeta,
+  measureLogWireFootprint,
+  LogWireMeta,
+  LogWireFootprint,
+} from '../context/wireShape';
 import { Logger } from '@codepapr/common';
 
 const log = new Logger('AppendOnlyLog');
@@ -24,6 +30,9 @@ export class AppendOnlyLog implements IAppendOnlyLog {
   private messages: IMessage[] = [];
   private readonly hashes: Map<number, string> = new Map();
   private totalBytes: number = 0;
+  /** 与 messages 同下标的 wire 计量（append/loadFromSnapshot 维护，pop 截断）。 */
+  private wireMetas: LogWireMeta[] = [];
+  private cachedWireFootprint: LogWireFootprint | null = null;
   private lastComputedHash: string = '';
   /** Memoized cascading prefix hash for the longest prefix hashed so far.
    *  Extending a previous computation is then O(delta). Never stale: every
@@ -55,15 +64,19 @@ export class AppendOnlyLog implements IAppendOnlyLog {
     }
 
     // 3. Compute message hash (for integrity verification)
-    const msgHash = sha256(Serializer.stringify(frozen));
+    const serialized = Serializer.stringify(frozen);
+    const msgHash = sha256(serialized);
 
     // 4. Store in immutable array
     const index = this.messages.length;
     this.messages.push(frozen);
     this.hashes.set(index, msgHash);
 
-    // 5. Update total bytes
-    this.totalBytes += Serializer.getByteLength(frozen);
+    // 5. Update total bytes + wire 计量（复用同一次序列化）
+    const wireMeta = describeLogWireMeta(frozen, serialized);
+    this.totalBytes += wireMeta.bytes;
+    this.wireMetas.push(wireMeta);
+    this.cachedWireFootprint = null;
 
     // 6. Invalidate cached hash (will be recomputed on next call)
     this.lastComputedHash = '';
@@ -144,7 +157,9 @@ export class AppendOnlyLog implements IAppendOnlyLog {
     const index = this.messages.length - 1;
     const msg = this.messages.pop()!;
     this.hashes.delete(index);
-    this.totalBytes -= Serializer.getByteLength(msg);
+    const meta = this.wireMetas.pop();
+    this.totalBytes -= meta ? meta.bytes : Serializer.getByteLength(msg);
+    this.cachedWireFootprint = null;
     this.lastComputedHash = '';
     if (this.prefixChainLen > this.messages.length) {
       this.prefixChainLen = 0;
@@ -270,6 +285,30 @@ export class AppendOnlyLog implements IAppendOnlyLog {
   }
 
   /**
+   * Wire footprint：这些消息真正随请求上线时的体量（剥离已消费的图片 base64、
+   * 把「最新一批」之外的工具全文按冻结摘要计）。预算决策与缩容有效性判定必须用
+   * 这个口径，否则 log 里永久留着的图片 base64 与工具全文会把估算抬高一个数量
+   * 级，导致「压缩风暴」：每轮都判定超预算，而压缩看不见超出的部分、永远缩不到
+   * 预算以下。图片另按 vision 口径（张数 × 固定权重）单独计费，见 wireShape。
+   */
+  getWireFootprint(): LogWireFootprint {
+    if (this.wireMetas.length !== this.messages.length) {
+      // 元数据与消息不同步（理论上不可能：所有改写 messages 的路径都同步改写
+      // wireMetas）。宁可重算一遍也不让预算决策用上脏口径。
+      log.error('Wire metadata length mismatch - rebuilding', {
+        metas: this.wireMetas.length,
+        messages: this.messages.length,
+      });
+      this.wireMetas = this.messages.map((msg) => describeLogWireMeta(msg));
+      this.cachedWireFootprint = null;
+    }
+    if (!this.cachedWireFootprint) {
+      this.cachedWireFootprint = measureLogWireFootprint(this.wireMetas);
+    }
+    return this.cachedWireFootprint;
+  }
+
+  /**
    * Validate append-only invariants
    */
   validate(): boolean {
@@ -331,6 +370,16 @@ export class AppendOnlyLog implements IAppendOnlyLog {
   }
 
   /**
+   * 从 `from` 下标起（含）新增消息的 wire 口径体量。用于 provider 实测对账的
+   * 增量部分：实测请求发出后 log 追加了工具结果/图片消息，实测总量 + 这部分
+   * 增量仍比纯 heuristic 准得多（heuristic 会把已不上线的图片 base64 计入）。
+   */
+  getWireFootprintSince(from: number): LogWireFootprint {
+    const start = Math.max(0, Math.min(from, this.wireMetas.length));
+    return measureLogWireFootprint(this.wireMetas.slice(start));
+  }
+
+  /**
    * Convert to message array (for API requests)
    */
   toMessageArray(): IMessage[] {
@@ -370,6 +419,8 @@ export class AppendOnlyLog implements IAppendOnlyLog {
     this.messages = [];
     this.hashes.clear();
     this.totalBytes = 0;
+    this.wireMetas = [];
+    this.cachedWireFootprint = null;
     this.lastComputedHash = '';
     this.prefixChainLen = 0;
     this.prefixChainHash = '';
@@ -406,9 +457,12 @@ export class AppendOnlyLog implements IAppendOnlyLog {
         );
       }
       this.messages.push(frozen);
-      const msgHash = sha256(Serializer.stringify(frozen));
+      const serialized = Serializer.stringify(frozen);
+      const msgHash = sha256(serialized);
       this.hashes.set(this.messages.length - 1, msgHash);
-      computedBytes += Serializer.getByteLength(frozen);
+      const wireMeta = describeLogWireMeta(frozen, serialized);
+      this.wireMetas.push(wireMeta);
+      computedBytes += wireMeta.bytes;
     }
 
     if (snapshot.totalBytes !== computedBytes) {
@@ -418,6 +472,7 @@ export class AppendOnlyLog implements IAppendOnlyLog {
     }
 
     this.totalBytes = computedBytes;
+    this.cachedWireFootprint = null;
     this.lastComputedHash = '';
     this.prefixChainLen = 0;
     this.prefixChainHash = '';

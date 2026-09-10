@@ -143,6 +143,80 @@ export function createEmptyTodoListContext(goal: string): TodoListContext {
   };
 }
 
+/** 一次 tasks 全量覆盖相对旧清单的「进度影响」评估（护栏与诊断用）。 */
+export interface TodoReplanImpact {
+  /** 是否为重建（旧清单存在且有任务）。false = 首次初始化。 */
+  isReplan: boolean;
+  /** 新清单里按 id 延续下来的旧任务。 */
+  keptIds: string[];
+  /** 被丢弃的已完成任务（进度证据就此消失）。 */
+  droppedCompleted: AgentTask[];
+  /** 被丢弃的未终结任务（running/pending/failed）。 */
+  droppedUnsettled: number;
+  /** 与旧清单毫无 id 交集的重建（最可疑：多半是压缩后模型丢了计划又重排）。 */
+  isFullReset: boolean;
+}
+
+export function evaluateTodoReplan(
+  previous: TodoListContext | null,
+  rawTasks: readonly RawTaskInput[]
+): TodoReplanImpact {
+  const empty: TodoReplanImpact = {
+    isReplan: false,
+    keptIds: [],
+    droppedCompleted: [],
+    droppedUnsettled: 0,
+    isFullReset: false,
+  };
+  if (!previous || previous.tasks.length === 0) return empty;
+
+  const nextIds = new Set(
+    rawTasks
+      .map((raw) => (typeof raw.id === 'string' ? normalizeId(raw.id, '') : ''))
+      .filter(Boolean)
+  );
+  const keptIds = previous.tasks
+    .filter((task) => nextIds.has(task.id))
+    .map((task) => task.id);
+  const dropped = previous.tasks.filter((task) => !nextIds.has(task.id));
+  const droppedCompleted = dropped.filter((task) => task.status === 'completed');
+  const droppedUnsettled = dropped.filter(
+    (task) => task.status !== 'completed' && task.status !== 'failed'
+  ).length;
+
+  return {
+    isReplan: true,
+    keptIds,
+    droppedCompleted,
+    droppedUnsettled,
+    isFullReset: keptIds.length === 0,
+  };
+}
+
+/** 把重建影响写成一行给模型看的告警；无需告警时返回 undefined。 */
+export function describeTodoReplanImpact(impact: TodoReplanImpact): string | undefined {
+  if (!impact.isReplan) return undefined;
+  const parts: string[] = [];
+  if (impact.droppedCompleted.length > 0) {
+    const ids = impact.droppedCompleted.map((task) => task.id).slice(0, 8).join(', ');
+    parts.push(
+      `丢弃了 ${impact.droppedCompleted.length} 项已完成任务的进度（${ids}）`
+    );
+  }
+  if (impact.droppedUnsettled > 0) {
+    parts.push(`丢弃了 ${impact.droppedUnsettled} 项仍在进行的任务`);
+  }
+  if (impact.isFullReset) {
+    parts.push('新清单与旧清单没有任何 id 交集（完全重排）');
+  }
+  if (parts.length === 0) return undefined;
+  return (
+    `[re-plan 警告] 本次 tasks 全量覆盖${parts.join('；')}。` +
+    '如果目标没有变化（例如只是上下文被压缩、你没看到旧清单），' +
+    '请不要重建计划：用同一批 id 重新提交 tasks，或改用 updates 继续推进原清单。'
+  );
+}
+
 /**
  * 用一组完整的任务定义覆盖 / 初始化 TodoList。
  */
@@ -159,6 +233,10 @@ export function writeTodoList(
     return normalizeTask(raw, index, existing, defaultMaxRetries);
   });
 
+  const impact = evaluateTodoReplan(previous, rawTasks);
+  const dropsProgress =
+    impact.isReplan && (impact.droppedCompleted.length > 0 || impact.droppedUnsettled > 0);
+
   return {
     goal: goal.trim() || previous?.goal || '',
     tasks,
@@ -166,6 +244,13 @@ export function writeTodoList(
     status: computeAggregateStatus(tasks),
     createdAt: previous?.createdAt ?? Date.now(),
     updatedAt: Date.now(),
+    // 只有真的丢掉进度才计数（首次初始化、以及只改措辞的同 id 重排不计），
+    // 供 UI/eval 观察「一个回合内反复重排」这类失控模式。
+    ...(dropsProgress
+      ? { replanCount: (previous?.replanCount ?? 0) + 1 }
+      : previous?.replanCount !== undefined
+        ? { replanCount: previous.replanCount }
+        : {}),
   };
 }
 
@@ -392,6 +477,8 @@ export function buildTodoToolDefinition(): IToolDefinition {
       + '2. 提供 updates 参数 → 部分更新一条或多条任务（标记进度/失败/完成）\n\n'
       + '自动推进：标记任务为 completed 时，系统自动将下一个 pending（依赖已满足）的任务置为 running。\n'
       + '与 task 工具的协作：todo 维护主 Agent 自己的计划；要委派给子代理执行，仍然调用 task。\n\n'
+      + 're-plan 纪律：一个目标只规划一次。看到「当前任务清单（权威状态）」分区时，那就是仍在生效的计划，'
+      + '请沿用其中的 id 用 updates 推进；只有用户目标改变时才用 tasks 重建。\n\n'
       + '每次调用返回完整 TodoList 快照，无需担心遗忘。',
     parameters: {
       type: 'object',
@@ -402,7 +489,12 @@ export function buildTodoToolDefinition(): IToolDefinition {
         },
         tasks: {
           type: 'array',
-          description: '全量任务列表，覆盖整个 TodoList。用于初始化新计划或重新规划（re-plan）。每次调用会完全替换旧清单。与 updates 参数互斥。',
+          description:
+            '全量任务列表，覆盖整个 TodoList。用于初始化新计划，或**用户目标真的变了**时的重新规划（re-plan）。'
+            + '每次调用会完全替换旧清单：未在新清单里复现的 id，其已完成/进行中进度会丢失'
+            + '（沿用同 id 的任务会保留状态与 summary）。上下文被压缩过、你只是看不到旧清单时'
+            + '**不要**重建计划——按检查点里的「当前任务清单（权威状态）」用 updates 继续推进。'
+            + '与 updates 参数互斥。',
           items: {
             type: 'object',
             properties: {

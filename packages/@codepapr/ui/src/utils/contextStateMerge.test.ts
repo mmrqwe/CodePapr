@@ -172,6 +172,27 @@ describe('validatePinnedStatePreserved', () => {
     expect(result.missing.join('|')).toContain('constraints');
     expect(result.missing.join('|')).toContain('todos');
   });
+
+  it('F：接受改写但没丢信息的合并结果（逐字相等会把合法输出整份否掉）', () => {
+    const base = mergeContextStateDeterministic({ priorState, facts: [] });
+    const reworded: ContextCheckpointStateV3 = {
+      ...base,
+      goal: base.goal.map((item) => `${item}（补充：仍是同一目标）`),
+      todos: base.todos.map((item) => `【进行中】${item}`),
+    };
+    expect(validatePinnedStatePreserved(priorState, reworded).ok).toBe(true);
+  });
+
+  it('F：换成完全无关的内容仍然报错（不能靠相似度蒙混）', () => {
+    const base = mergeContextStateDeterministic({ priorState, facts: [] });
+    const unrelated: ContextCheckpointStateV3 = {
+      ...base,
+      todos: ['把厨房的灯换成暖色温并且重新装修一下阳台和玄关'],
+    };
+    const result = validatePinnedStatePreserved(priorState, unrelated);
+    expect(result.ok).toBe(false);
+    expect(result.missing.join('|')).toContain('todos');
+  });
 });
 
 describe('parseContextCheckpointStateV3', () => {

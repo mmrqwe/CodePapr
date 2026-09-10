@@ -310,9 +310,15 @@ export function serializeDisabledRenderParams(): string {
 }
 
 /** 从 payload 派生 trigger/summary 兜底（payload 缺 provenance 时）。 */
-export function resolveCheckpointSummaryInfo(
-  payload: ContextCheckpointPayload
-): { kind: 'llm' | 'local-fallback'; provider?: string; model?: string } {
+export function resolveCheckpointSummaryInfo(payload: ContextCheckpointPayload): {
+  kind: 'llm' | 'local-fallback';
+  provider?: string;
+  model?: string;
+  /** F：local-fallback 的具体原因（compactor_unavailable / empty_output /
+   *  parse_failed / pinned_validation_failed / merge_failed），落到
+   *  context_compactions.failure_code。 */
+  failureCode?: string;
+} {
   if (payload.summaryInfo) return payload.summaryInfo;
   if (payload.modelTier === 'local') {
     return { kind: 'local-fallback' };

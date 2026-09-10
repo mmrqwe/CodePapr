@@ -23,7 +23,7 @@ import {
   RequestContextInsertion,
 } from '@codepapr/types';
 import { Logger, sha256, estimateTokens } from '@codepapr/common';
-import { Serializer, applyHistoryToolSummaries } from '@codepapr/core';
+import { Serializer, applyHistoryToolSummaries, stripConsumedImages } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS, sanitizeMaxTokens, getProviderContextLimit } from '../tokenLimits';
 
 const log = new Logger('RequestBuilder');
@@ -404,27 +404,4 @@ export class RequestBuilder {
       ...(message.toolResult ? { toolCallId: message.toolResult.toolCallId } : {}),
     }));
   }
-}
-
-export function stripConsumedImages(messages: IMessage[]): IMessage[] {
-  // 规则：
-  // 1) 图片消息之后已有 assistant 回复 → 已消费，剥离图片；
-  // 2) 多条「未消费」的图片消息（如连续的 user 图片消息）→ 只保留最后一条，
-  //    其余剥离。旧实现对未消费的全部保留，与「仅最后一条保留」的契约不符，
-  //    多份 base64 会反复膨胀请求。
-  let lastUnconsumedImageIndex = -1;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (msg.role !== 'user' || !msg.images || msg.images.length === 0) continue;
-    const hasAssistantAfter = messages.slice(i + 1).some((m) => m.role === 'assistant');
-    if (!hasAssistantAfter) {
-      lastUnconsumedImageIndex = i;
-      break;
-    }
-  }
-  return messages.map((msg, i) => {
-    if (msg.role !== 'user' || !msg.images || msg.images.length === 0) return msg;
-    if (i === lastUnconsumedImageIndex) return msg;
-    return { ...msg, images: undefined };
-  });
 }

@@ -1951,6 +1951,17 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   return message;
                 }
 
+                if (event.type === 'context-compaction-blocked') {
+                  // 压缩熔断：本轮不再尝试 mid-loop 压缩，给用户一条状态说明
+                  // （真超限仍由 provider overflow 路径兜底）。
+                  const translation = getTranslation(normalizedSettings.lang);
+                  return {
+                    ...message,
+                    isStreaming: true,
+                    statusText: translation.compactionBlockedStatus,
+                  };
+                }
+
                 return applyToolStreamEvent(message, event);
               });
 

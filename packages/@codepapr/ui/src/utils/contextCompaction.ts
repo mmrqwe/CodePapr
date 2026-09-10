@@ -5,6 +5,8 @@ import {
   redactTranscriptOutputString,
   pruneOldToolResults,
   applyHistoryToolSummaries,
+  describeLogWireMeta,
+  measureLogWireFootprint,
   TOOL_SUMMARY_METADATA_KEY,
   type PruneOptions,
 } from '@codepapr/core';
@@ -70,6 +72,8 @@ export interface ContextCheckpointPayload {
     kind: 'llm' | 'local-fallback';
     provider?: string;
     model?: string;
+    /** F：kind 为 local-fallback 时的降级原因（写入 failure_code）。 */
+    failureCode?: string;
   };
 }
 
@@ -122,6 +126,10 @@ export interface CheckpointMatch {
 
 interface ContextCopy {
   checkpointPreamble: string;
+  /** 有活跃任务清单时的替代前言：清单跨压缩仍然有效，必须继续而不是重排。 */
+  checkpointPreambleWithTodos: string;
+  /** 权威任务清单分区的标题。 */
+  todoDigestHeading: string;
   summaryHeading: string;
   userGoalHeading: string;
   constraintsHeading: string;
@@ -140,6 +148,9 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
       return {
         checkpointPreamble:
           '以下是先前長會話的上下文檢查點，僅作為已驗證的歷史背景摘要；若與後續原始訊息衝突，以後續原始訊息為準。當前回合的任務以用戶最新訊息為準：除非用戶明確要求繼續先前的工作，否則不要主動恢復或繼續檢查點中的舊任務、舊任務清單。',
+        checkpointPreambleWithTodos:
+          '以下是先前長會話的上下文檢查點，僅作為已驗證的歷史背景摘要；若與後續原始訊息衝突，以後續原始訊息為準。下方的「當前任務清單（權威狀態）」是用戶目標尚未完成的進行中計劃，仍舊有效：請繼續推進其中 running/pending 的任務，不要重建或重新規劃清單——只有當用戶最新消息改變了目標時才重排（re-plan）。',
+        todoDigestHeading: '當前任務清單（權威狀態）',
         summaryHeading: '檢查點摘要',
         userGoalHeading: '用戶目標',
         constraintsHeading: '約束與偏好',
@@ -155,6 +166,9 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
       return {
         checkpointPreamble:
           'The block below is a checkpoint summary of earlier conversation context, provided only as verified historical background; if it conflicts with later raw messages, trust the later raw messages. The current turn is governed by the user\'s latest message: do not resume or restore old tasks or task lists from the checkpoint unless the user explicitly asks to continue the previous work.',
+        checkpointPreambleWithTodos:
+          'The block below is a checkpoint summary of earlier conversation context, provided only as verified historical background; if it conflicts with later raw messages, trust the later raw messages. The "Current Task List (authoritative)" section below is the in-flight plan for the user\'s still-active goal and remains valid: keep executing its running/pending tasks instead of rebuilding or re-planning the list. Only re-plan when the user\'s latest message changes the goal.',
+        todoDigestHeading: 'Current Task List (authoritative)',
         summaryHeading: 'Checkpoint Summary',
         userGoalHeading: 'User Goal',
         constraintsHeading: 'Constraints & Preferences',
@@ -170,6 +184,9 @@ function getContextCopy(lang: Lang | undefined): ContextCopy {
       return {
         checkpointPreamble:
           '以下是先前长会话的上下文检查点，仅作为已验证的历史背景摘要；如果与后续原始消息冲突，以后续原始消息为准。当前回合的任务以用户最新消息为准：除非用户明确要求继续先前的工作，否则不要主动恢复或继续检查点中的旧任务、旧任务清单。',
+        checkpointPreambleWithTodos:
+          '以下是先前长会话的上下文检查点，仅作为已验证的历史背景摘要；如果与后续原始消息冲突，以后续原始消息为准。下方的「当前任务清单（权威状态）」是用户目标尚未完成的进行中计划，依然有效：请继续推进其中 running/pending 的任务，不要重建或重新规划清单——只有当用户最新消息改变了目标时才需要重排（re-plan）。',
+        todoDigestHeading: '当前任务清单（权威状态）',
         summaryHeading: '检查点摘要',
         userGoalHeading: '用户目标',
         constraintsHeading: '约束与偏好',
@@ -313,12 +330,26 @@ function getMessageChars(messages: readonly IMessage[]): number {
   return messages.reduce((sum, message) => sum + (message.content?.length ?? 0), 0);
 }
 
-function getMessageTokenCount(message: IMessage): number {
-  return estimateTokens([message.role, message.content ?? ''].filter(Boolean).join('\n'));
+/** 一组消息实际随请求上线的 token 估算（wire 口径，含图片 vision 权重）。
+ *  必须整组计量：是否仍「在线」取决于其后有没有 assistant 回复 / 是不是最新
+ *  一批工具结果，逐条计量会失真。
+ *  入参取 UI 侧的 ContextMessageLike（role 允许 'error'）：wire 计量只看
+ *  role/content/images/toolResult/metadata 五个字段，其余形态一律忽略。 */
+export function measureWireTokens(
+  messages: readonly (IMessage | ContextMessageLike)[]
+): number {
+  const footprint = measureLogWireFootprint(
+    messages.map((m) => describeLogWireMeta(m as IMessage))
+  );
+  return Math.ceil(footprint.wireBytes / 4) + footprint.imageTokens;
 }
 
 function getMessagesTokenCount(messages: readonly IMessage[]): number {
-  return messages.reduce((sum, message) => sum + getMessageTokenCount(message), 0);
+  // 上线口径（与 Agent / RequestBuilder 同一实现）：已消费的图片 base64 与会被
+  // 冻结摘要替换的旧工具全文都不随请求发送，图片按 vision 权重计费。用
+  // role+content 估算会让「压缩后仍然超限」不可见 → 纸面缩容通过、下一轮继续
+  // 触发压缩（压缩风暴）。
+  return measureWireTokens(messages);
 }
 
 function getCheckpointTokenCount(checkpoint: ContextCheckpointPayload | null): number {
@@ -506,9 +537,18 @@ export function renderContextCheckpointSummary(
   return lines.join('\n').trim();
 }
 
-export function renderContextCheckpointContent(summary: string, lang: Lang | undefined): string {
+export function renderContextCheckpointContent(
+  summary: string,
+  lang: Lang | undefined,
+  todoDigest?: string
+): string {
   const copy = getContextCopy(lang);
-  return `${copy.checkpointPreamble}\n\n${copy.summaryHeading}：\n${summary.trim()}`;
+  const digest = todoDigest?.trim();
+  // 有活跃清单时用「继续原清单」版前言并把权威清单（含状态与 current 指针）整块
+  // 附在末尾：压缩只毁掉模型可见的历史，毁掉计划就等于每压一次就重新规划一次。
+  const preamble = digest ? copy.checkpointPreambleWithTodos : copy.checkpointPreamble;
+  const body = `${preamble}\n\n${copy.summaryHeading}：\n${summary.trim()}`;
+  return digest ? `${body}\n\n${copy.todoDigestHeading}：\n${digest}` : body;
 }
 
 export function buildEffectiveContextMessages(

@@ -802,6 +802,8 @@ export interface CompactionCommitRequest {
   summaryMode: 'llm' | 'local-fallback';
   summaryProvider: string | null;
   summaryModel: string | null;
+  /** 压缩已提交但摘要降级（local-fallback）的原因；写入 failure_code 供审计。 */
+  degradedReason?: string | null;
   createdAt: number;
   nodes: PersistedSurfaceNode[];
   renderParamsJson: string;

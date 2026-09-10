@@ -6,6 +6,7 @@ import {
   buildEffectiveContextMessages,
   buildLocalContextCheckpointSections,
   insertCheckpointAtRetainedBoundary,
+  measureWireTokens,
   planContextCompaction,
   renderContextCheckpointContent,
   renderContextCheckpointSummary,
@@ -934,6 +935,53 @@ describe('contextCompaction', () => {
       expect(en).toContain('unless the user explicitly asks to continue');
       expect(en).not.toContain('todo(action: list)');
     });
+  });
+});
+
+describe('renderContextCheckpointContent：任务清单跨压缩存活（D）', () => {
+  const digest = [
+    '[TodoList] 目标: 修太阳过曝',
+    '  ✓ scale-research: 搜索距离比例依据',
+    '  ▶ fix-sun-v2: 二轮修正太阳光效果 ← current',
+    '  ○ verify-v2: 验证二轮修改',
+  ].join('\n');
+
+  it('带权威清单时用「继续原清单」前言，并把清单整块渲染进正文', () => {
+    const content = renderContextCheckpointContent('摘要正文', 'zh-CN', digest);
+    expect(content).toContain('当前任务清单（权威状态）');
+    expect(content).toContain('fix-sun-v2');
+    expect(content).toContain('← current');
+    expect(content).toContain('依然有效');
+    expect(content).toContain('不要重建或重新规划');
+    // 不能再出现「不要主动恢复旧任务清单」的指令——它正是模型重排计划的诱因
+    expect(content).not.toContain('否则不要主动恢复或继续检查点中的旧任务');
+  });
+
+  it('没有可继续的清单时用中性前言，且不渲染空清单分区', () => {
+    const content = renderContextCheckpointContent('摘要正文', 'zh-CN');
+    expect(content).not.toContain('当前任务清单（权威状态）');
+    expect(content).toContain('否则不要主动恢复或继续检查点中的旧任务');
+  });
+
+  it('空白 digest 不改变前言与结构', () => {
+    expect(renderContextCheckpointContent('摘要正文', 'en', '   ')).toBe(
+      renderContextCheckpointContent('摘要正文', 'en')
+    );
+  });
+
+  it('wire 口径：已消费的图片 base64 不计入（缩容有效性看得见真实体量）', () => {
+    const bigBase64 = 'iVBORw0KGgo'.repeat(30_000);
+    const withImage: ContextMessageLike = {
+      id: 'img1',
+      role: 'user',
+      content: '[Image from tool read_image]',
+      timestamp: 1,
+      images: [{ mediaType: 'image/png', data: bigBase64, path: 'shots/a.png' }],
+    };
+    const answered: ContextMessageLike = { id: 'a1', role: 'assistant', content: '看过', timestamp: 2 };
+    expect(measureWireTokens([withImage, answered])).toBeLessThan(200);
+    expect(measureWireTokens([withImage])).toBeGreaterThanOrEqual(2048);
+    expect(measureWireTokens([withImage])).toBeLessThan(3_000);
   });
 });
 

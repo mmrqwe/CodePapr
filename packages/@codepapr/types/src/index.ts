@@ -136,6 +136,28 @@ export interface IImmutablePrefix {
 // Append-Only Log Interface
 // ============================================================================
 
+/** log 的「上线口径」体量：实际会随请求发送的字节 + 图片的 vision token 计费。 */
+export interface ILogWireFootprint {
+  /** log 全量字节（旧口径，仅供诊断对比）。 */
+  logBytes: number;
+  /** 实际会随请求上线的字节（不含任何图片 base64）。 */
+  wireBytes: number;
+  /** 仍在线上的图片按 vision 口径计的 token。 */
+  imageTokens: number;
+  /** 因冻结摘要替换而不上线的字节。 */
+  summarySavingsBytes: number;
+  /** 因已被消费而不再上行的图片 base64 字节。 */
+  offWireImageBytes: number;
+  /** Session Bootstrap（memory / skills / project-graph）的上线字节。 */
+  bootstrapBytes: number;
+  /** 上下文检查点摘要的上线字节。 */
+  checkpointBytes: number;
+  /** 最后一条 user 消息的上线字节（不含图片 base64）。 */
+  lastUserBytes: number;
+  /** 最后一条 user 消息是否就是仍在线的那条图片消息（图片 token 归属它）。 */
+  lastUserHoldsLiveImages: boolean;
+}
+
 export interface IAppendOnlyLog {
   append(message: IMessage): Promise<number>;
   appendBatch(messages: IMessage[]): Promise<number[]>;
@@ -149,6 +171,12 @@ export interface IAppendOnlyLog {
   computeHash(): string;
   computeHashSince(index: number): string;
   getContentBytes(): number;
+  /** 可选：log 的「上线口径」体量（剥离已消费图片 base64、旧工具全文按冻结摘要
+   *  计，图片另按 vision 权重单独计费）。预算决策优先用它；未实现时调用方回落
+   *  getContentBytes()。 */
+  getWireFootprint?(): ILogWireFootprint;
+  /** 可选：`from` 起新增消息的「上线口径」体量（provider 实测增量对账用）。 */
+  getWireFootprintSince?(from: number): ILogWireFootprint;
   validate(): boolean;
 
   toMessageArray(): IMessage[];
@@ -404,7 +432,18 @@ export type IChatStreamEvent =
       }
   | { type: 'context-compacted'; round: number }
   /** PR2：soft~hard 区间原地裁剪旧工具结果（非压缩 epoch 重置）。 */
-  | { type: 'context-pruned'; round: number };
+  | { type: 'context-pruned'; round: number }
+  /** C：压缩熔断——本回合不再尝试 mid-loop 压缩（真超限由 provider overflow
+   *  路径与 reject-request 兜底）。reason：
+   *  - 'no-effective-shrink'：连续多次压缩后上线体量没有实质下降；
+   *  - 'per-turn-limit'：单次回合的压缩次数已达上限。 */
+  | {
+      type: 'context-compaction-blocked';
+      round: number;
+      reason: 'no-effective-shrink' | 'per-turn-limit';
+      attempts: number;
+      estimatedTokens: number;
+    };
 
 // ============================================================================
 // LLM Provider Types
@@ -539,6 +578,8 @@ export interface TodoListContext {
   status: 'active' | 'completed';
   createdAt: number;
   updatedAt: number;
+  /** tasks 全量覆盖导致进度丢失的次数（诊断失控重排用；首次/同 id 重排不计）。 */
+  replanCount?: number;
 }
 
 // ============================================================================

@@ -1,5 +1,6 @@
 import type { ICacheStatistics } from '@codepapr/types';
 import { estimateTokens } from '@codepapr/common';
+import { hasUnsettledTodoTasks } from '@codepapr/core';
 import { createId } from '../../utils/createId';
 import {
   computeCheckpointProvenanceRanges,
@@ -7,6 +8,7 @@ import {
 import {
   CONTEXT_COMPACTION_SOFT_BUDGET_RATIO,
   getLatestCheckpoint,
+  measureWireTokens,
   planContextCompaction,
   renderContextCheckpointContent,
   type ContextCheckpointPayload,
@@ -138,6 +140,9 @@ export async function maybeGenerateContextCheckpoint(
   let state = fallbackState;
   let modelName = 'local-checkpoint';
   let modelTier: ContextCheckpointPayload['modelTier'] = 'local';
+  // F：降级原因。历史上 22/31 次压缩都是 local-fallback 却什么也没记下，
+  // 只能从 console.warn 里猜；现在写进 failure_code 供审计与 eval。
+  let degradeReason: string | undefined;
   let cacheStats: ICacheStatistics | undefined;
 
   const lang =
@@ -152,6 +157,9 @@ export async function maybeGenerateContextCheckpoint(
       ? settings.fastModelEnabled && settings.fastModel.trim().length > 0
       : true;
 
+  if (!canRunLlm) {
+    degradeReason = 'compactor_unavailable';
+  }
   if (canRunLlm) {
     const { systemPrompt, userPrompt } = buildStateMergePrompt({
       priorState,
@@ -190,12 +198,17 @@ export async function maybeGenerateContextCheckpoint(
             modelName = compactorTier === 'fast' ? settings.fastModel.trim() : baseModel;
             modelTier = compactorTier;
           } else {
+            degradeReason = 'pinned_validation_failed';
             console.warn(
               '[checkpoint] LLM 合并丢失 pinned 状态，回退确定性合并:',
               pinned.missing.slice(0, 3)
             );
           }
+        } else {
+          degradeReason = 'parse_failed';
         }
+      } else {
+        degradeReason = 'empty_output';
       }
     } catch (e) {
       // 用户中断必须上抛（全仓取消约定：AbortError 原样传播），不能吞掉后
@@ -203,6 +216,7 @@ export async function maybeGenerateContextCheckpoint(
       if (e instanceof DOMException && e.name === 'AbortError') {
         throw e;
       }
+      degradeReason = 'merge_failed';
       console.warn('Smart context state merge failed:', e);
     }
   }
@@ -211,14 +225,25 @@ export async function maybeGenerateContextCheckpoint(
   const timestamp = Date.now();
   const compactionId = createId();
   const ranges = computeCheckpointProvenanceRanges(messages, plan.insertIndex);
-  const renderedContent = renderContextCheckpointContent(summary, settings.lang);
-  const checkpointTokens = estimateTokens(renderedContent || summary || '');
-  const retainedTokens = plan.retainedMessages.reduce(
-    (sum, message) =>
-      sum +
-      estimateTokens([message.role, message.content ?? ''].filter(Boolean).join('\n')),
-    0
+  // D：进行中的任务清单必须跨压缩存活。todoDigest 此前只塞进 payload 元数据、
+  // 从不进入模型可见的 surface，而 checkpoint 只带「未完成任务的标题」（且封顶
+  // 12 条），前言还写着「不要恢复旧任务清单」——于是每压缩一次，模型就把计划
+  // 从头再规划一遍（实测一个回合内 todo 全量重建 11 次，永远收不了尾）。
+  // 这里把权威清单（含状态、retry、current 指针）整块渲染进 checkpoint 正文，
+  // 仅在清单确有未完成项时使用「继续原清单」版前言。
+  const resumableTodoDigest =
+    todoContext && hasUnsettledTodoTasks(todoContext)
+      ? todoDigest?.trim() || undefined
+      : undefined;
+  const renderedContent = renderContextCheckpointContent(
+    summary,
+    settings.lang,
+    resumableTodoDigest
   );
+  const checkpointTokens = estimateTokens(renderedContent || summary || '');
+  // wire 口径：与 planContextCompaction 的 effectiveTokens 同一算法，否则
+  // estimatedTokensAfter 会「纸面变小」而实际请求量没变（无效缩检查看不见）。
+  const retainedTokens = measureWireTokens(plan.retainedMessages);
   return {
     message: {
       id: createId(),
@@ -258,7 +283,7 @@ export async function maybeGenerateContextCheckpoint(
         },
         summaryInfo:
           modelTier === 'local'
-            ? { kind: 'local-fallback' }
+            ? { kind: 'local-fallback', failureCode: degradeReason ?? 'unspecified' }
             : { kind: 'llm', model: modelName },
         // PR3：v3 payload 用结构化 state（渲染器绑定：旧 v2 payload 不重渲染）
         state,

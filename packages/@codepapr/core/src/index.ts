@@ -291,8 +291,10 @@ export {
   TODO_GUARD_NUDGE,
   hasUnsettledTodoTasks,
   convergeUnconfirmedRunningTasks,
+  evaluateTodoReplan,
+  describeTodoReplanImpact,
 } from './agent/todoList';
-export type { TodoUpdatePatch } from './agent/todoList';
+export type { TodoUpdatePatch, TodoReplanImpact } from './agent/todoList';
 export { createTaskSlot, withTaskSlot, TASK_PARALLEL_CONCURRENCY } from './agent/taskSlot';
 export { selectSubagentExecutionRoute } from './agent/subagentRoute';
 export type { SubagentExecutionRoute, SubagentRouteSettings } from './agent/subagentRoute';
@@ -455,6 +457,15 @@ export {
   decideContextBudgetAction,
   ContextBudgetRejectedError,
 } from "./context/ContextBudget";
+export {
+  IMAGE_WIRE_TOKEN_WEIGHT,
+  describeLogWireMeta,
+  measureLogWireFootprint,
+  stripConsumedImages,
+  clearConsumedImageData,
+  findLastUnconsumedImageIndex,
+} from "./context/wireShape";
+export type { LogWireMeta, LogWireFootprint } from "./context/wireShape";
 
 export type {
   ContentSourceKind,

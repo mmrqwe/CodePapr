@@ -7,6 +7,8 @@ import {
   renderTodoListDigest,
   hasUnsettledTodoTasks,
   convergeUnconfirmedRunningTasks,
+  describeTodoReplanImpact,
+  evaluateTodoReplan,
   buildTodoToolDefinition,
   DEFAULT_TODO_MAX_RETRIES,
   TODO_TOOL_NAME,
@@ -454,5 +456,79 @@ describe('convergeUnconfirmedRunningTasks（未确认 running 收敛）', () => 
     const ctx = updateTodoList(createInitialPlan(), [{ id: 'add-route', status: 'completed' }]);
     const next = convergeUnconfirmedRunningTasks(ctx, '进程退出前回合未确认');
     expect(next.tasks.find((t) => t.id === 'add-form')!.errorLog).toBe('进程退出前回合未确认');
+  });
+});
+
+describe('evaluateTodoReplan / describeTodoReplanImpact（E：tasks 全量覆盖护栏）', () => {
+  function planWithProgress(): TodoListContext {
+    const ctx = writeTodoList(null, '修太阳过曝', [
+      { id: 'diagnose', title: '诊断', description: '定位链路' },
+      { id: 'scale-research', title: '搜索比例依据', description: 'AU/直径比' },
+      { id: 'fix', title: '修复', description: '改 solarSystem.js' },
+    ]);
+    return updateTodoList(ctx, [
+      { id: 'diagnose', status: 'completed', summary: '链路已定位' },
+      { id: 'scale-research', status: 'completed', summary: '压缩惯例确认' },
+    ]);
+  }
+
+  it('首次初始化不算重排、无告警', () => {
+    const impact = evaluateTodoReplan(null, [{ id: 'a', title: 'A', description: 'a' }]);
+    expect(impact.isReplan).toBe(false);
+    expect(describeTodoReplanImpact(impact)).toBeUndefined();
+  });
+
+  it('同 id 重排（沿用进度）不告警、不计数', () => {
+    const previous = planWithProgress();
+    const raw = [
+      { id: 'diagnose', title: '诊断', description: '定位链路' },
+      { id: 'scale-research', title: '搜索比例依据', description: 'AU/直径比' },
+      { id: 'fix', title: '修复', description: '改 solarSystem.js' },
+    ];
+    const impact = evaluateTodoReplan(previous, raw);
+    expect(impact.isFullReset).toBe(false);
+    expect(impact.keptIds).toEqual(['diagnose', 'scale-research', 'fix']);
+    expect(impact.droppedCompleted).toHaveLength(0);
+    expect(describeTodoReplanImpact(impact)).toBeUndefined();
+    const rewritten = writeTodoList(previous, '', raw);
+    expect(rewritten.replanCount).toBeUndefined();
+    expect(rewritten.tasks.find((t) => t.id === 'diagnose')!.status).toBe('completed');
+  });
+
+  it('全新 id 的完全重排：报告丢弃的已完成进度并计数', () => {
+    const previous = planWithProgress();
+    const raw = [
+      { id: 'confirm-overexposure', title: '确认过曝', description: '截图复现' },
+      { id: 'analyze-source', title: '分析源图', description: '直方图' },
+    ];
+    const impact = evaluateTodoReplan(previous, raw);
+    expect(impact.isReplan).toBe(true);
+    expect(impact.isFullReset).toBe(true);
+    expect(impact.droppedCompleted.map((t) => t.id)).toEqual(['diagnose', 'scale-research']);
+    const warning = describeTodoReplanImpact(impact);
+    expect(warning).toContain('丢弃了 2 项已完成任务');
+    expect(warning).toContain('完全重排');
+    expect(warning).toContain('不要重建计划');
+    expect(writeTodoList(previous, '', raw).replanCount).toBe(1);
+  });
+
+  it('连续两次丢进度的重排会累加计数（供 eval 观察失控重排）', () => {
+    const first = writeTodoList(planWithProgress(), '', [
+      { id: 'x1', title: 'X1', description: 'x' },
+    ]);
+    expect(first.replanCount).toBe(1);
+    const second = writeTodoList(first, '', [{ id: 'x2', title: 'X2', description: 'x' }]);
+    expect(second.replanCount).toBe(2);
+    // 第三次仍保留计数（不因未丢进度而丢失历史）
+    const third = writeTodoList(second, '', [{ id: 'x2', title: 'X2', description: '改了描述' }]);
+    expect(third.replanCount).toBe(2);
+  });
+
+  it('工具 schema 明确 re-plan 纪律（压缩后不要重建清单）', () => {
+    const definition = buildTodoToolDefinition();
+    const text = JSON.stringify(definition);
+    expect(text).toContain('当前任务清单（权威状态）');
+    expect(text).toContain('不要');
+    expect(text).toContain('re-plan');
   });
 });

@@ -214,6 +214,60 @@ export function validateContextCheckpointStateV3(
 
 /* ── Pinned 状态校验（不变式 7：goal/constraints/todo/question 必须存活） ── */
 
+/**
+ * 归一化后的字符 bigram（中英混排都适用：中文没有空格，按词切分会把整句当成
+ * 一个 token，任何改写都会被判成「丢失」）。
+ */
+function similarityKey(item: string): string {
+  return item
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, '')
+    .trim();
+}
+
+function bigrams(key: string): Set<string> {
+  const set = new Set<string>();
+  if (key.length <= 1) {
+    if (key.length === 1) set.add(key);
+    return set;
+  }
+  for (let i = 0; i < key.length - 1; i++) {
+    set.add(key.slice(i, i + 2));
+  }
+  return set;
+}
+
+/**
+ * pinned 条目的语义包含判定：LLM 合并常常**改写**措辞而不丢信息，逐字相等会把
+ * 这类合法输出整份否掉、退回确定性摘要（实测 22/31 次压缩因此降级）。
+ * 顺序：精确匹配 → 一方包含另一方 → 字符 bigram 重叠度（Jaccard）达阈值。
+ */
+function isPinnedItemPreserved(
+  before: string,
+  afterKeys: readonly { raw: string; key: string; grams: Set<string> }[]
+): boolean {
+  const target = similarityKey(before);
+  if (!target) return true;
+  for (const candidate of afterKeys) {
+    if (!candidate.key) continue;
+    if (candidate.key === target) return true;
+    if (candidate.key.includes(target) || target.includes(candidate.key)) return true;
+    const a = bigrams(target);
+    const b = candidate.grams;
+    if (a.size === 0 || b.size === 0) continue;
+    let intersection = 0;
+    for (const gram of a) {
+      if (b.has(gram)) intersection++;
+    }
+    const jaccard = intersection / (a.size + b.size - intersection);
+    if (jaccard >= PINNED_ITEM_SIMILARITY_THRESHOLD) return true;
+  }
+  return false;
+}
+
+/** bigram 重叠阈值：改写但没丢信息通常 >0.5；换主题则 <0.15。 */
+export const PINNED_ITEM_SIMILARITY_THRESHOLD = 0.45;
+
 export function validatePinnedStatePreserved(
   priorState: ContextCheckpointStateV3 | null,
   nextState: ContextCheckpointStateV3
@@ -222,9 +276,12 @@ export function validatePinnedStatePreserved(
   const missing: string[] = [];
 
   const checkItems = (label: string, before: readonly string[], after: readonly string[]) => {
-    const afterSet = new Set(after.map((item) => item.toLowerCase()));
+    const afterIndex = after.map((item) => {
+      const key = similarityKey(item);
+      return { raw: item, key, grams: bigrams(key) };
+    });
     for (const item of before) {
-      if (!afterSet.has(item.toLowerCase())) {
+      if (!isPinnedItemPreserved(item, afterIndex)) {
         missing.push(`${label}: ${item}`);
       }
     }

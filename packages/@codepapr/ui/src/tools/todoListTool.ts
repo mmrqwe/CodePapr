@@ -16,6 +16,8 @@
 import {
   buildTodoToolDefinition,
   createEmptyTodoListContext,
+  describeTodoReplanImpact,
+  evaluateTodoReplan,
   parseTodoGoal,
   parseTodoUpdatePatches,
   renderTodoListDigest,
@@ -64,10 +66,16 @@ function scheduleTodoPersist(): void {
 interface ToolReturn {
   todoList: TodoListContext;
   digest: string;
+  /** E：tasks 全量覆盖丢掉旧进度时的告警（模型可见，下一轮即可纠正）。 */
+  replanWarning?: string;
 }
 
-function buildReturn(ctx: TodoListContext): ToolReturn {
-  return { todoList: ctx, digest: renderTodoListDigest(ctx) };
+function buildReturn(ctx: TodoListContext, replanWarning?: string): ToolReturn {
+  return {
+    todoList: ctx,
+    digest: renderTodoListDigest(ctx),
+    ...(replanWarning ? { replanWarning } : {}),
+  };
 }
 
 /**
@@ -105,8 +113,13 @@ export function registerTodoListTools(
       // ── 全量覆盖模式 ──
       const rawTasks = args.tasks as Array<Record<string, unknown>>;
       const previous = getTodoListContext(sessionId) ?? null;
+      // E：覆盖前先评估进度影响。压缩会毁掉模型可见的旧清单，模型于是「重新规
+      // 划」并把已完成的证据一起丢掉（实测一个回合内重建 11 次、永远收不了尾）。
+      // 不阻止重排（目标真变了就该重排），但把丢掉的东西如实回传，让下一轮有机会
+      // 用同一批 id 把计划接回去。
+      const replanWarning = describeTodoReplanImpact(evaluateTodoReplan(previous, rawTasks));
       const nextCtx = writeTodoList(previous, goal, rawTasks, maxRetries);
-      return buildReturn(commit(nextCtx));
+      return buildReturn(commit(nextCtx), replanWarning);
     }
 
     // ── 部分更新模式 ──
