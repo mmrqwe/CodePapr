@@ -2076,7 +2076,8 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
                     </button>
                   )}
                 </div>
-                {isActiveLoading ? (
+                {/* 执行中且输入框为空 → 取消；有草稿 → 换成发送（入队）。 */}
+                {isActiveLoading && !hasDraft ? (
                   <button
                     onClick={() => {
                       ttsStop();
@@ -2093,7 +2094,11 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
                   <button
                     onClick={() => { void handlePrimaryAction(); }}
                     disabled={!canSubmit}
-                    title={otherSessionRunning ? t.anotherSessionRunning : undefined}
+                    title={otherSessionRunning
+                      ? t.anotherSessionRunning
+                      : isActiveLoading
+                        ? t.queueSendTitle
+                        : undefined}
                     className={`p-1.5 rounded-lg transition-colors shadow-sm flex items-center justify-center
                       ${canSubmit
                         ? 'bg-slate-200 text-slate-900 hover:bg-white'

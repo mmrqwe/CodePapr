@@ -995,6 +995,55 @@ describe('ChatPanel', () => {
     expect(container.querySelector('[data-testid="queue-strip"]')).toBeNull();
   });
 
+  it('执行中：空草稿显示取消按钮，输入内容后换成发送按钮，点击入队', async () => {
+    const sendSpy = vi.fn(async () => true);
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ fastModelEnabled: false, apiKey: 'test-key' }),
+      isLoading: true,
+      loadingSessionId: 'session-1',
+      sessionMessagesLoading: false,
+      sendMessage: sendSpy,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    // 空草稿：只有取消按钮，无排队发送按钮。
+    const cancelText = (container.textContent ?? '').includes('取消');
+    expect(cancelText).toBe(true);
+    expect(container.querySelector('button[title="排队发送 · 当前回合结束后自动发送"]')).toBeNull();
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const setNativeValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    )!.set!;
+    await act(async () => {
+      setNativeValue.call(textarea, '执行中补充要求');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // 有草稿：取消按钮换成发送按钮。
+    const queueButton = container.querySelector<HTMLButtonElement>(
+      'button[title="排队发送 · 当前回合结束后自动发送"]',
+    );
+    expect(queueButton).not.toBeNull();
+    expect(container.textContent).not.toContain('取消');
+
+    await act(async () => {
+      queueButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(sendSpy).not.toHaveBeenCalled();
+    const list = useAgentStore.getState().queuedMessages['session-1'] ?? [];
+    expect(list.map((item) => item.taskText)).toEqual(['执行中补充要求']);
+    // 草稿清空后按钮换回取消。
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
+    expect(container.textContent).toContain('取消');
+  });
+
   it('shows sent file chips on user messages', async () => {
     useAgentStore.setState((state) => ({
       ...state,
