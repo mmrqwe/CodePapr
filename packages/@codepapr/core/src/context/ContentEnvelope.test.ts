@@ -4,6 +4,7 @@ import {
   planMemoryAdmission,
   planMemoryWrite,
   redactSecrets,
+  MEMORY_REPORTED_MAX_CHARS,
 } from './ContentEnvelope';
 
 describe('envelopeContent', () => {
@@ -279,6 +280,29 @@ describe('planMemoryWrite', () => {
       expect(decision.confidence).toBe('reported');
       expect(decision.projectToBootstrap).toBe(false);
     }
+  });
+
+  it('drops reported blobs over the atomic-fact cap (no more 80-line structure dumps)', () => {
+    const env = envelopeContent({
+      source: 'agent-proposed',
+      trust: 'derived',
+      origin: 'memory_write',
+      content: 'x'.repeat(MEMORY_REPORTED_MAX_CHARS + 1),
+    });
+    expect(planMemoryWrite({ envelope: env, kind: 'fact' })).toEqual({
+      action: 'drop',
+      reason: 'reported-too-long',
+    });
+  });
+
+  it('keeps long confirmed content (user note / tool output) under the global cap', () => {
+    const env = envelopeContent({
+      source: 'user',
+      trust: 'trusted',
+      origin: 'user-message',
+      content: 'y'.repeat(MEMORY_REPORTED_MAX_CHARS * 4),
+    });
+    expect(planMemoryWrite({ envelope: env, kind: 'user-note' }).action).toBe('persist');
   });
 
   it('stores procedure as recall-only', () => {

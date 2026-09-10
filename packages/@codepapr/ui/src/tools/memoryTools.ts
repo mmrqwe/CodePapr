@@ -13,7 +13,7 @@ import {
   asString,
   asOptionalString,
   envelopeContent,
-  MEMORY_CONTENT_MAX_CHARS,
+  MEMORY_REPORTED_MAX_CHARS,
   MEMORY_KINDS,
   type ContentSourceKind,
   type ContentTrust,
@@ -33,13 +33,17 @@ import {
   buildRecallInsertion,
   buildRecallQuery,
   renderRecallBlock,
+  selectDiverseRecallItems,
+  RETRIEVAL_STRATEGY,
+  RETRIEVAL_VERSION,
 } from '../utils/memoryRecall';
 
 const MEMORY_CATEGORIES = MEMORY_KINDS;
 
-/** 入队尺寸上限与准入门共用 core 常量（MEMORY_CONTENT_MAX_CHARS），
- *  避免「可入队但永不可准入」的契约断裂。 */
-const MEMORY_WRITE_MAX_CHARS = MEMORY_CONTENT_MAX_CHARS;
+/** 入队尺寸上限与准入门共用 core 常量：memory_write 的 envelope 恒为
+ *  agent-proposed/derived → reported，因此上限就是 reported 门槛，避免
+ *  「可入队但永不可准入」的契约断裂。 */
+const MEMORY_WRITE_MAX_CHARS = MEMORY_REPORTED_MAX_CHARS;
 
 /** 拦截路径归一化后与 .CodePapr/memory.md 比对。
  *  大小写不敏感：macOS 默认 APFS 大小写不敏感，`.codepapr/memory.md` 等
@@ -213,13 +217,15 @@ export function registerMemoryTools(
 
     let items: RecallSearchItem[];
     try {
-      items = await searchMemoryForRecall(workspacePath, { tokens, limit: 10 });
+      const found = await searchMemoryForRecall(workspacePath, { tokens, limit: 16 });
+      // 先按 category 过滤再做多样性选择：否则同类里最相似的几条会先占掉
+      // 槽位，用户点名的那一类反而一条不剩。
+      items = selectDiverseRecallItems(
+        category ? found.filter((item) => item.category === category) : found
+      );
     } catch (err) {
       console.warn('[memory-tools] memory_search 检索失败:', err instanceof Error ? err.message : err);
       items = [];
-    }
-    if (category && items.length > 0) {
-      items = items.filter((item) => item.category === category);
     }
 
     const rendered = renderSearchResults(query, items);
@@ -260,8 +266,8 @@ export function registerMemoryTools(
             renderedContent: renderedBlock,
             itemsJson: JSON.stringify(items.slice(0, 5)),
             estimatedTokens: estimateTokens(renderedBlock),
-            retrievalStrategy: 'like-token-v1',
-            retrievalVersion: 1,
+            retrievalStrategy: RETRIEVAL_STRATEGY,
+            retrievalVersion: RETRIEVAL_VERSION,
             createdAt: Date.now(),
           });
           let set = reRecallAuditIds.get(sessionId);

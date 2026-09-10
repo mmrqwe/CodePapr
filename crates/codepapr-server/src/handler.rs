@@ -387,6 +387,7 @@ pub async fn handle_request(ctx: &Arc<ServerContext>, method: &str, params: Valu
         "db/admitMemoryCandidate" => json_ok(codepapr_core::db::admit_memory_candidate(require_workspace(ctx, &params)?, require_string(&params, "candidateId")?, require_string(&params, "entryId")?)?),
         "db/rejectMemoryCandidate" => { codepapr_core::db::reject_memory_candidate(require_workspace(ctx, &params)?, require_string(&params, "candidateId")?, opt_string(&params, "reason"))?; Ok(json!({ "ok": true })) }
         "db/forgetMemoryEntry" => { codepapr_core::db::forget_memory_entry(require_workspace(ctx, &params)?, require_string(&params, "entryId")?, opt_string(&params, "reason"))?; Ok(json!({ "ok": true })) }
+        "db/collapseMemoryDuplicates" => json_ok(codepapr_core::db::collapse_memory_duplicates(require_workspace(ctx, &params)?)?),
         "db/reviveMemoryEntry" => { codepapr_core::db::revive_memory_entry(require_workspace(ctx, &params)?, require_string(&params, "entryId")?)?; Ok(json!({ "ok": true })) }
         "db/loadMemoryEntries" => json_ok(codepapr_core::db::load_memory_entries(require_workspace(ctx, &params)?, opt_bool(&params, "onlyActive"))?),
         "db/loadMemoryCandidates" => json_ok(codepapr_core::db::load_memory_candidates(require_workspace(ctx, &params)?, opt_string(&params, "status"))?),

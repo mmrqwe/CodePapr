@@ -2,7 +2,7 @@
 
 - 状态: Accepted
 - 日期: 2026-08-17
-- 关联: ADR-008（双区投影，已被 ADR-011 取代）、ADR-009（Recall）、[ADR-011](./ADR-011-retire-memory-md.md)（退役 memory.md）
+- 关联: ADR-008（双区投影，已被 ADR-011 取代）、ADR-009（Recall）、[ADR-011](./ADR-011-retire-memory-md.md)（退役 memory.md）、[ADR-014](./ADR-014-retire-cold-start-memory-bootstrap.md)（退役冷启动摘要）
 
 ## 背景
 
@@ -28,7 +28,7 @@ Claude Code MEMORY.md 都不一样：那些产品是系统自己记，人事后�
 | 用户说「记住」或强模态完整指令（必须/禁止/不得…） | preference / constraint | 是（confirmed） |
 | 用户在记忆面板手写笔记 | user-note | 是（账本渲染进 Bootstrap） |
 | 工作区实证（工具输出、测试/构建成功） | fact / convention / verification | 是（confirmed） |
-| 冷启动 LLM 摘要 | fact | 否——`[reported]`，只按需召回 |
+| ~~冷启动 LLM 摘要~~ | ~~fact~~ | **已退役**（ADR-014：生成器删除，存量收敛到 1 条） |
 | Agent 经 `memory_write` 自报 | fact / decision / … | 否——`[reported]`，只按需召回 |
 | 同一错误踩两次 / `category: procedure` | procedure | 否，只 Recall |
 | web / MCP / `https` evidence / `category: citation` | citation | 否，永远不当指令 |
@@ -38,9 +38,10 @@ Bootstrap 信任硬规则：**只有 confirmed（user / tool-output / 面板手�
 reported（Agent 自报、冷启动 LLM 生成）只进 Recall——模型臆测不得固化成
 「每次会话都看见的项目真理」。用户可事后遗忘。网页内容即使被误标为 fact，
 只要 origin/evidence 是 URL 或 source 是 web/MCP，运行时改写成 citation。
-准入前对同 category 做近义合并（bigram Jaccard / 编辑相似度），换说法重写
-同一事实不再堆叠占预算。遗忘条目的同 hash 再写默认拒绝（防自动复活），
-恢复唯一通道是记忆面板的显式「恢复」。
+准入前对同 category 做近义合并（短文本 bigram Jaccard ≥ 0.8，长文本 containment
+≥ 0.85），换说法重写同一事实不再堆叠占预算；`reported` 内容有 400 字上限，超长即
+blob，直接丢弃。遗忘条目的同 hash **或近义**再写默认拒绝（防自动复活），恢复唯一通道
+是记忆面板的显式「恢复」。详见 [ADR-014](./ADR-014-retire-cold-start-memory-bootstrap.md)。
 
 自动 Recall **跳过 citation**（ADR-009 第 9 条：不可信内容不自动召回）。`memory_search` 仍可检索引用。
 

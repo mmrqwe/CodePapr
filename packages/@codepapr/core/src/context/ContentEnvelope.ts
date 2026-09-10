@@ -197,6 +197,12 @@ export type MemoryWriteDecision =
 export const MEMORY_CONTENT_MAX_CHARS = 8_000;
 /** 记忆内容尺寸下限（字符）：过短内容无记忆价值。 */
 export const MEMORY_CONTENT_MIN_CHARS = 8;
+/**
+ * reported（LLM 自报、未经证实）内容的尺寸上限。冷启动 LLM 摘要这类大段
+ * blob 破坏原子性：无法近义合并、无法按条预算、召回时被整段挤占预算。
+ * confirmed（用户原话 / 工具输出 / 面板手写）不受此限。
+ */
+export const MEMORY_REPORTED_MAX_CHARS = 400;
 
 export function normalizeMemoryKind(raw: string | undefined): MemoryKind {
   const kind = (raw ?? 'general').trim().toLowerCase();
@@ -269,6 +275,10 @@ export function planMemoryWrite(input: {
   // M8：cold-start-bootstrap（LLM 生成）不再算 attested——幻觉不得以
   // [verified] 姿态冻结进前缀；以 reported 身份只进 Recall。
   const confidence = attested ? 'confirmed' : 'reported';
+  // reported 内容必须是原子事实：超长即 blob（清单/摘要），宁可不记。
+  if (confidence === 'reported' && trimmed.length > MEMORY_REPORTED_MAX_CHARS) {
+    return { action: 'drop', reason: 'reported-too-long' };
+  }
   return {
     action: 'persist',
     kind,

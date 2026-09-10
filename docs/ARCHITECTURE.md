@@ -1,7 +1,7 @@
 # CodePapr 系统设计文档
 
 > 本版本围绕**宿主 / 客户端拆分**重写，所有结论均对照 `c4597827c403e59d6ff0ae52f897a70f9feca685` 的树内代码核实。
-> 上下文分层、记忆、缓存分区、TodoList、子代理等 TypeScript 侧主题，见 `docs/adr/ADR-001` … `ADR-011`、`docs/web/context-architecture.html` 与 `docs/USAGE.md`。
+> 上下文分层、记忆、缓存分区、TodoList、子代理等 TypeScript 侧主题，见 `docs/adr/ADR-001` … `ADR-014`、`docs/web/context-architecture.html` 与 `docs/USAGE.md`。
 
 ## 1. 定位
 
@@ -361,7 +361,7 @@ manifest 可声明 `command` / `args` / `port`。`app_runtime_pt2.rs` 先探测�
 | 宿主 / 客户端拆分决策 | `docs/adr/ADR-012-host-client-split.md` |
 | App 双作用域决策 | `docs/adr/ADR-013-app-install-scope.md` |
 | 上下文分层 / Surface / 压缩事务 / 渲染参数冻结 / checkpoint v3 | `docs/adr/ADR-001` … `ADR-007`、`docs/web/context-architecture.html` |
-| 项目记忆（双区 → 零审核 → 账本唯一面） | `docs/adr/ADR-008` … `ADR-011` |
+| 项目记忆（双区 → 零审核 → 账本唯一面 → 摘要退役与重复收敛） | `docs/adr/ADR-008` … `ADR-011`、`ADR-014` |
 | 安装、验证、发布与排错 | `docs/SETUP.md` |
 | 日常使用与工具清单 | `docs/USAGE.md`、`docs/web/tool-inventory.html` |
 | 参数参考 | `packages/@codepapr/core/docs/CONFIGURATION.md` |

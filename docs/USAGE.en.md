@@ -298,7 +298,7 @@ Project memory is not “dumped into the model as one blob”. The ledger in SQL
 | Kind | Stored in | Request layer | When it reaches this session’s model | How it changes |
 |---|---|---|---|---|
 | Hand-written notes | Ledger; panel “every session” | Session Bootstrap (stable prefix) | Rendered from the ledger at session start; refreshed on a compaction epoch | A panel edit hits the ledger immediately; **the current prefix is not rebuilt** until the next session or compaction |
-| Preferences / constraints / project facts | Ledger; panel “every session” | Same, Bootstrap | Same: written to the ledger this turn, enters the prefix on the **next Bootstrap refresh** | You said remember / must / don't; workspace-grounded facts; successful tests; cold start; Agent `memory_write` → persist immediately, no admit click |
+| Preferences / constraints / project facts | Ledger; panel “every session” | Same, Bootstrap | Same: written to the ledger this turn, enters the prefix on the **next Bootstrap refresh** | You said remember / must / don't; workspace-grounded facts; successful tests; Agent `memory_write` → persist immediately, no admit click |
 | Procedures (`procedure`) | Ledger; panel “on-demand” | Turn-scoped Recall / `memory_search` | **Next user turn** after save, if retrieval hits | Same error twice, etc.; never in the every-session prefix |
 | Web / MCP citations (`citation`) | Ledger; panel “search only” | `memory_search` only | Only if the model searches | web / MCP / `https` evidence; **never Bootstrap; auto-Recall skips them** |
 | Current-task goal / todos | Session Checkpoint | Session State | After compaction, as the checkpoint | Evolves with the epoch; **not** cross-session project memory |
@@ -310,9 +310,9 @@ Project memory is not “dumped into the model as one blob”. The ledger in SQL
 
 **Load and cache**: At session start, the ledger is rendered into Session Bootstrap (`log[0]`, `isPrefixSystem`), frozen per (session × stable signature). The rendered section is outside the signature, so newly saved memories **do not bust the current prefix cache**. Compaction epochs refresh via `refreshBootstrap`; a new session always re-reads the ledger. Each user turn also runs Recall (citations excluded from automatic Recall).
 
-**Cold start**: If the ledger has no Bootstrap section and a ProjectGraph cache exists, a background job writes a structure / stack / build-command summary into the ledger. It does not block the current session; it enters Bootstrap on the next session or compaction.
+**No cold-start summary**: directory structure and tech-stack overviews are not memorized — they are re-derivable on demand (subagents read the ProjectGraph cache directly). Memory stores one fact per entry; `reported` (agent self-reported) content over 400 characters is dropped.
 
-**Dedup**: Same-hash active rows are superseded. There is no LLM pass over a standalone memory file.
+**Dedup**: Same-hash rows are superseded; same-category paraphrases merge (char-bigram Jaccard ≥ 0.8 for short text, containment ≥ 0.85 with a length-ratio floor for long text); `cold-start-*` derived entries keep only the newest active row. Projects opened before this release collapse their legacy duplicates once, on first open. The panel also has “Clean duplicates” and multi-select forget. Recall applies the same paraphrase filter plus a 3-per-category cap.
 
 ## Code Intelligence (lsp / list)
 

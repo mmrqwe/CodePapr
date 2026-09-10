@@ -955,6 +955,14 @@ export async function reviveMemoryEntry(
   });
 }
 
+/** 面板「清理重复」：同源 + 近义收敛，返回被 supersede 的条数。 */
+export async function collapseMemoryDuplicates(workspacePath: string): Promise<number> {
+  const result = await invoke<{ collapsed?: number } | number>('collapse_memory_duplicates', {
+    workspacePath: workspacePath.trim(),
+  });
+  return typeof result === 'number' ? result : (result.collapsed ?? 0);
+}
+
 export interface PersistedMemoryEntry {
   id: string;
   category: string;

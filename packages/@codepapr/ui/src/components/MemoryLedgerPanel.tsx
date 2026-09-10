@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { envelopeContent, memoryEntryProjectsToBootstrap } from '@codepapr/core';
 import { getTranslation, type Lang } from '../utils/i18n';
 import {
+  collapseMemoryDuplicates,
   forgetMemoryEntry,
   ingestLegacyMemoryMd,
   loadMemoryEntries,
@@ -44,6 +45,10 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
   const [error, setError] = useState<string | null>(null);
   const [showForgotten, setShowForgotten] = useState(false);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState<string | null>(null);
+  const [collapsing, setCollapsing] = useState(false);
   const [draft, setDraft] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
@@ -79,6 +84,52 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
         next.delete(id);
         return next;
       });
+    }
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const bulkForget = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setError(null);
+    setNotice(null);
+    try {
+      for (const id of ids) {
+        await forgetMemoryEntry(workspacePath, id, 'panel:bulk-forget');
+      }
+      setNotice(t.memoryLedgerBulkForgetDone.replace('{{count}}', String(ids.length)));
+      setSelected(new Set());
+      setSelectMode(false);
+      setEntries(await loadMemoryEntries(workspacePath, false));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const collapseDupes = async () => {
+    setCollapsing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const collapsed = await collapseMemoryDuplicates(workspacePath);
+      setNotice(
+        collapsed > 0
+          ? t.memoryLedgerCollapseDupesDone.replace('{{count}}', String(collapsed))
+          : t.memoryLedgerCollapseDupesNone
+      );
+      setEntries(await loadMemoryEntries(workspacePath, false));
+    } catch (err) {
+      setError(`${t.memoryLedgerCollapseDupesFailed}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCollapsing(false);
     }
   };
 
@@ -146,6 +197,15 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
     return (
       <div key={entry.id} className="rounded-lg border border-line bg-raised px-3 py-2">
         <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+          {selectMode && entry.status === 'active' ? (
+            <input
+              type="checkbox"
+              checked={selected.has(entry.id)}
+              onChange={() => toggleSelected(entry.id)}
+              className="accent-accent"
+              aria-label={t.memoryLedgerSelect}
+            />
+          ) : null}
           <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${badge.cls}`}>
             {badge.label}
           </span>
@@ -279,6 +339,38 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
         >
           ↻
         </button>
+        <button
+          type="button"
+          disabled={collapsing}
+          onClick={() => void collapseDupes()}
+          className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-soft hover:text-fg disabled:opacity-40"
+        >
+          {t.memoryLedgerCollapseDupes}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setSelectMode((prev) => !prev);
+            setSelected(new Set());
+          }}
+          className={`rounded-md border px-2 py-1 text-[10px] font-medium transition-colors ${
+            selectMode
+              ? 'border-accent-soft text-accent-text'
+              : 'border-line text-fg-muted hover:border-accent-soft hover:text-fg'
+          }`}
+        >
+          {t.memoryLedgerSelect}
+        </button>
+        {selectMode ? (
+          <button
+            type="button"
+            disabled={selected.size === 0}
+            onClick={() => void bulkForget()}
+            className="rounded-md border border-line px-2 py-1 text-[10px] font-medium text-fg-dim transition-colors hover:border-slate-500 hover:text-fg-soft disabled:opacity-40"
+          >
+            {t.memoryLedgerBulkForget} ({selected.size})
+          </button>
+        ) : null}
         <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-[11px] text-fg-muted">
           <input
             type="checkbox"
@@ -289,6 +381,8 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
           {t.memoryLedgerShowForgotten}
         </label>
       </div>
+
+      {notice ? <p className="text-xs text-fg-muted">{notice}</p> : null}
 
       <section className="space-y-2 rounded-lg border border-line bg-raised px-3 py-2">
         <h3 className="text-xs font-semibold text-fg-soft">{t.memoryLedgerAddNote}</h3>

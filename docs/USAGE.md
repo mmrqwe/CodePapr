@@ -337,7 +337,7 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 | 种类 | 存在哪 | 进哪一层 | 何时进当前会话的模型 | 怎么变 |
 |---|---|---|---|---|
 | 用户手写笔记 | 账本；面板「每次会话」 | Session Bootstrap（稳定前缀） | 会话启动从账本渲染；压缩 epoch 会刷新 | 你在面板增改立刻落库；**当前会话前缀不重建**，下次会话或压缩后才带上 |
-| 偏好 / 约束 / 项目事实 | 账本；面板「每次会话」 | 同上，Bootstrap | 同上：本回合写入账本，**下一次 Bootstrap 刷新**才进前缀 | 你说「记住 / 必须 / 不要」、工作区实证、测试成功、冷启动、Agent `memory_write` → 立刻 persist，无需点同意 |
+| 偏好 / 约束 / 项目事实 | 账本；面板「每次会话」 | 同上，Bootstrap | 同上：本回合写入账本，**下一次 Bootstrap 刷新**才进前缀 | 你说「记住 / 必须 / 不要」、工作区实证、测试成功、Agent `memory_write` → 立刻 persist，无需点同意 |
 | 踩坑经验 (`procedure`) | 账本；面板「按需召回」 | Turn-scoped Recall / `memory_search` | 写入后的**下一用户回合**，若检索命中 | 同一错误踩两次等；不进每次会话的前缀 |
 | 网页 / MCP 引用 (`citation`) | 账本；面板「仅搜索」 | 仅 `memory_search` | 模型主动搜索才会看到 | web / MCP / `https` 证据；**永不进 Bootstrap，自动 Recall 也跳过** |
 | 当前任务目标 / 待办 | Session Checkpoint | Session State | 压缩后作为检查点 | 随压缩 epoch 变；**不是**跨会话项目记忆 |
@@ -349,9 +349,9 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 
 **加载与缓存**：会话启动时从账本渲染 Bootstrap 段注入 Session Bootstrap（`log[0]`，`isPrefixSystem`），按「会话 × 稳定签名」冻结。渲染结果排除在签名外，新记住的内容**不拆当前前缀缓存**；`memory_forget` 同理——当前会话的 Bootstrap 不回滚重渲染（工具返回会注明「下次会话前缀不再包含」），遗忘在下一次压缩 epoch 刷新或新会话生效。这是刻意契约：换取前缀缓存稳定，面板与账本始终是权威事实源。压缩 epoch 随 `refreshBootstrap` 刷新；新会话总是重读账本。每用户回合另做一次 Recall（citation 不进入自动 Recall）。
 
-**冷启动**：若账本没有 Bootstrap 段且 ProjectGraph 可用，后台生成项目结构 / 技术栈 / 构建命令摘要写入账本；不阻塞当前会话，下次会话或压缩后进入 Bootstrap。
+**没有冷启动摘要**：项目结构 / 技术栈这类可即时探测的信息不进账本（子代理需要时用 ProjectGraph 现取）。记忆只记「一条一个事实」；`reported`（Agent 自报）超过 400 字直接丢弃。
 
-**去重**：同内容哈希的旧条被 supersede。不再对独立记忆文件做 LLM 整理。
+**去重**：同内容哈希的旧条被 supersede；同 category 的近义改述合并（短文本 bigram Jaccard ≥ 0.8，长文本 containment ≥ 0.85 且长度比 ≥ 0.6）；`cold-start-*` 这类同源派生条目只保留最新一条。老项目首次打开时自动收敛历史重复（一次收敛，不反复改写）。面板另有「清理重复」与多选批量遗忘。召回侧再兜一层：与已选条目近义的候选、以及超过 3 条的同一 category 都会被过滤掉。
 
 ## 代码智能（lsp / list）
 

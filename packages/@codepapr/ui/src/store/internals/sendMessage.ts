@@ -44,7 +44,6 @@ import {
   formatVisionOffloadBlock,
 } from '../../utils/visionOffload';
 import { resolveVisionInputAction, modelSupportsVision } from '../../utils/visionRouting';
-import { bootstrapMemoryContent } from '../../utils/memoryConsolidation';
 import {
   accumulateCacheStats,
   buildExecutionContextSummary,
@@ -89,6 +88,7 @@ import {
   filterAutoRecallItems,
   renderRecallBlock,
   resolveRecallBudget,
+  selectDiverseRecallItems,
   RETRIEVAL_STRATEGY,
   RETRIEVAL_VERSION,
 } from '../../utils/memoryRecall';
@@ -100,10 +100,7 @@ import {
   saveMemoryRecall,
   searchMemoryForRecall,
 } from '../../utils/projectStorage';
-import {
-  drainReRecallAuditIds,
-  proposeMemoryCandidateFromWrite,
-} from '../../tools/memoryTools';
+import { drainReRecallAuditIds } from '../../tools/memoryTools';
 import type { RequestContextInsertion } from '@codepapr/types';
 import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
 import { runVerifierSubagent } from '../../utils/verifierRunner';
@@ -184,15 +181,11 @@ function formatRetryCounter(attempt: number, maxRetries?: number): string {
   return maxRetries === undefined ? `${attempt}` : `${attempt}/${maxRetries}`;
 }
 
-// Guards cold-start ledger bootstrap so concurrent sendMessage calls
-// don't trigger duplicate generation. Module-level on purpose: the guard
-// spans the whole session, not a single store snapshot.
-let memoryBootstrapInFlight = false;
 // N22：/compact 在飞标记——压缩是 LLM 调用（可达数十秒），重复触发会并行
 // 生成双检查点。第二次触发只提示进行中，不发起新压缩。
 let compactCheckpointInFlight = false;
 // 单执行守卫：sendMessage 在置 isLoading=true 之前有多个前置 await（消息重载、
-// project-graph 缓存、memory bootstrap、MCP 发现等，可达数十秒）。该窗口内
+// project-graph 缓存、MCP 发现等，可达数十秒）。该窗口内
 // isLoading 仍是 false，第二次调用（用户重复点击、后台自动修复）会通过
 // isLoading 检查并行启动第二个回合：会话日志交错污染、cancel 只能路由到最后
 // 一个请求、bash/git 副作用重复执行。JS 单线程下「检查 + 占位」在同一同步块
@@ -239,7 +232,6 @@ function currentTodoDigest(sessionId: string | null): string | undefined {
 
 /** 切工作区：放下在飞守卫。旧回合的 finally 也会再清一次，幂等。 */
 export function resetSendMessageWorkspaceGuards(): void {
-  memoryBootstrapInFlight = false;
   compactCheckpointInFlight = false;
 }
 
@@ -1200,7 +1192,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
 
           const rulesSection = get()._projectRulesSection;
           const skillDefinitions = get()._skillDefinitions;
-          let projectGraphBootstrapSummary: string | undefined;
+          let subagentProjectGraphSummary: string | undefined;
           try {
             const cachedRaw = await invoke<string | null>(
               'load_projectgraph_cache',
@@ -1210,7 +1202,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (cachedRaw) {
               const cacheData = JSON.parse(cachedRaw);
               if (cacheData?.projectGraph) {
-                projectGraphBootstrapSummary = buildProjectGraphBootstrapSummary(
+                subagentProjectGraphSummary = buildProjectGraphBootstrapSummary(
                   cacheData.projectGraph,
                   undefined,
                   undefined,
@@ -1226,45 +1218,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             ? await loadMemoryBootstrapSection(workspacePath)
             : undefined;
           ensureNotStopped();
-          // Cold-start: ledger 里还没有 Bootstrap 记忆，且有项目图摘要时，
-          // 后台生成初始事实。不阻塞当前会话。M2/M8：LLM 生成内容以 reported
-          // 入账，不进前缀，只按需召回（防止幻觉固化成「项目真理」）。
-          if (!memorySection && projectGraphBootstrapSummary && !memoryBootstrapInFlight) {
-            memoryBootstrapInFlight = true;
-            const bootstrapInput = {
-              projectGraphSummary: projectGraphBootstrapSummary,
-              rulesSection,
-              firstUserMessage: effectiveInput,
-            };
-            // 必须捕获已声明的 turnSessionId：IIFE 在 `let activeSessionId`
-            // （更下方）之前启动，回合若在声明前中止，闭包读 activeSessionId
-            // 会触发 TDZ ReferenceError，被下方 catch 静默吞掉后 bootstrap 丢失。
-            const bootstrapSessionId = turnSessionId;
-            void (async () => {
-              try {
-                const generated = await bootstrapMemoryContent(bootstrapInput, normalizedSettings);
-                if (!generated) return;
-                const already = await loadMemoryBootstrapSection(workspacePath);
-                if (already) return;
-                const persist = await proposeMemoryCandidateFromWrite({
-                  workspacePath,
-                  sessionId: bootstrapSessionId ?? undefined,
-                  content: generated,
-                  origin: 'cold-start-bootstrap',
-                  source: 'cold-start-bootstrap',
-                  trust: 'derived',
-                  category: 'fact',
-                });
-                if (persist.status === 'dropped') {
-                  console.warn('[memory] bootstrap dropped:', persist.note);
-                }
-              } catch {
-                // Silent fail - don't disrupt the session
-              } finally {
-                memoryBootstrapInFlight = false;
-              }
-            })();
-          }
           let mcpToolDefinitions: IToolDefinition[] = [];
           let mcpToolMappings: Array<{ serverId: string; toolName: string; displayName: string }> = [];
           if (normalizedSettings.mcp.enabled && normalizedSettings.mcp.exposeTools) {
@@ -1364,7 +1317,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             mcpToolMappings,
             rulesSection,
             memorySection,
-            projectGraphSummary: projectGraphBootstrapSummary,
+            projectGraphSummary: subagentProjectGraphSummary,
             customPrompt: normalizedSettings.systemPrompt,
             lang: normalizedSettings.lang,
             mode,
@@ -1777,11 +1730,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   `[recall] 软预算紧张（剩余 ${Math.max(0, softBudgetTokens - currentContextTokens)} token），跳过本轮 Recall`
                 );
               } else {
-                const items = filterAutoRecallItems(
-                  await searchMemoryForRecall(workspacePath, {
-                    tokens: queryTokens,
-                    limit: 8,
-                  })
+                // 多取一些候选再选多样性：同源改述被过滤后不至于凑不满槽位。
+                const items = selectDiverseRecallItems(
+                  filterAutoRecallItems(
+                    await searchMemoryForRecall(workspacePath, {
+                      tokens: queryTokens,
+                      limit: 16,
+                    })
+                  )
                 );
                 if (items.length > 0) {
                   const block = renderRecallBlock(items, {

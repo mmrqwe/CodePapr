@@ -60,6 +60,8 @@ memory.md 目前有四个写路径：
 
 ### 记忆工具（PR4 / ADR-010）
 
+`reported` 内容有 400 字上限（ADR-014）：一次一条事实，清单/摘要类 blob 不记。
+
 ```text
 memory_write(content, category, evidence?)   → 立刻 persist 或 drop，不排队
 memory_search(query, category?)

@@ -291,6 +291,11 @@ pub async fn revive_memory_entry(app: AppHandle, workspace_path: String, entry_i
 }
 
 #[tauri::command]
+pub async fn collapse_memory_duplicates(app: AppHandle, workspace_path: String) -> Result<Value, String> {
+    rpc(&app, "db/collapseMemoryDuplicates", json!({ "workspacePath": workspace_path })).await
+}
+
+#[tauri::command]
 pub async fn load_memory_entries(app: AppHandle, workspace_path: String, only_active: Option<bool>) -> Result<Value, String> {
     rpc(&app, "db/loadMemoryEntries", json!({ "workspacePath": workspace_path, "onlyActive": only_active })).await
 }

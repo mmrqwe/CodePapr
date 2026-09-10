@@ -16,8 +16,9 @@ export const MAX_RECALL_TOKENS = 1_200;
 /** ADR-009 第10条：单条 recall item ≤ 350 token（字节口径，非字符数）。 */
 export const MAX_RECALL_ITEM_TOKENS = 350;
 export const AUTO_RECALL_EXCLUDED_CATEGORIES = new Set(['citation']);
-export const RETRIEVAL_STRATEGY = 'like-token-v1';
-export const RETRIEVAL_VERSION = 1;
+/** v2：候选量提到 16 并做多样性过滤（v1 会让同一份 blob 的改述占满槽位）。 */
+export const RETRIEVAL_STRATEGY = 'like-token-diverse-v2';
+export const RETRIEVAL_VERSION = 2;
 
 /** M6：自动 Recall 排除 citation——按显式 category 字段，不再依赖 title 约定。 */
 export function filterAutoRecallItems<T extends { category?: string }>(
@@ -28,6 +29,13 @@ export function filterAutoRecallItems<T extends { category?: string }>(
 
 /** Recall 预算下限：低于该值不值得注入，直接跳过本轮 Recall。 */
 export const MIN_RECALL_BUDGET_TOKENS = 200;
+
+/** 已选条目与候选的字符 bigram containment ≥ 该值 = 同一事实的另一个说法
+ *  （或嵌套：一条 checkpoint 摘要把另一条整段包进去），不再占预算。 */
+export const RECALL_DUP_CONTAINMENT = 0.85;
+/** 单轮 Recall 内同一 category 最多占几条：同源 blob 未被合并时也不至于是
+ *  独占一整块的 5 条。 */
+export const RECALL_MAX_PER_CATEGORY = 3;
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'is', 'are', 'was', 'were', 'of', 'to', 'in', 'on', 'for', 'and', 'or',
@@ -111,6 +119,59 @@ export interface RecallDisplayItem {
   content: string;
   confidence: string;
   trust: string;
+}
+
+/** 与 Rust `char_bigram_set` 同口径：只留字母数字（含 CJK），小写，取相邻
+ *  字符对。用于 Recall 侧的多样性过滤。 */
+function charBigrams(text: string): Set<string> {
+  const folded = text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const set = new Set<string>();
+  for (let i = 0; i + 1 < folded.length; i += 1) {
+    set.add(folded.slice(i, i + 2));
+  }
+  return set;
+}
+
+/** 交集 / 较小集合：A 基本被 B 包住时接近 1（改述与「摘要套摘要」都算）。 */
+function bigramContainment(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  for (const gram of small) {
+    if (large.has(gram)) inter += 1;
+  }
+  return inter / small.size;
+}
+
+/**
+ * Recall 多样性选择（保持传入的分数序）：跳过与已选条目近义的候选，并给
+ * 单一 category 设上限。否则同一份项目摘要的 N 个改述会把 5 个槽位全占掉，
+ * 真实有用的 constraint / decision 永远挤不进来。
+ */
+export function selectDiverseRecallItems<
+  T extends { content: string; category?: string }
+>(items: readonly T[]): T[] {
+  const selected: T[] = [];
+  const selectedGrams: Set<string>[] = [];
+  const perCategory = new Map<string, number>();
+  for (const item of items) {
+    const grams = charBigrams(item.content);
+    if (grams.size === 0) {
+      selected.push(item);
+      selectedGrams.push(grams);
+      continue;
+    }
+    const duplicate = selectedGrams.some((existing) =>
+      existing.size === 0 ? false : bigramContainment(grams, existing) >= RECALL_DUP_CONTAINMENT
+    );
+    if (duplicate) continue;
+    const category = item.category ?? '';
+    if ((perCategory.get(category) ?? 0) >= RECALL_MAX_PER_CATEGORY) continue;
+    perCategory.set(category, (perCategory.get(category) ?? 0) + 1);
+    selected.push(item);
+    selectedGrams.push(grams);
+  }
+  return selected;
 }
 
 /**

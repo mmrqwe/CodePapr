@@ -9,11 +9,13 @@ const {
   forgetMemoryEntryMock,
   reviveMemoryEntryMock,
   ingestLegacyMemoryMdMock,
+  collapseMemoryDuplicatesMock,
 } = vi.hoisted(() => ({
   loadMemoryEntriesMock: vi.fn(async (): Promise<unknown[]> => []),
   forgetMemoryEntryMock: vi.fn(async (): Promise<void> => undefined),
   reviveMemoryEntryMock: vi.fn(async (): Promise<void> => undefined),
   ingestLegacyMemoryMdMock: vi.fn(async () => ({ ingested: 0, deletedFile: false })),
+  collapseMemoryDuplicatesMock: vi.fn(async (): Promise<number> => 0),
 }));
 
 vi.mock('../utils/projectStorage', () => ({
@@ -22,6 +24,7 @@ vi.mock('../utils/projectStorage', () => ({
   reviveMemoryEntry: reviveMemoryEntryMock,
   ingestLegacyMemoryMd: ingestLegacyMemoryMdMock,
   updateMemoryEntryContent: vi.fn(async (): Promise<void> => undefined),
+  collapseMemoryDuplicates: collapseMemoryDuplicatesMock,
 }));
 
 vi.mock('../utils/memoryPersist', () => ({
@@ -60,6 +63,8 @@ describe('MemoryLedgerPanel', () => {
     forgetMemoryEntryMock.mockReset();
     reviveMemoryEntryMock.mockReset();
     ingestLegacyMemoryMdMock.mockReset();
+    collapseMemoryDuplicatesMock.mockReset();
+    collapseMemoryDuplicatesMock.mockResolvedValue(0);
     loadMemoryEntriesMock.mockResolvedValue([]);
     forgetMemoryEntryMock.mockResolvedValue(undefined);
     reviveMemoryEntryMock.mockResolvedValue(undefined);
@@ -232,4 +237,94 @@ describe('MemoryLedgerPanel', () => {
 
     expect(forgetMemoryEntryMock).toHaveBeenCalledWith('/tmp/ws', 'e1');
   });
+
+  it('cleans duplicate memories through the collapse RPC', async () => {
+    loadMemoryEntriesMock.mockResolvedValue([
+      {
+        id: 'cs-1',
+        category: 'fact',
+        content: '项目初始化记忆 v2',
+        contentHash: 'h1',
+        confidence: 'reported',
+        trust: 'derived',
+        status: 'active',
+        sourceSessionId: null,
+        sourceMessageIds: null,
+        evidence: '{"origin":"cold-start-bootstrap"}',
+        createdAt: 1,
+        verifiedAt: 1,
+        supersededBy: null,
+      },
+    ]);
+    collapseMemoryDuplicatesMock.mockResolvedValue(20);
+
+    await act(async () => {
+      root.render(<MemoryLedgerPanel workspacePath="/tmp/ws" lang="zh-CN" />);
+    });
+    await flush();
+    clickButton(container, '清理重复');
+    await flush();
+
+    expect(collapseMemoryDuplicatesMock).toHaveBeenCalledWith('/tmp/ws');
+    expect(container.textContent ?? '').toContain('已折叠 20 条重复记忆');
+  });
+
+  it('forgets several entries at once in select mode', async () => {
+    loadMemoryEntriesMock.mockResolvedValue([
+      {
+        id: 'a1',
+        category: 'fact',
+        content: '事实一',
+        contentHash: 'ha1',
+        confidence: 'reported',
+        trust: 'derived',
+        status: 'active',
+        sourceSessionId: null,
+        sourceMessageIds: null,
+        evidence: null,
+        createdAt: 1,
+        verifiedAt: 1,
+        supersededBy: null,
+      },
+      {
+        id: 'a2',
+        category: 'fact',
+        content: '事实二',
+        contentHash: 'ha2',
+        confidence: 'reported',
+        trust: 'derived',
+        status: 'active',
+        sourceSessionId: null,
+        sourceMessageIds: null,
+        evidence: null,
+        createdAt: 2,
+        verifiedAt: 2,
+        supersededBy: null,
+      },
+    ]);
+
+    await act(async () => {
+      root.render(<MemoryLedgerPanel workspacePath="/tmp/ws" lang="zh-CN" />);
+    });
+    await flush();
+    clickButton(container, '多选');
+    await flush();
+
+    const boxes = [...container.querySelectorAll('input[type="checkbox"]')].filter(
+      (box) => box.getAttribute('aria-label') === '多选'
+    );
+    expect(boxes).toHaveLength(2);
+    await act(async () => {
+      for (const box of boxes) {
+        box.click();
+      }
+    });
+    await flush();
+    clickButton(container, '遗忘所选 (2)');
+    await flush();
+
+    expect(forgetMemoryEntryMock).toHaveBeenCalledTimes(2);
+    expect((container.textContent ?? '')).toContain('已遗忘 2 条');
+  });
+
 });

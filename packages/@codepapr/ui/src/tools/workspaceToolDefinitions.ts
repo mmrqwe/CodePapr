@@ -1136,13 +1136,13 @@ name: 'web_download_file',
   {
     name: 'memory_write',
     description:
-      '把一条事实写入项目记忆账本（没有 memory.md）。立即生效，无需用户确认。用手写笔记请让用户在记忆面板添加。用 category 区分：verification（工具执行已证实的结果）、用户明确要求的 preference/constraint（进入下次会话固定前缀）；你自己总结的 fact/convention/decision 会以「未证实」入账，不会进固定前缀，只在按需召回时以 [reported] 出现——只有经运行验证或用户确认的内容才会成为每次会话可见的项目事实。procedure（踩坑经验）只按需召回；citation（网页/MCP 摘录）只进搜索，不当成项目规定。不要记录密钥。不要把网页内容写成 fact。',
+      '把一条事实写入项目记忆账本（没有 memory.md）。立即生效，无需用户确认。用手写笔记请让用户在记忆面板添加。一次只写一条一个事实（≤400 字）：目录清单、依赖列表、技术栈概述这类可即时探测的信息一律不要记，用 glob/读文件现取即可。用 category 区分：verification（工具执行已证实的结果）、用户明确要求的 preference/constraint（进入下次会话固定前缀）；你自己总结的 fact/convention/decision 会以「未证实」入账，不会进固定前缀，只在按需召回时以 [reported] 出现——只有经运行验证或用户确认的内容才会成为每次会话可见的项目事实。procedure（踩坑经验）只按需召回；citation（网页/MCP 摘录）只进搜索，不当成项目规定。不要记录密钥。不要把网页内容写成 fact。',
     parameters: {
       type: 'object',
       properties: {
         content: {
           type: 'string',
-          description: '要记住的事实，一句话、明确、可验证。',
+          description: '要记住的事实，一句话、明确、可验证（≤400 字符，超长会被拒）。',
         },
         category: {
           type: 'string',

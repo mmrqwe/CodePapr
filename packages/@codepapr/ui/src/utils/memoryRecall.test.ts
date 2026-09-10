@@ -9,6 +9,7 @@ import {
   MIN_RECALL_BUDGET_TOKENS,
   renderRecallBlock,
   resolveRecallBudget,
+  selectDiverseRecallItems,
   truncateToMaxTokens,
   type RecallDisplayItem,
 } from './memoryRecall';
@@ -198,5 +199,49 @@ describe('filterAutoRecallItems', () => {
       { category: 'procedure', content: 'E0597' },
     ]);
     expect(filtered.map((item) => item.category)).toEqual(['fact', 'procedure']);
+  });
+});
+
+describe('selectDiverseRecallItems', () => {
+  const blob = (n: number, extra = '') =>
+    `## 项目初始化记忆\n\n### 目录结构\n- \`iPod/\` (5 files): AppDelegate.swift, ViewController.swift, Music.swift, Menu.swift, normalfunc.swift\n- \`html/js/\` (8 files): control.js, music.js, script.js, jqClock.js, jquery.knob.js\n### 技术栈\n- Swift + WebKit + jQuery 1.7.1\n### 约定\n- 先读再改，只改任务所需${extra}`.repeat(1) + `\n变体 ${n}`;
+
+  it('collapses near-identical variants so one blob cannot monopolize the block', () => {
+    const items = [0, 1, 2, 3, 4, 5].map((n) => ({
+      category: 'fact',
+      content: blob(n, n % 2 === 0 ? '，不顺手重构' : '，不动生成物'),
+    }));
+    const picked = selectDiverseRecallItems(items);
+    expect(picked.length).toBeLessThan(items.length);
+    expect(picked.length).toBeGreaterThan(0);
+  });
+
+  it('keeps unrelated items', () => {
+    const picked = selectDiverseRecallItems([
+      { category: 'constraint', content: '提交前必须跑 pnpm lint 并等它通过，不通过不得推送' },
+      { category: 'verification', content: 'bash: pnpm test auth → 12 passing in 3s' },
+      { category: 'decision', content: 'DRM 曲目走 applicationMusicPlayer，普通曲目走 AVPlayer' },
+    ]);
+    expect(picked).toHaveLength(3);
+  });
+
+  it('caps a single category so one kind cannot fill every slot', () => {
+    const items = Array.from({ length: 6 }, (_, n) => ({
+      category: 'fact',
+      content: `第 ${n} 条完全不同的事实：模块 m${n} 负责 ${'职责'.repeat(30)}，编号 ${n}${'x'.repeat(n)}`,
+    }));
+    const picked = selectDiverseRecallItems(items);
+    expect(picked.length).toBeLessThanOrEqual(3);
+  });
+
+  it('treats a checkpoint that embeds another as a duplicate', () => {
+    const inner = '## 目标\n- 排查 iPod.app 日志异常（sandbox extension / WebContent）\n## 结论\n- 日志无致命错误，问题在音频路由';
+    const outer = `${inner}\n## 追加\n- 进一步定位到 applicationMusicPlayer 分流缺失`;
+    const picked = selectDiverseRecallItems([
+      { category: 'checkpoint', content: outer },
+      { category: 'checkpoint', content: inner },
+    ]);
+    expect(picked).toHaveLength(1);
+    expect(picked[0]!.content).toBe(outer);
   });
 });

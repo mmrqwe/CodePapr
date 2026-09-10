@@ -71,7 +71,7 @@ const EXTERNAL_ACCESS_POLICY_KEY: &str = "fs.externalAccessPolicy";
 const PROJECT_STORAGE_DIR: &str = ".CodePapr";
 const PROJECT_DB_FILE: &str = "project.sqlite";
 /// 当前 project.sqlite schema 版本。已达此版本的连接跳过全量 DDL 批。
-const PROJECT_SCHEMA_VERSION: i64 = 7;
+const PROJECT_SCHEMA_VERSION: i64 = 8;
 /// 每个 project.sqlite 路径在本进程只跑一次 ADR-005 启动防御清理。
 static STARTUP_DEFENSE_DONE: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 const PAPR_APP_DB_FILE: &str = "db.sqlite";
@@ -577,7 +577,137 @@ fn migrate_project_db(conn: &Connection, workspace: &Path) -> Result<(), String>
             .map_err(|err| format!("设置数据库版本失败: {err}"))?;
     }
 
+    if version < 8 {
+        // v8: 收敛历史上重复入账的派生记忆（同源多份冷启动摘要 / 同事实改述）。
+        migrate_project_db_v8(conn)?;
+        conn.pragma_update(None, "user_version", 8_i64)
+            .map_err(|err| format!("设置数据库版本失败: {err}"))?;
+    }
+
     Ok(())
+}
+
+/// 同源单例的 origin：机器周期性重出的整份产物（冷启动 LLM 摘要）。同一
+/// origin 只允许一条 active——这类内容不是「一条一个事实」，近义合并按
+/// 集合相似度打不到它（实测 21 条变体两两 Jaccard 最高 0.783 < 0.8）。
+fn origin_collapses_same_source(origin: &str) -> bool {
+    origin.starts_with("cold-start-")
+}
+
+/// v8 一次性收敛：同源多份 → 只留最新；剩余派生条目再做近义折叠。
+/// 只碰 `trust='derived'`（Agent/LLM 自报），用户手写与工具验证结果不动。
+fn migrate_project_db_v8(conn: &Connection) -> Result<(), String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("开启记忆收敛事务失败: {err}"))?;
+    let same_origin = collapse_same_origin_entries(&tx)?;
+    let near_dup = collapse_near_duplicate_entries(&tx)?;
+    let total = same_origin + near_dup;
+    if total > 0 {
+        let now = unix_millis()?;
+        tx.execute(
+            "INSERT INTO project_meta (key, value, updated_at)
+             VALUES ('memory_dupes_collapsed', ?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            params![total.to_string(), now],
+        )
+        .map_err(|err| format!("写入记忆收敛标记失败: {err}"))?;
+    }
+    tx.commit()
+        .map_err(|err| format!("提交记忆收敛失败: {err}"))?;
+    Ok(())
+}
+
+/// 一条 active 派生记忆：`(id, category, content, evidence)`。
+type DerivedActiveEntry = (String, String, String, Option<String>);
+
+/// active 派生条目（新→旧）。`trust='derived'` 只覆盖冷启动摘要与 Agent
+/// 自报事实；user-note / tool-output（workspace）永不被自动收敛。
+fn load_derived_active(tx: &rusqlite::Transaction<'_>) -> Result<Vec<DerivedActiveEntry>, String> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT id, category, content, evidence FROM memory_entries
+             WHERE status = 'active' AND trust = 'derived'
+             ORDER BY verified_at DESC, created_at DESC
+             LIMIT 500",
+        )
+        .map_err(|err| format!("读取派生记忆失败: {err}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .map_err(|err| format!("读取派生记忆失败: {err}"))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| format!("收集派生记忆失败: {err}"))?;
+    Ok(rows)
+}
+
+fn mark_superseded(
+    tx: &rusqlite::Transaction<'_>,
+    keeper_id: &str,
+    stale_id: &str,
+) -> Result<(), String> {
+    tx.execute(
+        "UPDATE memory_entries
+         SET status = 'superseded', superseded_by = ?1
+         WHERE id = ?2 AND status = 'active'",
+        params![keeper_id, stale_id],
+    )
+    .map_err(|err| format!("标记同源旧条目失败: {err}"))?;
+    Ok(())
+}
+
+/// 同一 origin（+ category）只保留最新一条 active。
+fn collapse_same_origin_entries(tx: &rusqlite::Transaction<'_>) -> Result<u32, String> {
+    let rows = load_derived_active(tx)?;
+    let mut keeper: std::collections::HashMap<(String, String), String> =
+        std::collections::HashMap::new();
+    let mut collapsed = 0u32;
+    for (id, category, _, evidence) in &rows {
+        let Some(origin) = evidence_origin(evidence.as_deref())
+            .filter(|origin| origin_collapses_same_source(origin))
+        else {
+            continue;
+        };
+        match keeper.get(&(origin.clone(), category.clone())) {
+            Some(keeper_id) => {
+                mark_superseded(tx, keeper_id, id)?;
+                collapsed += 1;
+            }
+            None => {
+                keeper.insert((origin, category.clone()), id.clone());
+            }
+        }
+    }
+    Ok(collapsed)
+}
+
+/// 剩余的派生条目按近义（containment / Jaccard）折叠：新者留、旧者 supersede。
+fn collapse_near_duplicate_entries(tx: &rusqlite::Transaction<'_>) -> Result<u32, String> {
+    let rows = load_derived_active(tx)?;
+    let mut kept: Vec<(String, String, String)> = Vec::new(); // (id, category, content)
+    let mut collapsed = 0u32;
+    for (id, category, content, _) in &rows {
+        let hit = kept
+            .iter()
+            .find(|(_, kept_cat, kept_content)| {
+                kept_cat == category && is_near_duplicate(content, kept_content)
+            })
+            .map(|(kept_id, _, _)| kept_id.clone());
+        match hit {
+            Some(keeper_id) => {
+                mark_superseded(tx, &keeper_id, id)?;
+                collapsed += 1;
+            }
+            None => kept.push((id.clone(), category.clone(), content.clone())),
+        }
+    }
+    Ok(collapsed)
 }
 
 fn migrate_project_db_v6(conn: &Connection) -> Result<(), String> {
@@ -3154,6 +3284,15 @@ pub fn save_memory_candidate(
 const NEAR_DUP_JACCARD: f64 = 0.8;
 /// bigram 集合过短时不判定（避免短句偶然高重叠）。
 const NEAR_DUP_MIN_BIGRAMS: usize = 4;
+/// 长文本（>该 bigram 数）改用 containment 判定：Jaccard 的分母是并集，
+/// 80 行文档里换个说法/调个顺序就会把分数稀释到 0.6-0.78，永远打不到 0.8
+/// （实测 21 条同内容变体两两最高 0.783）。containment 看交集占较小集合的
+/// 比例，对「子集式改述」稳定。
+const NEAR_DUP_LONG_BIGRAMS: usize = 60;
+const NEAR_DUP_CONTAINMENT: f64 = 0.85;
+/// 长度悬殊时 containment 会退化成「短的是长的子集」——那通常是摘要 vs
+/// 全文，不是同一事实，交给比例门槛挡住。
+const NEAR_DUP_MIN_LENGTH_RATIO: f64 = 0.6;
 
 fn normalize_fold(text: &str) -> Vec<char> {
     text.chars()
@@ -3179,7 +3318,35 @@ fn is_near_duplicate(new_content: &str, existing_content: &str) -> bool {
     }
     let inter = a.intersection(&b).count() as f64;
     let union = a.union(&b).count() as f64;
-    inter / union >= NEAR_DUP_JACCARD
+    if inter / union >= NEAR_DUP_JACCARD {
+        return true;
+    }
+    if a.len() < NEAR_DUP_LONG_BIGRAMS || b.len() < NEAR_DUP_LONG_BIGRAMS {
+        return false;
+    }
+    let smaller = a.len().min(b.len()) as f64;
+    let larger = a.len().max(b.len()) as f64;
+    inter / smaller >= NEAR_DUP_CONTAINMENT && smaller / larger >= NEAR_DUP_MIN_LENGTH_RATIO
+}
+
+/// 从 entry/candidate 的 evidence JSON 取 origin（同源收敛与溯源用）。
+fn evidence_origin(evidence: Option<&str>) -> Option<String> {
+    let raw = evidence?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()?
+        .get("origin")?
+        .as_str()
+        .map(|s| {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        })?
 }
 
 fn find_near_duplicate_entry(
@@ -3187,16 +3354,33 @@ fn find_near_duplicate_entry(
     category: &str,
     content: &str,
 ) -> Result<Option<String>, String> {
+    find_near_duplicate_with_status(tx, category, content, "active")
+}
+
+fn find_near_duplicate_forgotten_entry(
+    tx: &rusqlite::Transaction<'_>,
+    category: &str,
+    content: &str,
+) -> Result<Option<String>, String> {
+    find_near_duplicate_with_status(tx, category, content, "forgotten")
+}
+
+fn find_near_duplicate_with_status(
+    tx: &rusqlite::Transaction<'_>,
+    category: &str,
+    content: &str,
+    status: &str,
+) -> Result<Option<String>, String> {
     let mut stmt = tx
         .prepare(
             "SELECT id, content FROM memory_entries
-             WHERE status = 'active' AND category = ?1
+             WHERE status = ?1 AND category = ?2
              ORDER BY verified_at DESC, created_at DESC
              LIMIT 200",
         )
         .map_err(|err| format!("准备近义记忆检测失败: {err}"))?;
     let rows = stmt
-        .query_map(params![category], |row| {
+        .query_map(params![status, category], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(|err| format!("读取近义记忆检测失败: {err}"))?
@@ -3206,6 +3390,39 @@ fn find_near_duplicate_entry(
         .into_iter()
         .find(|(_, existing)| is_near_duplicate(content, existing))
         .map(|(id, _)| id))
+}
+
+/// 同源条目：`evidence.origin` 相同的 active 派生条目（冷启动摘要、同一条
+/// 命令的验证结果…）。同一来源只允许一条 active，新的覆盖旧的。
+fn find_same_origin_active_entries(
+    tx: &rusqlite::Transaction<'_>,
+    origin: &str,
+    category: &str,
+    keep_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT id, evidence FROM memory_entries
+             WHERE status = 'active' AND category = ?1 AND id != ?2
+             ORDER BY verified_at DESC, created_at DESC
+             LIMIT 200",
+        )
+        .map_err(|err| format!("准备同源记忆检测失败: {err}"))?;
+    let rows = stmt
+        .query_map(params![category, keep_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        })
+        .map_err(|err| format!("读取同源记忆检测失败: {err}"))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| format!("收集同源记忆检测失败: {err}"))?;
+    Ok(rows
+        .into_iter()
+        .filter(|(_, evidence)| evidence_origin(evidence.as_deref()).as_deref() == Some(origin))
+        .map(|(id, _)| id)
+        .collect())
 }
 
 /// 准入：候选 → entry（单事务），并 supersede 同内容哈希的旧 active entry。
@@ -3250,10 +3467,11 @@ pub fn admit_memory_candidate(
     // active entry 上不会出现有意义的 risk_flags。
     let (category, content, content_hash, confidence, trust, source_session_id, source_message_ids, evidence, _risk_flags, created_at) = candidate;
 
-    // 已遗忘的同内容条目：遗忘是用户的显式决定，自动重扫（回合后抽取会
-    // 对同一命令反复生成候选）不得让它复活。候选标记 rejected 并阻断，
-    // 避免每回合重复提议。
-    let forgotten: Option<String> = tx
+    // 已遗忘条目：遗忘是用户的显式决定，自动重扫（回合后抽取会对同一命令
+    // 反复生成候选）不得让它复活。精确 hash 之外还要看近义——收敛迁移和
+    // 「换个说法再记一遍」都会绕过 hash 门，只挡 hash 等于没挡。候选标记
+    // rejected 并阻断，避免每回合重复提议。
+    let forgotten_exact: Option<String> = tx
         .query_row(
             "SELECT id FROM memory_entries
               WHERE content_hash = ?1 AND status = 'forgotten' LIMIT 1",
@@ -3262,7 +3480,12 @@ pub fn admit_memory_candidate(
         )
         .optional()
         .map_err(|err| format!("查询遗忘条目失败: {err}"))?;
-    if forgotten.is_some() {
+    let forgotten_similar = if forgotten_exact.is_some() {
+        None
+    } else {
+        find_near_duplicate_forgotten_entry(&tx, &category, &content)?
+    };
+    if forgotten_exact.is_some() || forgotten_similar.is_some() {
         tx.execute(
             "UPDATE memory_candidates
              SET status = 'rejected', decided_at = ?1, rejection_reason = 'content-forgotten'
@@ -3304,17 +3527,23 @@ pub fn admit_memory_candidate(
 
     // M4（近义合并）：同 category 的 active 条目做轻量相似检测——换个说法
     // 重写同一事实不再堆叠占预算，幂等返回既有条目 id。
-    if let Some(similar_id) = find_near_duplicate_entry(&tx, &category, &content)? {
-        tx.execute(
-            "UPDATE memory_candidates
+    // 例外：同源单例 origin（冷启动摘要）走「新者胜」，插新条目并 supersede
+    // 旧的，不能把最新一版内容丢掉。
+    let collapse_origin = evidence_origin(evidence.as_deref())
+        .filter(|origin| origin_collapses_same_source(origin));
+    if collapse_origin.is_none() {
+        if let Some(similar_id) = find_near_duplicate_entry(&tx, &category, &content)? {
+            tx.execute(
+                "UPDATE memory_candidates
              SET status = 'admitted', decided_at = ?1
              WHERE id = ?2",
-            params![unix_millis()?, candidate_id],
-        )
-        .map_err(|err| format!("标记候选近义合并失败: {err}"))?;
-        tx.commit()
-            .map_err(|err| format!("提交候选近义合并失败: {err}"))?;
-        return Ok(similar_id);
+                params![unix_millis()?, candidate_id],
+            )
+            .map_err(|err| format!("标记候选近义合并失败: {err}"))?;
+            tx.commit()
+                .map_err(|err| format!("提交候选近义合并失败: {err}"))?;
+            return Ok(similar_id);
+        }
     }
 
     let verified_at = unix_millis()?;
@@ -3348,6 +3577,21 @@ pub fn admit_memory_candidate(
     )
     .map_err(|err| format!("标记旧条目失败: {err}"))?;
 
+    // 同源单例：冷启动摘要这类 origin 是「机器周期性重出的同一份产物」，
+    // 每次新生成都应覆盖旧版（新者胜），否则同一事实的 N 个改述会各自
+    // 占一份召回预算（iPod 项目实测：21 条同源 blob 挤满整个 Recall 块）。
+    if let Some(origin) = collapse_origin.as_deref() {
+        for stale_id in find_same_origin_active_entries(&tx, origin, &category, &entry_id)? {
+            tx.execute(
+                "UPDATE memory_entries
+                 SET status = 'superseded', superseded_by = ?1
+                 WHERE id = ?2 AND status = 'active'",
+                params![entry_id, stale_id],
+            )
+            .map_err(|err| format!("标记同源旧条目失败: {err}"))?;
+        }
+    }
+
     tx.execute(
         "UPDATE memory_candidates
          SET status = 'admitted', decided_at = ?1
@@ -3359,6 +3603,31 @@ pub fn admit_memory_candidate(
     tx.commit()
         .map_err(|err| format!("提交准入事务失败: {err}"))?;
     Ok(entry_id)
+}
+
+/// 记忆面板「清理重复」：手动跑一次 v8 的收敛（同源 + 近义），返回被
+/// supersede 的条目数。只碰 trust='derived'，用户手写与验证结果不动。
+pub fn collapse_memory_duplicates(workspace_path: String) -> Result<u32, String> {
+    let (conn, ..) = open_project_db(&workspace_path)?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("开启记忆收敛事务失败: {err}"))?;
+    let same_origin = collapse_same_origin_entries(&tx)?;
+    let near_dup = collapse_near_duplicate_entries(&tx)?;
+    let total = same_origin + near_dup;
+    if total > 0 {
+        let now = unix_millis()?;
+        tx.execute(
+            "INSERT INTO project_meta (key, value, updated_at)
+             VALUES ('memory_dupes_collapsed', ?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            params![total.to_string(), now],
+        )
+        .map_err(|err| format!("写入记忆收敛标记失败: {err}"))?;
+    }
+    tx.commit()
+        .map_err(|err| format!("提交记忆收敛失败: {err}"))?;
+    Ok(total)
 }
 
 pub fn reject_memory_candidate(
@@ -5005,13 +5274,13 @@ mod tests {
         }
         std::fs::create_dir_all(workspace.file_path(".CodePapr/apps/live-app")).unwrap();
 
-        // 重新打开触发 v4 迁移（当前最新版本为 v7，v4 迁移后继续升级）
+        // 重新打开触发 v4 迁移（当前最新版本为 v8，v4 迁移后继续升级）
         {
             let (conn, ..) = open_project_db(&ws).unwrap();
             let version: i64 = conn
                 .pragma_query_value(None, "user_version", |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 7);
+            assert_eq!(version, 8);
             let table_gone: bool = conn
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_storage')",
@@ -5854,6 +6123,308 @@ mod tests {
         assert_eq!(active.len(), 2);
     }
 
+
+    /// 真实回归语料（iPod 项目）：同一份冷启动摘要的两次生成。Jaccard 0.758
+    /// 打不到 0.8，必须靠长文本 containment 折叠——否则每代改述都新增一条，
+    /// 21 条同源 blob 挤满整块 Recall 预算。
+    const BOOTSTRAP_FIXTURE_A: &str = r#"## 2026-09-10 项目初始化记忆
+
+### 目录结构
+- `html/js/` (8 个文件): `control.js`, `jqClock.js`, `jquery-1.7.1.min.js`, `jquery.calendar-widget.js`, `jquery.knob.js`, `music.js`, `script.js`, `script的副本.js`
+- `iPod/` (5 个文件): `AppDelegate.swift`, `Menu.swift`, `Music.swift`, `ViewController.swift`, `normalfunc.swift`
+- `iPodTests/iPodTests.swift`: `setUp` / `tearDown` / `testExample` / `testPerformanceExample`
+- `iPodUITests/iPodUITests.swift`: `setUp` / `tearDown` / `testExample`
+
+### 技术栈
+- Swift: `AppDelegate`, `ViewController` + `MyDelegate` / `MenuPayload`, `Music.swift` 内 `Album0`, `normalfunc.swift` 内 `batteryinfo`
+- JavaScript: `jquery-1.7.1.min.js`, `jquery.knob.js` (`Dial`), `jqClock.js` (`clock/updateClock`), `jquery.calendar-widget.js` (`calendarWidget`), `control.js` (`changestate/changetime/changevolume/controlwheel`), `music.js` (`funcforswift/getallmusic/playthemusic`)
+
+### 项目约定（来自 `.CodePapr/AGENTS.md`）
+- 改代码: 先读再改，沿用现有模式、命名和目录；只改任务所需，不重构、不扩范围；动共享状态/数据流/公共组件需核对其他读取面；优先小范围修改
+- 完成: 需用验证命令拿证据；界面交互改动需实际走一遍；验证没跑或失败需明说阻塞
+- 不要动: 密钥、凭证、`.env`；未要求的 git 提交或推送；生成物及无关依赖/锁文件
+"#;
+
+    const BOOTSTRAP_FIXTURE_B: &str = r#"## 2026-09-11 项目初始化记忆
+
+### 目录结构
+- `html/js/` (8 个文件，前端逻辑):
+  - `control.js`: `changestate` / `changetime` / `changevolume` / `controlwheel`
+  - `music.js`: `funcforswift` / `getallmusic` / `playthemusic`
+  - `script.js` 与 `script的副本.js`: `ready` / `calendar` 相关
+  - `jquery-1.7.1.min.js`, `jquery.knob.js` (Dial), `jqClock.js`, `jquery.calendar-widget.js`
+- `iPod/` (6 个文件，原生侧):
+  - `ViewController.swift`: `MyDelegate` (`delegateNeedDo` / `refreshui`), `Bridge Payload` / `MenuPayload`
+  - `Music.swift`: `Album0` (`name` / `id` / `genre` / `songs`)
+  - `normalfunc.swift`: `batteryinfo` (`create` / `destroy` / `delegate` / `observing`)
+  - `AppDelegate.swift`, `SceneDelegate.swift`, `Menu.swift`
+- `iPodTests/iPodTests.swift`: `setUp` / `tearDown` / `testExample` / `testPerformanceExample`
+- `iPodUITests/iPodUITests.swift`: `setUp` / `tearDown` / `testExample`
+
+### 技术栈
+- 语言: Swift (`iPod/`) + JavaScript (`html/js/`)
+- 前端: jQuery 1.7.1 + `jquery.knob` / `jqClock` / `calendar-widget`
+- 原生侧: `AppDelegate` / `SceneDelegate` / `ViewController` 结构，含 JS-Swift Bridge (`funcforswift`, `Bridge Payload`)
+
+### 项目约定
+- 来源: `.CodePapr/AGENTS.md`
+- 改代码: 先读再改，沿用现有模式/命名/目录；只改任务所需，不顺手重构、不扩范围；动共享状态/数据流/公共组件时核对所有读取面；优先小范围修改
+- 完成: 需用「验证」命令拿证据；界面交互改动需实际走一遍；验证未跑或失败需明确阻塞
+- 不要动: 密钥/凭证/`.env`；未要求的 git 提交或推送；生成物及无关依赖/锁文件
+"#;
+
+    /// 同源但内容确实更新了（文件数变化 + 新模块）：近义判定不命中，
+    /// 靠同源单例规则收敛。
+    const BOOTSTRAP_FIXTURE_C: &str = r#"## 2026-09-12 项目初始化记忆
+
+### 目录结构（重构后）
+- `Sources/App/`：`AppDelegate.swift`、`SceneDelegate.swift`、`MenuCoordinator.swift`
+- `Sources/Bridge/`：`JsBridge.swift`、`MenuPayloadCodec.swift`、`BridgePayload.swift`
+- `Sources/Player/`：`MusicPlayerRouter.swift`（AVPlayer + applicationMusicPlayer 双引擎）、`NowPlaying.swift`
+- `web/js/`：`control.ts`、`music.ts`、`wheel.ts`（已从 jQuery 迁到原生 ESM）
+- `Tests/BridgeTests.swift`：编解码往返用例
+
+### 技术栈
+- Swift 5.10 + WebKit WKWebView 消息桥；前端 TypeScript + Vite（不再用 jQuery 1.7.1）
+- 播放器路由：DRM 曲目走 applicationMusicPlayer，普通曲目走 AVPlayer
+
+### 构建与验证
+- 构建：`xcodebuild -scheme iPod -sdk iphonesimulator build`
+- 类型检查：`npm run typecheck`；单测：`swift test --filter BridgeTests`
+- 约定：改动 Bridge 编解码必须同步 web 侧 control.ts 与 Swift 侧 MenuPayloadCodec，两侧读取面一起核对
+"#;
+
+    #[test]
+    fn is_near_duplicate_merges_long_rephrasing() {
+        assert!(
+            is_near_duplicate(BOOTSTRAP_FIXTURE_A, BOOTSTRAP_FIXTURE_B),
+            "同一份摘要的改述必须判为近义"
+        );
+    }
+
+    #[test]
+    fn is_near_duplicate_keeps_short_conflicting_facts() {
+        // 短事实（一字之改翻转语义）走不到长文本 containment 分支。
+        assert!(!is_near_duplicate(
+            "播放按钮触控偏下，图标上沿被内圈遮挡",
+            "播放按钮触控偏上，图标下沿溢出外圈"
+        ));
+        assert!(!is_near_duplicate("测试命令是 pnpm test --watch", "测试命令是 pnpm test --coverage"));
+    }
+
+    /// 准入路径：不同 hash 的长改述幂等合并到既有条目。
+    #[test]
+    fn admit_memory_candidate_merges_long_rephrased_entry() {
+        let workspace = TestWorkspace::new("memory-long-near-dup");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let candidate = |id: &str, hash: &str, content: &str| {
+            serde_json::json!({
+                "id": id,
+                "category": "fact",
+                "content": content,
+                "contentHash": hash,
+                "confidence": "reported",
+                "trust": "derived",
+                "sourceSessionId": "s1",
+                "sourceMessageIds": "[]",
+                "evidence": "{\"origin\":\"memory_write\"}",
+                "riskFlags": null,
+                "createdAt": 1i64,
+            })
+        };
+        save_memory_candidate(ws.clone(), candidate("ln-1", "h-ln1", BOOTSTRAP_FIXTURE_A).to_string())
+            .expect("save ln-1");
+        let id1 = admit_memory_candidate(ws.clone(), "ln-1".to_string(), "e-ln1".to_string())
+            .expect("admit ln-1");
+        save_memory_candidate(ws.clone(), candidate("ln-2", "h-ln2", BOOTSTRAP_FIXTURE_B).to_string())
+            .expect("save ln-2");
+        let id2 = admit_memory_candidate(ws.clone(), "ln-2".to_string(), "e-ln2".to_string())
+            .expect("admit ln-2");
+        assert_eq!(id1, id2, "长改述必须合并到既有条目");
+        assert_eq!(load_memory_entries(ws, Some(true)).expect("load").len(), 1);
+    }
+
+    /// 同源单例：冷启动摘要换个 origin 之外的任何理由都不允许堆叠——
+    /// 新者胜，旧的标 superseded（历史 bug：每条用户消息重跑一次，攒了 21 条）。
+    #[test]
+    fn admit_memory_candidate_supersedes_same_origin_cold_start_entries() {
+        let workspace = TestWorkspace::new("memory-same-origin");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let evidence = "{\"origin\":\"cold-start-bootstrap\"}";
+        let candidate = |id: &str, hash: &str, content: &str| {
+            serde_json::json!({
+                "id": id,
+                "category": "fact",
+                "content": content,
+                "contentHash": hash,
+                "confidence": "reported",
+                "trust": "derived",
+                "sourceSessionId": "s1",
+                "sourceMessageIds": "[]",
+                "evidence": evidence,
+                "riskFlags": null,
+                "createdAt": 1i64,
+            })
+        };
+        save_memory_candidate(ws.clone(), candidate("cs-1", "h-cs1", BOOTSTRAP_FIXTURE_A).to_string())
+            .expect("save cs-1");
+        admit_memory_candidate(ws.clone(), "cs-1".to_string(), "e-cs1".to_string()).expect("admit cs-1");
+        // 差异大到近义判定不命中，也必须被同源规则收敛。
+        let other = BOOTSTRAP_FIXTURE_C.to_string();
+        save_memory_candidate(ws.clone(), candidate("cs-2", "h-cs2", &other).to_string())
+            .expect("save cs-2");
+        let id2 = admit_memory_candidate(ws.clone(), "cs-2".to_string(), "e-cs2".to_string())
+            .expect("admit cs-2");
+        assert_eq!(id2, "e-cs2", "同源新内容应成为 active 的那条");
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "e-cs2");
+        let all = load_memory_entries(ws.clone(), Some(false)).expect("load all");
+        assert!(all.iter().any(|e| e.id == "e-cs1" && e.status == "superseded"));
+    }
+
+    /// 遗忘保护扩展到近义：用户忘掉一份摘要后，换个说法的变体不得复活它。
+    #[test]
+    fn admit_memory_candidate_blocks_near_duplicate_of_forgotten_entry() {
+        let workspace = TestWorkspace::new("memory-forgotten-near-dup");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        {
+            let (conn, ..) = open_project_db(&ws).expect("open db");
+            conn.execute(
+                "INSERT INTO memory_entries
+                   (id, category, content, content_hash, confidence, trust, status,
+                    evidence, created_at, verified_at)
+                 VALUES ('fg-1', 'fact', ?1, 'h-fg1', 'reported', 'derived', 'forgotten',
+                         '{\"origin\":\"cold-start-bootstrap\"}', 1, 1)",
+                params![BOOTSTRAP_FIXTURE_A],
+            )
+            .expect("insert forgotten");
+        }
+        let candidate = serde_json::json!({
+            "id": "fg-c",
+            "category": "fact",
+            "content": BOOTSTRAP_FIXTURE_B,
+            "contentHash": "h-fg-c",
+            "confidence": "reported",
+            "trust": "derived",
+            "sourceSessionId": "s1",
+            "sourceMessageIds": "[]",
+            "evidence": "{\"origin\":\"memory_write\"}",
+            "riskFlags": null,
+            "createdAt": 2i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save candidate");
+        let err = admit_memory_candidate(ws, "fg-c".to_string(), "e-fg-c".to_string())
+            .expect_err("near duplicate of forgotten must be blocked");
+        assert!(err.contains("遗忘"), "got: {err}");
+    }
+
+    /// v8 迁移：历史项目里堆叠的同源冷启动摘要收敛到 1 条，用户手写不动。
+    #[test]
+    fn migrate_project_db_v8_collapses_legacy_bootstrap_duplicates() {
+        let workspace = TestWorkspace::new("memory-migrate-v8");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        {
+            let (conn, ..) = open_project_db(&ws).expect("open db");
+            for (idx, content) in [BOOTSTRAP_FIXTURE_A, BOOTSTRAP_FIXTURE_B, BOOTSTRAP_FIXTURE_C]
+                .iter()
+                .enumerate()
+            {
+                conn.execute(
+                    "INSERT INTO memory_entries
+                       (id, category, content, content_hash, confidence, trust, status,
+                        evidence, created_at, verified_at)
+                     VALUES (?1, 'fact', ?2, ?3, 'reported', 'derived', 'active',
+                             '{\"origin\":\"cold-start-bootstrap\"}', ?4, ?4)",
+                    params![
+                        format!("cs-{}", idx),
+                        content.to_string(),
+                        format!("h-cs-{}", idx),
+                        (idx as i64) + 1
+                    ],
+                )
+                .expect("insert legacy duplicate");
+            }
+            conn.execute(
+                "INSERT INTO memory_entries
+                   (id, category, content, content_hash, confidence, trust, status,
+                    evidence, created_at, verified_at)
+                 VALUES ('note-1', 'user-note', '用户手写：提交前必须跑 lint', 'h-note',
+                         'confirmed', 'trusted', 'active',
+                         '{\"origin\":\"panel:user-note\"}', 9, 9)",
+                [],
+            )
+            .expect("insert user note");
+            // 回退版本，强制 open_project_db 再跑一次 v8。
+            conn.pragma_update(None, "user_version", 7_i64).unwrap();
+        }
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
+        assert_eq!(active.len(), 2, "3 条同源摘要应收敛成 1 条 + 1 条手写笔记");
+        assert!(active.iter().any(|e| e.id == "cs-2"));
+        assert!(active.iter().any(|e| e.id == "note-1"));
+        let all = load_memory_entries(ws.clone(), Some(false)).expect("load all");
+        assert!(all.iter().filter(|e| e.status == "superseded").count() >= 2);
+        let collapsed: String = {
+            let (conn, ..) = open_project_db(&ws).expect("reopen");
+            conn.query_row(
+                "SELECT value FROM project_meta WHERE key = 'memory_dupes_collapsed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("meta written")
+        };
+        assert!(!collapsed.is_empty());
+    }
+
+    /// 面板「清理重复」：同源 + 近义收敛，只碰派生条目并返回条数。
+    #[test]
+    fn collapse_memory_duplicates_only_touches_derived_entries() {
+        let workspace = TestWorkspace::new("memory-collapse-manual");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        {
+            let (conn, ..) = open_project_db(&ws).expect("open db");
+            // 工具验证过的内容即使 origin 与冷启动摘要相同也不许被自动收敛。
+            conn.execute(
+                "INSERT INTO memory_entries
+                   (id, category, content, content_hash, confidence, trust, status,
+                    evidence, created_at, verified_at)
+                 VALUES ('w-1', 'verification', ?1, 'h-w1', 'confirmed', 'workspace', 'active',
+                         '{\"origin\":\"cold-start-bootstrap\"}', 1, 1)",
+                params![BOOTSTRAP_FIXTURE_A],
+            )
+            .expect("insert workspace entry");
+            conn.execute(
+                "INSERT INTO memory_entries
+                   (id, category, content, content_hash, confidence, trust, status,
+                    evidence, created_at, verified_at)
+                 VALUES ('w-2', 'fact', ?1, 'h-w2', 'reported', 'derived', 'active',
+                         '{\"origin\":\"cold-start-bootstrap\"}', 2, 2)",
+                params![BOOTSTRAP_FIXTURE_B],
+            )
+            .expect("insert older derived entry");
+            conn.execute(
+                "INSERT INTO memory_entries
+                   (id, category, content, content_hash, confidence, trust, status,
+                    evidence, created_at, verified_at)
+                 VALUES ('w-3', 'fact', ?1, 'h-w3', 'reported', 'derived', 'active',
+                         '{\"origin\":\"cold-start-bootstrap\"}', 3, 3)",
+                params![BOOTSTRAP_FIXTURE_A],
+            )
+            .expect("insert newer derived entry");
+        }
+        let collapsed = collapse_memory_duplicates(ws.clone()).expect("collapse");
+        assert_eq!(collapsed, 1, "两条同源派生条目应收敛掉较旧的那条");
+        let active = load_memory_entries(ws, Some(true)).expect("load");
+        assert!(active.iter().any(|e| e.id == "w-1"), "workspace 条目不得被自动收敛");
+        assert!(active.iter().any(|e| e.id == "w-3"));
+        assert!(!active.iter().any(|e| e.id == "w-2"));
+    }
+
     /// M7：forgotten → active 仅经面板显式恢复；自动路径仍被遗忘守卫阻断。
     #[test]
     fn revive_memory_entry_restores_forgotten_entry() {
@@ -6519,7 +7090,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         let leftover: bool = conn
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = '_codepapr_fts_probe')",

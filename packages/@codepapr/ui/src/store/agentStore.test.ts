@@ -155,7 +155,6 @@ vi.mock('./internals/contextCheckpoint', () => ({
   maybeGenerateContextCheckpoint: maybeGenerateContextCheckpointMock,
 }));
 
-vi.mock('../utils/memoryConsolidation', () => ({}));
 
 // createAgent/createMainThreadAgent are spied so crash-recovery tests can
 // inject mock agents for rebuilt instances; defaults delegate to the real
