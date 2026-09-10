@@ -51,7 +51,7 @@ import {
   collectExecutedTools,
   type ExecutedToolSummary,
 } from '../../utils/agentExecution';
-import { getTodoListContext, convergeSessionTodoListAtTurnEnd } from '../../tools/todoListRegistry';
+import { getTodoListContext, convergeSessionTodoListAtTurnEnd, openTodoCreationWindow } from '../../tools/todoListRegistry';
 import { getActiveCharacterPrompt } from '../charactersStore';
 import { loadMcpToolDefinitions } from '../../tools/mcpTools';
 import { isReasoningPlaceholderEcho } from '@codepapr/api';
@@ -1468,6 +1468,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             input: effectiveInput,
             todoDigest: currentTodoDigest(optimisticSid),
           });
+          // 创建是回合级事件：这条用户消息开启一次 `todo` 工具的 tasks 创建
+          // 窗口（首次成功创建即消耗）。追加消息同样各有一次窗口；是否使用
+          // 由模型判断——旧清单未跑完时应当用 updates 续用而不是重建。
+          openTodoCreationWindow(optimisticSid, effectiveInput);
           let passImages = images && images.length ? images : undefined;
           if (passImages?.length) {
             const visionAction = resolveVisionInputAction(normalizedSettings, route.model);

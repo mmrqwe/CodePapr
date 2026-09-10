@@ -65,7 +65,7 @@ function desktopVisibleNames(testCase: Case): string[] {
     multimodalEnabled: testCase.multimodalEnabled,
     disableWebSearchTools: testCase.mcpSearchEnabled,
   });
-  registerTodoListTools(inner, 's1', '', 3);
+  registerTodoListTools(inner, 's1');
   registerMemoryTools(inner, '/tmp/ws', 's1');
   return inner
     .getLlmTools()
@@ -208,7 +208,7 @@ function desktopVisibleTools(testCase: Case) {
     multimodalEnabled: testCase.multimodalEnabled,
     disableWebSearchTools: testCase.mcpSearchEnabled,
   });
-  registerTodoListTools(inner, 's1', '', 3);
+  registerTodoListTools(inner, 's1');
   registerMemoryTools(inner, '/tmp/ws', 's1');
   return inner.getLlmTools();
 }

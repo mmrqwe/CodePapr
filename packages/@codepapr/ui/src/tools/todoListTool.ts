@@ -1,36 +1,32 @@
 /**
  * UI 层 TodoList 工具桥接：
  *  - 注册 `todo` 工具到 ToolRegistry
- *  - 工具 handler 改注册表（纯数据，见 todoListRegistry），并把最新
- *    TodoListContext 通过返回值喂回 LLM
- *  - 清单变更经注册表监听器推进 agentStore 的 `_taskChecklists`
+ *  - 工具 handler 走 core 的 applyTodoToolRequest 纯函数（与 headless 同源），
+ *    在这里叠加两件事：创建窗口闸门（回合级一次创建）与主线程副作用
+ *    （注册表写入 → zustand 渲染推送 → 防抖落盘）
  *
  * 与 task 工具正交：todo 只改主 Agent 的计划，task 仍然是子代理委派。
- *
- * 持久化：每次修改 TodoList 后，同步到 project.sqlite 以便重启恢复。
  *
  * 注意：TodoListContext 的存储仓库已拆到 `todoListRegistry`（无 store 依赖），
  * worker 侧的压缩管线只依赖注册表读取，避免把整个 agentStore 图谱
  * （约 860KB）打进 worker 包。
  */
 import {
+  TODO_CREATE_REJECTED_NOTICE,
   buildTodoToolDefinition,
-  createEmptyTodoListContext,
-  describeTodoReplanImpact,
-  evaluateTodoReplan,
-  parseTodoGoal,
-  parseTodoUpdatePatches,
   renderTodoListDigest,
-  updateTodoList,
-  writeTodoList,
+  applyTodoToolRequest,
   type ToolRegistry,
 } from '@codepapr/core';
 import type { IToolDefinition, TodoListContext } from '@codepapr/types';
 import { useAgentStore } from '../store/agentStore';
 import { saveCurrentProjectState } from '../store/internals/projectSnapshot';
 import {
+  closeTodoCreationWindow,
   commitTodoListContext,
+  getTodoCreationWindowGoal,
   getTodoListContext,
+  isTodoCreationWindowOpen,
   setTodoChecklistListener,
   setTodoListContext,
 } from './todoListRegistry';
@@ -66,33 +62,32 @@ function scheduleTodoPersist(): void {
 interface ToolReturn {
   todoList: TodoListContext;
   digest: string;
-  /** E：tasks 全量覆盖丢掉旧进度时的告警（模型可见，下一轮即可纠正）。 */
-  replanWarning?: string;
+  /** 创建窗口已关闭时 tasks 被拒的系统说明（模型可见）。 */
+  notice?: string;
 }
 
-function buildReturn(ctx: TodoListContext, replanWarning?: string): ToolReturn {
+function buildReturn(ctx: TodoListContext, notice?: string): ToolReturn {
   return {
     todoList: ctx,
     digest: renderTodoListDigest(ctx),
-    ...(replanWarning ? { replanWarning } : {}),
+    ...(notice ? { notice } : {}),
   };
 }
 
 /**
  * 注册统一的 `todo` 工具到指定 ToolRegistry。
  *
- * 两种调用模式——通过参数区分：
- *  - tasks 参数：全量覆盖（初始化 / re-plan）
- *  - updates 参数：部分更新（进度汇报 / 完成标记 / 失败报告）
+ * 运行时纪律（core applyTodoToolRequest 执行语义，这里供给窗口与副作用）：
+ *  - tasks 全量覆盖 = 创建，每个用户回合至多一次（创建窗口 open 于用户
+ *    消息发送时，首次成功创建即消耗）；窗口已关的 tasks 调用被拒绝，
+ *    状态零变化，仅回传当前快照 + 说明。
+ *  - updates 是回合内一切进度变化的唯一通道，不限次数。
  *
- * @param sessionId  会话 ID；不同会话各持一份 TodoListContext
- * @param defaultGoal 兜底目标文本
+ * @param sessionId 会话 ID；不同会话各持一份 TodoListContext
  */
 export function registerTodoListTools(
   registry: ToolRegistry,
-  sessionId: string,
-  defaultGoal: string,
-  maxRetries: number = 3
+  sessionId: string
 ): IToolDefinition[] {
   const definition = buildTodoToolDefinition();
   if (!definition) {
@@ -105,62 +100,33 @@ export function registerTodoListTools(
   };
 
   registry.register(definition, async (args) => {
-    const hasTasks = Array.isArray(args.tasks);
-    const hasUpdates = Array.isArray(args.updates);
-    const goal = parseTodoGoal(args.goal, defaultGoal);
+    const previous = getTodoListContext(sessionId) ?? null;
+    const creationOpen = isTodoCreationWindowOpen(sessionId);
+    const defaultGoal = creationOpen
+      ? getTodoCreationWindowGoal(sessionId) || previous?.goal || ''
+      : previous?.goal || '';
+    const result = applyTodoToolRequest(
+      previous,
+      args as Record<string, unknown>,
+      { creationOpen, defaultGoal }
+    );
 
-    if (hasTasks) {
-      // ── 全量覆盖模式 ──
-      const rawTasks = args.tasks as Array<Record<string, unknown>>;
-      const previous = getTodoListContext(sessionId) ?? null;
-      // E：覆盖前先评估进度影响。压缩会毁掉模型可见的旧清单，模型于是「重新规
-      // 划」并把已完成的证据一起丢掉（实测一个回合内重建 11 次、永远收不了尾）。
-      // 不阻止重排（目标真变了就该重排），但把丢掉的东西如实回传，让下一轮有机会
-      // 用同一批 id 把计划接回去。
-      const replanWarning = describeTodoReplanImpact(evaluateTodoReplan(previous, rawTasks));
-      const nextCtx = writeTodoList(previous, goal, rawTasks, maxRetries);
-      return buildReturn(commit(nextCtx), replanWarning);
+    if (result.rejected) {
+      // 状态零变化：不落盘、不推渲染，只把当前快照和拒绝说明回传给模型。
+      return buildReturn(result.ctx, TODO_CREATE_REJECTED_NOTICE);
     }
-
-    // ── 部分更新模式 ──
-    const previous = getTodoListContext(sessionId);
-    if (!previous) {
-      // 没有已有清单时自动创建一个空的，然后应用更新。
-      // 空清单先推 null（与旧实现一致），首个 updates 落地后再推渲染结构。
-      const emptyCtx = createEmptyTodoListContext(goal);
-      setTodoListContext(sessionId, emptyCtx, 'null');
-
-      if (!hasUpdates) {
-        return buildReturn(emptyCtx);
-      }
-
-      const rawUpdates = hasUpdates ? (args.updates as Array<Record<string, unknown>>) : [];
-      const patches = parseTodoUpdatePatches(rawUpdates);
-      if (patches.length === 0) {
-        return buildReturn(emptyCtx);
-      }
-
-      const nextCtx = updateTodoList(emptyCtx, patches);
-      return buildReturn(commit(nextCtx));
+    if (result.created) {
+      closeTodoCreationWindow(sessionId);
     }
-
-    if (!hasUpdates) {
-      // 无 tasks 也无 updates，仅更新 goal (如果提供)
-      if (goal && goal !== previous.goal) {
-        const nextCtx = { ...previous, goal, updatedAt: Date.now() };
-        return buildReturn(commit(nextCtx));
-      }
-      return buildReturn(previous);
+    if (result.ctx === previous) {
+      return buildReturn(result.ctx);
     }
-
-    const rawUpdates = (args.updates as Array<Record<string, unknown>>);
-    const patches = parseTodoUpdatePatches(rawUpdates);
-    if (patches.length === 0) {
-      return buildReturn(previous);
+    if (!previous && result.ctx.tasks.length === 0) {
+      // 空清单不推渲染卡片（与旧实现一致），也不值得落盘。
+      setTodoListContext(sessionId, result.ctx, 'null');
+      return buildReturn(result.ctx);
     }
-
-    const nextCtx = updateTodoList(previous, patches);
-    return buildReturn(commit(nextCtx));
+    return buildReturn(commit(result.ctx));
   });
 
   // 如果该会话已有 TodoList（例如 Worker 重启），立刻把现状推回 store
@@ -170,21 +136,4 @@ export function registerTodoListTools(
   }
 
   return [definition];
-}
-
-/**
- * 用于 Agent 主流程：在用户消息真正发送前，把 defaultGoal 记住，
- * 后续 `todo` 没显式提供 goal 时回退到它。
- */
-export function rememberTodoGoal(sessionId: string, goal: string): void {
-  const trimmed = goal.trim();
-  if (!trimmed) return;
-  const existing = getTodoListContext(sessionId);
-  if (!existing) {
-    return;
-  }
-  if (!existing.goal.trim()) {
-    // 仅改 goal 不推送渲染结构（与旧实现一致：rememberTodoGoal 不触发 store 写入）
-    setTodoListContext(sessionId, { ...existing, goal: trimmed, updatedAt: Date.now() }, 'none');
-  }
 }

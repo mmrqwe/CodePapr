@@ -1,24 +1,31 @@
 /**
  * TodoList: 主 Agent 的"短期工作记忆"。
  *
- * 设计要点：
- *  - 每个 Agent 会话维护一份 TodoListContext，由 LLM 通过 `todo` 工具读写。
- *  - 工具执行结果总是回传完整 TodoListContext 快照，因此 LLM 无需依赖系统提示词
- *    就能在下一轮自然看到当前清单（绕过 ImmutablePrefix 冻结限制）。
- *  - 与 `task` 工具正交协作：todo 维护主 Agent 的计划，task 把单个 todo 分发给子代理执行。
- *  - 工具定义在 core 层声明；具体 handler 由 UI 层桥接到 zustand store，
- *    以便在主线程同步刷新 TaskChecklist 渲染。
- *  - 单工具 `todo` 替代之前的三工具（todo_write/todo_update/todo_complete）：
- *    · tasks 参数 → 全量覆盖（初始化 / re-plan）
- *    · updates 参数 → 批量部分更新（进度汇报 / 失败标记）
- *    · 标记任务 completed 时自动推进到下一个可执行任务
+ * 运行时规则只有三条：
+ *  1. **创建是回合级事件**：每条用户消息开启一次创建窗口，`tasks` 全量覆盖
+ *     消耗窗口；窗口关闭后的 `tasks` 调用被拒绝（状态零变化，回传当前快照）。
+ *     追加对话是否建新清单由模型判断——上一回合清单未跑完就继续用 updates。
+ *  2. **回合内一切变化走 `updates`**：改状态/摘要/错误说明，幂等，不受限。
+ *  3. **光标纯推导**：currentTaskId 不存储推进历史，每次返回快照时从任务
+ *     状态现算（有 running 即它；否则第一个依赖满足的 pending）。
+ *
+ * 其他要点：
+ *  - 工具执行结果总是回传完整 TodoListContext 快照 + digest，LLM 无需依赖
+ *    系统提示词就能在下一轮看到当前清单。
+ *  - 与 `task` 工具正交：todo 维护主 Agent 的计划，task 委派子代理执行。
+ *  - 工具定义与请求应用逻辑（applyTodoToolRequest）在 core 层声明为纯函数，
+ *    桌面 handler 与 headless harness 共用，避免双实现漂移。
  */
 
 import type { AgentTask, TaskStatus, TodoListContext, IToolDefinition } from '@codepapr/types';
 
-export const DEFAULT_TODO_MAX_RETRIES = 3;
-
 export const TODO_TOOL_NAME = 'todo' as const;
+
+/** tasks 调用撞上已关闭的创建窗口时，回传给模型的说明。 */
+export const TODO_CREATE_REJECTED_NOTICE =
+  '[todo] 本回合的任务清单已创建过，这次 tasks 全量覆盖被拒绝：清单保持原样。'
+  + '请用 updates 推进现有任务（标记进度/完成/失败）；只有用户发来新消息才会再次开启创建窗口。'
+  + '如果你发现当前清单确实不再适用于目标，把它写进本轮回答或对应任务的 summary，等下一条用户消息再重排。';
 
 function normalizeId(value: unknown, fallback: string): string {
   if (typeof value !== 'string') {
@@ -61,10 +68,9 @@ interface RawTaskInput {
   touchedArtifacts?: unknown;
   summary?: unknown;
   errorLog?: unknown;
-  maxRetries?: unknown;
 }
 
-function normalizeTask(raw: RawTaskInput, index: number, existing?: AgentTask, defaultMaxRetries: number = DEFAULT_TODO_MAX_RETRIES): AgentTask {
+function normalizeTask(raw: RawTaskInput, index: number, existing?: AgentTask): AgentTask {
   const title = typeof raw.title === 'string' ? raw.title.trim() : existing?.title ?? '';
   const description = typeof raw.description === 'string' ? raw.description.trim() : existing?.description ?? title;
   const id = normalizeId(raw.id, existing?.id ?? `task-${index + 1}`);
@@ -82,9 +88,6 @@ function normalizeTask(raw: RawTaskInput, index: number, existing?: AgentTask, d
   const errorLog = typeof raw.errorLog === 'string' && raw.errorLog.trim()
     ? raw.errorLog.trim()
     : existing?.errorLog;
-  const maxRetries = typeof raw.maxRetries === 'number' && Number.isFinite(raw.maxRetries) && raw.maxRetries > 0
-    ? Math.floor(raw.maxRetries)
-    : existing?.maxRetries ?? defaultMaxRetries;
 
   return {
     id,
@@ -96,8 +99,6 @@ function normalizeTask(raw: RawTaskInput, index: number, existing?: AgentTask, d
     touchedArtifacts: touchedArtifacts.length > 0 ? touchedArtifacts : undefined,
     summary,
     errorLog,
-    retries: existing?.retries ?? 0,
-    maxRetries,
   };
 }
 
@@ -109,17 +110,17 @@ function computeAggregateStatus(tasks: AgentTask[]): 'active' | 'completed' {
   return allTerminal ? 'completed' : 'active';
 }
 
-function inferCurrentTaskId(tasks: AgentTask[], previous: string | null): string | null {
+/**
+ * 光标纯推导：不存储、不推进、不继承——每次返回快照时从任务状态现算。
+ * 有 running 任务则光标就是它；否则取第一个「pending 且依赖已满足」的任务；
+ * 都没有则为 null。旧实现把光标做成可被 updates 弄丢的持久状态，模型被迫
+ * 反复用 tasks 全量覆盖来"找回"锚点，是重排风暴的直接成因。
+ */
+export function inferCurrentTaskId(tasks: AgentTask[]): string | null {
   const running = tasks.find((task) => task.status === 'running');
   if (running) {
     return running.id;
   }
-  if (previous && tasks.some((task) => task.id === previous && task.status !== 'completed' && task.status !== 'failed')) {
-    return previous;
-  }
-  // 兜底：没有任何 running 任务时，把指针放到第一个「pending 且依赖已满足」的
-  // 任务上。旧实现只认 running，all-pending 初始化后 currentTaskId 永远是 null，
-  // 导致「标记 completed 自动推进」的链路永远走不到（死代码）。
   const completedIds = new Set(
     tasks.filter((task) => task.status === 'completed').map((task) => task.id)
   );
@@ -143,114 +144,29 @@ export function createEmptyTodoListContext(goal: string): TodoListContext {
   };
 }
 
-/** 一次 tasks 全量覆盖相对旧清单的「进度影响」评估（护栏与诊断用）。 */
-export interface TodoReplanImpact {
-  /** 是否为重建（旧清单存在且有任务）。false = 首次初始化。 */
-  isReplan: boolean;
-  /** 新清单里按 id 延续下来的旧任务。 */
-  keptIds: string[];
-  /** 被丢弃的已完成任务（进度证据就此消失）。 */
-  droppedCompleted: AgentTask[];
-  /** 被丢弃的未终结任务（running/pending/failed）。 */
-  droppedUnsettled: number;
-  /** 与旧清单毫无 id 交集的重建（最可疑：多半是压缩后模型丢了计划又重排）。 */
-  isFullReset: boolean;
-}
-
-export function evaluateTodoReplan(
-  previous: TodoListContext | null,
-  rawTasks: readonly RawTaskInput[]
-): TodoReplanImpact {
-  const empty: TodoReplanImpact = {
-    isReplan: false,
-    keptIds: [],
-    droppedCompleted: [],
-    droppedUnsettled: 0,
-    isFullReset: false,
-  };
-  if (!previous || previous.tasks.length === 0) return empty;
-
-  const nextIds = new Set(
-    rawTasks
-      .map((raw) => (typeof raw.id === 'string' ? normalizeId(raw.id, '') : ''))
-      .filter(Boolean)
-  );
-  const keptIds = previous.tasks
-    .filter((task) => nextIds.has(task.id))
-    .map((task) => task.id);
-  const dropped = previous.tasks.filter((task) => !nextIds.has(task.id));
-  const droppedCompleted = dropped.filter((task) => task.status === 'completed');
-  const droppedUnsettled = dropped.filter(
-    (task) => task.status !== 'completed' && task.status !== 'failed'
-  ).length;
-
-  return {
-    isReplan: true,
-    keptIds,
-    droppedCompleted,
-    droppedUnsettled,
-    isFullReset: keptIds.length === 0,
-  };
-}
-
-/** 把重建影响写成一行给模型看的告警；无需告警时返回 undefined。 */
-export function describeTodoReplanImpact(impact: TodoReplanImpact): string | undefined {
-  if (!impact.isReplan) return undefined;
-  const parts: string[] = [];
-  if (impact.droppedCompleted.length > 0) {
-    const ids = impact.droppedCompleted.map((task) => task.id).slice(0, 8).join(', ');
-    parts.push(
-      `丢弃了 ${impact.droppedCompleted.length} 项已完成任务的进度（${ids}）`
-    );
-  }
-  if (impact.droppedUnsettled > 0) {
-    parts.push(`丢弃了 ${impact.droppedUnsettled} 项仍在进行的任务`);
-  }
-  if (impact.isFullReset) {
-    parts.push('新清单与旧清单没有任何 id 交集（完全重排）');
-  }
-  if (parts.length === 0) return undefined;
-  return (
-    `[re-plan 警告] 本次 tasks 全量覆盖${parts.join('；')}。` +
-    '如果目标没有变化（例如只是上下文被压缩、你没看到旧清单），' +
-    '请不要重建计划：用同一批 id 重新提交 tasks，或改用 updates 继续推进原清单。'
-  );
-}
-
 /**
  * 用一组完整的任务定义覆盖 / 初始化 TodoList。
+ * 仅由 applyTodoToolRequest 在创建窗口开启时调用（每个用户回合至多一次）。
  */
 export function writeTodoList(
   previous: TodoListContext | null,
   goal: string,
-  rawTasks: readonly RawTaskInput[],
-  defaultMaxRetries: number = DEFAULT_TODO_MAX_RETRIES
+  rawTasks: readonly RawTaskInput[]
 ): TodoListContext {
   const tasks = rawTasks.map((raw, index) => {
     const existing = previous?.tasks.find((task) =>
       typeof raw.id === 'string' && task.id === normalizeId(raw.id, '')
     );
-    return normalizeTask(raw, index, existing, defaultMaxRetries);
+    return normalizeTask(raw, index, existing);
   });
-
-  const impact = evaluateTodoReplan(previous, rawTasks);
-  const dropsProgress =
-    impact.isReplan && (impact.droppedCompleted.length > 0 || impact.droppedUnsettled > 0);
 
   return {
     goal: goal.trim() || previous?.goal || '',
     tasks,
-    currentTaskId: inferCurrentTaskId(tasks, previous?.currentTaskId ?? null),
+    currentTaskId: inferCurrentTaskId(tasks),
     status: computeAggregateStatus(tasks),
     createdAt: previous?.createdAt ?? Date.now(),
     updatedAt: Date.now(),
-    // 只有真的丢掉进度才计数（首次初始化、以及只改措辞的同 id 重排不计），
-    // 供 UI/eval 观察「一个回合内反复重排」这类失控模式。
-    ...(dropsProgress
-      ? { replanCount: (previous?.replanCount ?? 0) + 1 }
-      : previous?.replanCount !== undefined
-        ? { replanCount: previous.replanCount }
-        : {}),
   };
 }
 
@@ -260,13 +176,10 @@ export interface TodoUpdatePatch {
   summary?: string;
   errorLog?: string;
   touchedArtifacts?: string[];
-  /** 显式 +1 retries；用于 LLM 主动声明"我又试了一次"。 */
-  bumpRetry?: boolean;
 }
 
 /**
  * 解析 LLM 传入的 todo 工具参数（桌面 handler 与 headless harness 共用）。
- * 语义与 todoListTool 的旧内联实现一致：仅接受非空 id 的 patch。
  */
 export function parseTodoUpdatePatches(rawUpdates: unknown): TodoUpdatePatch[] {
   if (!Array.isArray(rawUpdates)) return [];
@@ -289,36 +202,20 @@ export function parseTodoGoal(rawGoal: unknown, defaultGoal: string): string {
 }
 
 /**
- * 部分更新若干任务，标记 completed 时自动推进到下一个可执行任务。
+ * 部分更新若干任务。状态字段完全由模型声明（允许把 completed 改回
+ * pending/running 表示重开工作——这是诚实汇报，不是需要系统兜底的异常）。
+ * 光标在返回前纯推导，不做任何"自动推进"。
  */
 export function updateTodoList(
   previous: TodoListContext,
   patches: readonly TodoUpdatePatch[]
 ): TodoListContext {
+  if (patches.length === 0) {
+    return previous;
+  }
   const tasks = previous.tasks.map((task) => {
     const patch = patches.find((p) => p.id === task.id);
     if (!patch) return task;
-
-    let nextStatus = patch.status ?? task.status;
-    let retries = task.retries ?? 0;
-    let errorLog = task.errorLog;
-
-    // 同一次更新里 bumpRetry 与 failed 转换只计一次重试：旧实现两者同时出现
-    // 会 +2，提前耗尽 maxRetries。
-    const failedTransition =
-      nextStatus === 'failed' && (task.status === 'running' || task.status === 'pending');
-    if (patch.bumpRetry === true || failedTransition) {
-      retries += 1;
-    }
-    if (failedTransition) {
-      const limit = task.maxRetries ?? DEFAULT_TODO_MAX_RETRIES;
-      if (retries < limit) {
-        nextStatus = 'pending';
-      }
-    }
-    if (typeof patch.errorLog === 'string' && patch.errorLog.trim()) {
-      errorLog = patch.errorLog.trim();
-    }
 
     const touched = patch.touchedArtifacts !== undefined
       ? normalizeStringArray(patch.touchedArtifacts)
@@ -326,92 +223,20 @@ export function updateTodoList(
 
     return {
       ...task,
-      status: nextStatus,
+      status: patch.status ?? task.status,
       summary: typeof patch.summary === 'string' && patch.summary.trim() ? patch.summary.trim() : task.summary,
-      errorLog,
+      errorLog: typeof patch.errorLog === 'string' && patch.errorLog.trim() ? patch.errorLog.trim() : task.errorLog,
       touchedArtifacts: touched && touched.length > 0 ? touched : undefined,
-      retries,
     };
   });
 
-  // 自动推进：仅当「当前任务被标记为 completed」时才选择下一个 pending
-  // （依赖已满足）的任务。旧实现加了 `|| patches.some(p => p.id ===
-  // previous.currentTaskId)`：任何触及当前任务的 patch（哪怕只是汇报进度、
-  // 状态仍为 running）都会触发推进——产生两个 running 任务，且指针跳到
-  // 尚未开始的工作上。
-  const completedIds = new Set(
-    tasks.filter((task) => task.status === 'completed').map((task) => task.id)
-  );
-  const newCurrentId = previous.currentTaskId &&
-    tasks.some((task) => task.id === previous.currentTaskId && task.status === 'completed')
-    ? inferNextTaskId(tasks, completedIds)
-    : previous.currentTaskId;
-
-  // 确保被自动推进选中的任务置为 running
-  const finalTasks = newCurrentId !== previous.currentTaskId && newCurrentId
-    ? tasks.map((task) =>
-        task.id === newCurrentId ? { ...task, status: 'running' as TaskStatus } : task
-      )
-    : tasks;
-
   return {
     ...previous,
-    tasks: finalTasks,
-    currentTaskId: newCurrentId,
-    status: computeAggregateStatus(finalTasks),
+    tasks,
+    currentTaskId: inferCurrentTaskId(tasks),
+    status: computeAggregateStatus(tasks),
     updatedAt: Date.now(),
   };
-}
-
-function inferNextTaskId(tasks: AgentTask[], completedIds: Set<string>): string | null {
-  const next = tasks.find((task) => {
-    if (task.status !== 'pending') return false;
-    if (!task.dependsOn || task.dependsOn.length === 0) return true;
-    return task.dependsOn.every((depId) => completedIds.has(depId));
-  });
-  return next ? next.id : null;
-}
-
-/**
- * 标记当前任务完成并自动推进到下一条 pending（依赖已满足的）任务。
- * 保留此函数供测试兼容和外部调用。
- */
-export function completeCurrentTodo(
-  previous: TodoListContext,
-  summary?: string,
-  touchedArtifacts?: readonly string[]
-): TodoListContext {
-  const currentId = previous.currentTaskId;
-  if (!currentId) {
-    return previous;
-  }
-  return updateTodoList(previous, [
-    {
-      id: currentId,
-      status: 'completed',
-      summary,
-      touchedArtifacts: touchedArtifacts ? [...touchedArtifacts] : undefined,
-    },
-  ]);
-}
-
-/**
- * 回合结束兜底提醒（临时 user 消息注入 Agent 日志，仅用于促使模型在收尾前
- * 同步任务清单；不进入主线程持久化的转录）。
- */
-export const TODO_GUARD_NUDGE =
-  '你正试图结束回合，但任务清单仍有未进入终态的任务（running/pending）。'
-  + '请立即调用 todo 工具（updates）同步清单：实际已完成的任务改 completed 并附 summary；'
-  + '确认放弃的改 failed 并附 errorLog；确实仍在进行的保持不动并简述原因。'
-  + '清单与真实进度脱节会让后续回合误判工作状态。';
-
-/**
- * 清单是否仍有未终结任务——回合结束前 guard 的判定条件。
- * null / 空清单 / 已 completed 均返回 false。
- */
-export function hasUnsettledTodoTasks(ctx: TodoListContext | null | undefined): boolean {
-  if (!ctx || ctx.status !== 'active') return false;
-  return ctx.tasks.some((task) => task.status === 'running' || task.status === 'pending');
 }
 
 /**
@@ -436,10 +261,19 @@ export function convergeUnconfirmedRunningTasks(
   return {
     ...ctx,
     tasks,
-    currentTaskId: inferCurrentTaskId(tasks, ctx.currentTaskId),
+    currentTaskId: inferCurrentTaskId(tasks),
     status: computeAggregateStatus(tasks),
     updatedAt: Date.now(),
   };
+}
+
+/**
+ * 清单是否仍有未终结任务——压缩检查点决定是否携带「权威状态」分区的判定条件。
+ * null / 空清单 / 已 completed 均返回 false。
+ */
+export function hasUnsettledTodoTasks(ctx: TodoListContext | null | undefined): boolean {
+  if (!ctx || ctx.status !== 'active') return false;
+  return ctx.tasks.some((task) => task.status === 'running' || task.status === 'pending');
 }
 
 /**
@@ -447,7 +281,7 @@ export function convergeUnconfirmedRunningTasks(
  */
 export function renderTodoListDigest(ctx: TodoListContext): string {
   if (ctx.tasks.length === 0) {
-    return '[TodoList] 空。请用 todo 工具初始化计划（提供 tasks 参数进行全量覆盖）。';
+    return '[TodoList] 空。请在本回合的创建窗口内用 todo 工具的 tasks 参数初始化计划。';
   }
   const lines = [`[TodoList] 目标: ${ctx.goal || '(未设置)'}`];
   for (const task of ctx.tasks) {
@@ -455,9 +289,8 @@ export function renderTodoListDigest(ctx: TodoListContext): string {
       task.status === 'completed' ? '✓' :
       task.status === 'failed' ? '✗' :
       task.status === 'running' ? '▶' : '○';
-    const retry = task.retries && task.retries > 0 ? ` (retry ${task.retries}/${task.maxRetries ?? DEFAULT_TODO_MAX_RETRIES})` : '';
     const focus = task.id === ctx.currentTaskId ? ' ← current' : '';
-    lines.push(`  ${flag} ${task.id}: ${task.title}${retry}${focus}`);
+    lines.push(`  ${flag} ${task.id}: ${task.title}${focus}`);
     if (task.status === 'failed' && task.errorLog) {
       lines.push(`     err: ${task.errorLog.slice(0, 200)}`);
     }
@@ -471,30 +304,28 @@ export function buildTodoToolDefinition(): IToolDefinition {
   return {
     name: 'todo',
     description:
-      '管理主 Agent 的任务清单（短期工作记忆），用于多步任务的规划、进度汇报和重规划。\n\n'
+      '管理主 Agent 的任务清单（短期工作记忆）。\n\n'
       + '两种调用模式（二选一）：\n'
-      + '1. 提供 tasks 参数 → 全量覆盖任务列表（初始化或 re-plan）\n'
-      + '2. 提供 updates 参数 → 部分更新一条或多条任务（标记进度/失败/完成）\n\n'
-      + '自动推进：标记任务为 completed 时，系统自动将下一个 pending（依赖已满足）的任务置为 running。\n'
-      + '与 task 工具的协作：todo 维护主 Agent 自己的计划；要委派给子代理执行，仍然调用 task。\n\n'
-      + 're-plan 纪律：一个目标只规划一次。看到「当前任务清单（权威状态）」分区时，那就是仍在生效的计划，'
-      + '请沿用其中的 id 用 updates 推进；只有用户目标改变时才用 tasks 重建。\n\n'
-      + '每次调用返回完整 TodoList 快照，无需担心遗忘。',
+      + '1. tasks 参数 → 创建任务清单（全量覆盖）。**每个用户回合至多一次**：'
+      + '本回合已经创建过（或旧清单仍然有效）时，再发 tasks 会被直接拒绝，清单保持原样。\n'
+      + '2. updates 参数 → 部分更新已有任务（进度/完成/失败/重开），回合内不限次数。\n\n'
+      + '纪律：新消息带来全新目标时才创建清单；同一目标继续推进时沿用现有清单的 id，'
+      + '用 updates 更新状态（completed 可改回 pending/running 表示重开工作，这是允许的诚实汇报）。'
+      + '任务状态变化后 current 标记由系统自动重算，无需（也无法）手动设置。'
+      + '与 task 工具正交：todo 维护主 Agent 自己的计划；委派子代理执行调用 task。\n\n'
+      + '每次调用返回完整 TodoList 快照 + digest，无需担心遗忘，更不要为了"确认状态"重复调用。',
     parameters: {
       type: 'object',
       properties: {
         goal: {
           type: 'string',
-          description: '（可选）更新用户目标描述。',
+          description: '（可选）本回合目标描述；创建时缺省用用户消息填充。',
         },
         tasks: {
           type: 'array',
           description:
-            '全量任务列表，覆盖整个 TodoList。用于初始化新计划，或**用户目标真的变了**时的重新规划（re-plan）。'
-            + '每次调用会完全替换旧清单：未在新清单里复现的 id，其已完成/进行中进度会丢失'
-            + '（沿用同 id 的任务会保留状态与 summary）。上下文被压缩过、你只是看不到旧清单时'
-            + '**不要**重建计划——按检查点里的「当前任务清单（权威状态）」用 updates 继续推进。'
-            + '与 updates 参数互斥。',
+            '创建任务清单（全量覆盖），每个用户回合至多一次。沿用旧清单中相同 id 的任务会保留'
+            + '其状态与 summary，其余字段整体替换。与 updates 参数互斥。',
           items: {
             type: 'object',
             properties: {
@@ -511,17 +342,16 @@ export function buildTodoToolDefinition(): IToolDefinition {
                 items: { type: 'string' },
                 description: '预期产出文件路径，用于验证。',
               },
-              maxRetries: {
-                type: 'number',
-                description: '允许的最大重试次数，默认 3。破坏性写入可调小。',
-              },
             },
             required: ['title', 'description'],
           },
         },
         updates: {
           type: 'array',
-          description: '部分更新一条或多条任务，不覆盖整个清单。常用：改 status（pending→running→completed/failed）、写 summary/errorLog、汇报 touchedArtifacts。标记完成时自动推进到下一个可执行任务。与 tasks 参数互斥。',
+          description:
+            '部分更新一条或多条已有任务，不增删任务、不覆盖清单。'
+            + '常用：改 status（pending/running/completed/failed）、写 summary/errorLog、汇报 touchedArtifacts。'
+            + '与 tasks 参数互斥。',
           items: {
             type: 'object',
             properties: {
@@ -529,10 +359,10 @@ export function buildTodoToolDefinition(): IToolDefinition {
               status: {
                 type: 'string',
                 enum: ['pending', 'running', 'completed', 'failed'],
-                description: '新状态。设为 completed 会自动推进到下一条任务。',
+                description: '新状态（如实反映即可，current 由系统派生）。',
               },
               summary: { type: 'string', description: '完成或进展摘要。' },
-              errorLog: { type: 'string', description: '失败时的错误说明，供后续 re-plan 参考。' },
+              errorLog: { type: 'string', description: '失败或重开的说明，供后续回合参考。' },
               touchedArtifacts: {
                 type: 'array',
                 items: { type: 'string' },
@@ -545,4 +375,69 @@ export function buildTodoToolDefinition(): IToolDefinition {
       },
     },
   };
+}
+
+// ── 请求应用（桌面 handler 与 headless harness 共用的唯一实现）────
+
+export interface TodoToolRequestResult {
+  /** 处理后的清单快照。rejected 时为原样返回（引用不变或空清单）。 */
+  ctx: TodoListContext;
+  /** 本次调用创建（全量覆盖）了清单，已消耗本回合创建窗口。 */
+  created: boolean;
+  /** 本次 tasks 调用因创建窗口已关闭而被拒绝。 */
+  rejected: boolean;
+}
+
+/**
+ * 应用一次 todo 工具请求（纯函数，不产生副作用）。
+ *
+ * @param previous 当前清单（可为 null）
+ * @param args     模型传入的工具参数（goal / tasks / updates）
+ * @param opts.creationOpen 本用户回合的创建窗口是否尚未被消耗
+ * @param opts.defaultGoal  创建时 goal 缺省的兜底文本（通常是本条用户消息）
+ */
+export function applyTodoToolRequest(
+  previous: TodoListContext | null,
+  args: Record<string, unknown>,
+  opts: { creationOpen: boolean; defaultGoal: string }
+): TodoToolRequestResult {
+  const goal = parseTodoGoal(args.goal, opts.defaultGoal);
+
+  if (Array.isArray(args.tasks)) {
+    if (!opts.creationOpen) {
+      return {
+        ctx: previous ?? createEmptyTodoListContext(goal),
+        created: false,
+        rejected: true,
+      };
+    }
+    const next = writeTodoList(previous, goal, args.tasks as RawTaskInput[]);
+    return { ctx: next, created: true, rejected: false };
+  }
+
+  if (Array.isArray(args.updates)) {
+    if (!previous) {
+      // updates 不能凭空造清单——引导模型走创建路径。
+      return { ctx: createEmptyTodoListContext(goal), created: false, rejected: false };
+    }
+    const patches = parseTodoUpdatePatches(args.updates);
+    let next = patches.length > 0 ? updateTodoList(previous, patches) : previous;
+    if (goal && goal !== next.goal) {
+      next = { ...next, goal, updatedAt: Date.now() };
+    }
+    return { ctx: next, created: false, rejected: false };
+  }
+
+  // 无 tasks 无 updates：仅更新 goal（若提供）。
+  if (previous) {
+    if (goal && goal !== previous.goal) {
+      return {
+        ctx: { ...previous, goal, updatedAt: Date.now() },
+        created: false,
+        rejected: false,
+      };
+    }
+    return { ctx: previous, created: false, rejected: false };
+  }
+  return { ctx: createEmptyTodoListContext(goal), created: false, rejected: false };
 }

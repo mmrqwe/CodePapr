@@ -3,7 +3,6 @@ import type { IChatRequest, IChatResponse, IChatStreamEvent, IContextSnapshot, I
 import {
   Agent,
   CONTINUATION_NUDGE,
-  TODO_GUARD_NUDGE,
   DEFAULT_AGENT_MAX_TOOL_ROUNDS,
   EMPTY_COMPLETION_DISABLE_THINKING_AFTER,
   EMPTY_COMPLETION_RETRY_DELAYS_MS,
@@ -1395,93 +1394,6 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     const logged = agent.getSession().logStore.getAllMessages();
     expect(logged.some((m) => (m.content ?? '').includes('reRecallInsertion'))).toBe(false);
     expect(logged.some((m) => (m.content ?? '').includes('## Re-recall'))).toBe(false);
-  });
-});
-describe('Agent todoListGuard（回合结束任务清单同步守卫）', () => {
-  function setupGuardAgent(guard: () => boolean, responses: string[]) {
-    const toolRegistry = new ToolRegistry();
-    const session = new Session({
-      sessionId: 'session-guard',
-      prefix: new ImmutablePrefix({
-        systemPrompt: '你是测试助手',
-        tools: [],
-        model: 'test-model',
-        parameters: { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
-      }),
-      toolRegistry,
-    });
-    const chatFn = vi
-      .fn<(_: IChatRequest) => Promise<IChatResponse>>()
-      .mockImplementation(async () => createResponse(responses[chatFn.mock.calls.length - 1] ?? ''));
-    const provider: ILLMProvider = {
-      name: 'openai',
-      models: ['test-model'],
-      validate: () => true,
-      chat: chatFn,
-    };
-    const agent = new Agent({
-      session,
-      provider,
-      providerName: 'openai',
-      requestBuilder: { build: ({ model }) => ({ model, messages: [] }) },
-      cacheValidator: {
-        validate: () => ({
-          prefixCached: false,
-          prefixCreated: false,
-          cacheReadTokens: 0,
-          cacheCreationTokens: 0,
-          newInputTokens: 1,
-          outputTokens: 1,
-          cacheHitRate: 0,
-        }),
-      },
-      todoListGuard: guard,
-    });
-    return { agent, session, chatFn };
-  }
-
-  it('模型收尾未同步清单时注入一次性提醒并继续循环', async () => {
-    const guard = vi.fn<() => boolean>().mockReturnValue(true);
-    const { agent, session, chatFn } = setupGuardAgent(guard, ['干完了', '已同步清单']);
-
-    const response = await agent.chat('把活干完');
-
-    // 第二次收尾时 guard 已被消费，不再追问（provider 恰好 2 次调用）
-    expect(chatFn).toHaveBeenCalledTimes(2);
-    expect(guard).toHaveBeenCalledTimes(1);
-    expect(response.content).toBe('已同步清单');
-
-    const logged = session.logStore.getAllMessages();
-    const nudges = logged.filter((m) => m.content === TODO_GUARD_NUDGE);
-    expect(nudges).toHaveLength(1);
-    expect(nudges[0]!.role).toBe('user');
-    expect(nudges[0]!.id).toContain('todo-guard-nudge');
-    // 顺序：user 输入 → assistant(收尾) → user(提醒) → assistant(最终)
-    expect(logged.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
-  });
-
-  it('guard 返回 false 时不打扰收尾', async () => {
-    const guard = vi.fn<() => boolean>().mockReturnValue(false);
-    const { agent, session, chatFn } = setupGuardAgent(guard, ['正常收尾']);
-
-    const response = await agent.chat('问个简单问题');
-    expect(chatFn).toHaveBeenCalledTimes(1);
-    expect(guard).toHaveBeenCalledTimes(1);
-    expect(response.content).toBe('正常收尾');
-    expect(session.logStore.getAllMessages().some((m) => m.content === TODO_GUARD_NUDGE)).toBe(false);
-  });
-
-  it('每次 chat() 独立计数：第二回合仍可再次提醒（提醒不按会话累计）', async () => {
-    const guard = vi.fn<() => boolean>().mockReturnValue(true);
-    const { agent, session, chatFn } = setupGuardAgent(
-      guard,
-      ['收尾1', '同步1', '收尾2', '同步2']
-    );
-    await agent.chat('第一轮');
-    await agent.chat('第二轮');
-    expect(chatFn).toHaveBeenCalledTimes(4);
-    const nudges = session.logStore.getAllMessages().filter((m) => m.content === TODO_GUARD_NUDGE);
-    expect(nudges).toHaveLength(2);
   });
 });
 

@@ -155,8 +155,8 @@ export interface AgentWorkerChatPayload {
    */
   contextInsertions?: RequestContextInsertion[];
   /** 回合开始时主线程的 TodoList 快照：worker 用它播种本进程注册表镜像，
-   *  使回合结束守卫（todoListGuard）在 worker 不重启/工具桥结果之外也能看到
-   *  上一回合遗留的未终结清单；回合中镜像再由 `todo` 工具返回值持续刷新。 */
+   *  供回合中压缩检查点的「当前任务清单（权威状态）」分区读取；
+   *  回合中镜像再由 `todo` 工具返回值持续刷新。 */
   todoSnapshot?: TodoListContext | null;
   images?: IImageContent[];
   settings: WorkerAgentSettings;

@@ -562,24 +562,18 @@ export interface AgentTask {
   summary?: string;
   /** 失败时的结构化错误日志，供 Agent 自我反思 */
   errorLog?: string;
-  /** 已重试次数 */
-  retries?: number;
-  /** 单条任务允许的最大重试次数；超过则进入 re-plan */
-  maxRetries?: number;
 }
 
 export interface TodoListContext {
   /** 用户的终极目标 */
   goal: string;
   tasks: AgentTask[];
-  /** 当前正在执行的任务 ID；空表示尚未开始或全部完成 */
+  /** 当前任务：每次快照返回时由任务状态纯推导（running 优先，否则首个可执行 pending） */
   currentTaskId: string | null;
   /** 顶层 TodoList 状态：active 表示尚有 pending/running，completed 表示全部终结 */
   status: 'active' | 'completed';
   createdAt: number;
   updatedAt: number;
-  /** tasks 全量覆盖导致进度丢失的次数（诊断失控重排用；首次/同 id 重排不计）。 */
-  replanCount?: number;
 }
 
 // ============================================================================

@@ -248,7 +248,7 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
   // toolDefinitions 同步缺位，幻觉调用在 worker 侧报 unknown tool）。
   const minimalSurface = config.settings.agentToolProfile === 'minimal';
   if (!minimalSurface) {
-    registerTodoListTools(registry, config.sessionId, '');
+    registerTodoListTools(registry, config.sessionId);
 
     // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
     registerMemoryTools(registry, config.workspacePath, config.sessionId);

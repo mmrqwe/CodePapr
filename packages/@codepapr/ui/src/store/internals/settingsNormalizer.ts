@@ -688,10 +688,6 @@ export function normalizeSettings(
     typeof input.scoutMaxDepth === 'number' && Number.isFinite(input.scoutMaxDepth)
       ? Math.max(1, Math.min(5, Math.floor(input.scoutMaxDepth)))
       : DEFAULT_SETTINGS.scoutMaxDepth;
-  const todoMaxRetries =
-    typeof input.todoMaxRetries === 'number' && Number.isFinite(input.todoMaxRetries)
-      ? Math.max(0, Math.min(10, Math.floor(input.todoMaxRetries)))
-      : DEFAULT_SETTINGS.todoMaxRetries;
   const goalMaxIterations =
     typeof input.goalMaxIterations === 'number' && Number.isFinite(input.goalMaxIterations)
       ? Math.max(1, Math.min(100, Math.floor(input.goalMaxIterations)))
@@ -1150,7 +1146,6 @@ export function normalizeSettings(
     scoutTemperature,
     scoutMaxToolRounds,
     scoutMaxDepth,
-    todoMaxRetries,
     goalMaxIterations,
     goalMaxWallClockMs,
     goalRequireGitClean,

@@ -32,12 +32,6 @@
 | `maxContextTokens` | 数字 | `200000` | `1000` - `1000000` | 上下文窗口 token 上限，超出时触发压缩。对 DeepSeek / OpenAI 兼容 / Claude 等统一生效（`max(1000, 设定值)`）。 |
 | `maxConversationRounds` | 数字 | `24` | `2` - `500` | 触发上下文压缩前保留的最大对话轮数 |
 
-## TodoList 设置
-
-| 参数 | 类型 | 默认值 | 范围 | 说明 |
-|---|---|---|---|---|
-| `todoMaxRetries` | 数字 | `3` | `0` - `10` | 单条 TodoList 任务失败后的最大重试次数。0 表示不重试 |
-
 ## ProjectGraph 设置
 
 | 参数 | 类型 | 默认值 | 范围 | 说明 |

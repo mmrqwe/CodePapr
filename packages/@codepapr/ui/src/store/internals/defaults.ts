@@ -220,7 +220,6 @@ export const DEFAULT_SETTINGS: Settings = {
   scoutTemperature: 0.3,
   scoutMaxToolRounds: 200,
   scoutMaxDepth: 2,
-  todoMaxRetries: 3,
   // Goal 自主循环
   goalMaxIterations: 20,
   goalMaxWallClockMs: 1_800_000,

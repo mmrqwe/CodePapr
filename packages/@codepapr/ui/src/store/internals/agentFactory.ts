@@ -19,7 +19,6 @@ import {
   type PruneOptions,
   SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
   PERMISSION_WAITING_TOOL_TIMEOUTS,
-  hasUnsettledTodoTasks,
 } from '@codepapr/core';
 import type { PromptMode } from '@codepapr/core';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
@@ -38,7 +37,6 @@ import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTo
 import { registerMcpTools } from '../../tools/mcpTools';
 import { registerMemoryTools } from '../../tools/memoryTools';
 import { registerTodoListTools } from '../../tools/todoListTool';
-import { getTodoListContext } from '../../tools/todoListRegistry';
 import { mcpSearchHidesNativeWeb } from '../../utils/mcpTypes';
 import {
   buildProviderInstance,
@@ -442,7 +440,7 @@ export function buildAgentSessionParts(
   // 幻觉调用报 unknown tool；prompt 层由 buildMinimalToolSurfaceSection 说明）。
   const minimalSurface = settings.agentToolProfile === 'minimal';
   if (!minimalSurface) {
-    registerTodoListTools(toolRegistry, sessionId, '', settings.todoMaxRetries);
+    registerTodoListTools(toolRegistry, sessionId);
 
     // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
     registerMemoryTools(toolRegistry, workspacePath, sessionId);
@@ -538,7 +536,6 @@ function _createLocalAgent(
     },
     toolOutputTruncation: buildToolOutputTruncation(settings, workspacePath),
     toolContextConfig: buildToolContextConfig(settings),
-    todoListGuard: () => hasUnsettledTodoTasks(getTodoListContext(sessionId)),
     contextCompaction: createContextCompactionHandler(
       settings,
       parts.providerName,

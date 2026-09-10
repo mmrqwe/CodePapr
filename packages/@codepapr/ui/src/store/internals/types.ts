@@ -156,7 +156,6 @@ export interface Settings {
   scoutTemperature: number;
   scoutMaxToolRounds: number;
   scoutMaxDepth: number;
-  todoMaxRetries: number;
   // Goal 自主循环配置
   goalMaxIterations: number;
   goalMaxWallClockMs: number;

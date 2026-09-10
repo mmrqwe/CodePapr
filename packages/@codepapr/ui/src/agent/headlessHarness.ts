@@ -24,15 +24,11 @@ import {
   buildSessionBootstrapPrompt,
   buildMinimalToolSurfaceSection,
   buildSkillsSection,
-  createEmptyTodoListContext,
-  DEFAULT_TODO_MAX_RETRIES,
+  applyTodoToolRequest,
   isReadOnlyMode,
-  parseTodoGoal,
-  parseTodoUpdatePatches,
   readOnlyModeBlockMessage,
   renderTodoListDigest,
-  updateTodoList,
-  writeTodoList,
+  TODO_CREATE_REJECTED_NOTICE,
 } from '@codepapr/core';
 import type { IToolDefinition, IMessage, TodoListContext } from '@codepapr/types';
 import { hasEnabledMcpSearch, parseMcpToolName } from '../utils/mcpTypes';
@@ -92,6 +88,8 @@ interface SessionMirror {
   /** canonical 历史（不含 bootstrap；由 result.deltaMessages 累积）。 */
   messages: IMessage[];
   todo: TodoListContext | null;
+  /** 本 run（= 一次用户回合）的 tasks 创建窗口是否尚未被消耗。 */
+  creationOpen: boolean;
   compactionGeneration: number;
 }
 
@@ -118,7 +116,7 @@ export function createHarnessMediator(deps: HarnessMediatorDeps): HarnessMediato
   function getSession(sessionId: string): SessionMirror {
     let mirror = sessions.get(sessionId);
     if (!mirror) {
-      mirror = { messages: [], todo: null, compactionGeneration: 0 };
+      mirror = { messages: [], todo: null, creationOpen: false, compactionGeneration: 0 };
       sessions.set(sessionId, mirror);
     }
     return mirror;
@@ -207,6 +205,8 @@ export function createHarnessMediator(deps: HarnessMediatorDeps): HarnessMediato
   function handleRun(payload: HarnessRunPayload): void {
     const harness = requireAssembled();
     const mirror = getSession(payload.sessionId);
+    // 一次 harness/run = 一个用户回合，开启该回合的 todo 创建窗口。
+    mirror.creationOpen = true;
     if (mirror.messages.length === 0 && payload.history && payload.history.length > 0) {
       // Host-restored multi-run history: seed the mirror so this process
       // continues the conversation instead of cold-starting.
@@ -325,35 +325,28 @@ export function createHarnessMediator(deps: HarnessMediatorDeps): HarnessMediato
   function handleTodo(
     message: Extract<AgentWorkerToMainMessage, { type: 'tool-request' }>
   ): void {
-    const harness = requireAssembled();
     const { requestId, toolRequestId, arguments: args } = message;
     const sessionId = sessionIdForRequest(requestId);
     const mirror = getSession(sessionId);
-    const goal = parseTodoGoal(args.goal, '');
-    const hasTasks = Array.isArray(args.tasks);
-    const maxRetries = harness.settings.todoMaxRetries ?? DEFAULT_TODO_MAX_RETRIES;
-    let nextCtx: TodoListContext;
-    if (hasTasks) {
-      nextCtx = writeTodoList(
-        mirror.todo,
-        goal,
-        args.tasks as Array<Record<string, unknown>>,
-        maxRetries
-      );
-    } else if (mirror.todo) {
-      const patches = parseTodoUpdatePatches(args.updates);
-      nextCtx = patches.length > 0 ? updateTodoList(mirror.todo, patches) : mirror.todo;
-      if (goal && goal !== mirror.todo.goal) {
-        nextCtx = { ...nextCtx, goal, updatedAt: Date.now() };
-      }
-    } else {
-      const empty = createEmptyTodoListContext(goal);
-      const patches = parseTodoUpdatePatches(args.updates);
-      nextCtx = patches.length > 0 ? updateTodoList(empty, patches) : empty;
+    const result = applyTodoToolRequest(mirror.todo, args, {
+      creationOpen: mirror.creationOpen,
+      defaultGoal: mirror.todo?.goal ?? '',
+    });
+    if (result.rejected) {
+      // 状态零变化：只把当前快照 + 拒绝说明回传给模型。
+      respondTool(requestId, toolRequestId, true, {
+        todoList: result.ctx,
+        digest: renderTodoListDigest(result.ctx),
+        notice: TODO_CREATE_REJECTED_NOTICE,
+      });
+      return;
     }
-    mirror.todo = nextCtx;
-    const digest = renderTodoListDigest(nextCtx);
-    respondTool(requestId, toolRequestId, true, { todoList: nextCtx, digest });
+    if (result.created) {
+      mirror.creationOpen = false;
+    }
+    mirror.todo = result.ctx;
+    const digest = renderTodoListDigest(result.ctx);
+    respondTool(requestId, toolRequestId, true, { todoList: result.ctx, digest });
     emitHarnessEvent('todo.updated', requestId, sessionId, { digest });
   }
 

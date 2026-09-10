@@ -250,24 +250,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </FieldCard>
 
       <FieldCard padding="loose">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">TodoList</h3>
-        <div className="grid gap-5 md:grid-cols-2">
-          <TextField
-            label={t.todoMaxRetriesLabel}
-            type="number"
-            min="0"
-            max="10"
-            value={local.todoMaxRetries}
-            onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
-              update({ todoMaxRetries: Number.isFinite(parsed) ? parsed : local.todoMaxRetries });
-            }}
-            title={t.todoMaxRetriesLabel}
-          />
-        </div>
-      </FieldCard>
-
-      <FieldCard padding="loose">
         <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">{t.goalSettingsTitle}</h3>
         <div className="grid gap-5 md:grid-cols-2">
           <TextField

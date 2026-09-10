@@ -22,7 +22,6 @@ import {
   PERMISSION_WAITING_TOOL_TIMEOUTS,
   withTaskSlot,
   TODO_TOOL_NAME,
-  hasUnsettledTodoTasks,
 } from '@codepapr/core';
 import {
   DEFAULT_MAX_TOKENS,
@@ -50,7 +49,7 @@ import {
 } from './agentWorkerProtocol';
 import { parseMcpToolName, sanitizeMcpToolPart } from '../utils/mcpTypes';
 import { buildPruneOptions, createContextCompactionHandler } from './compactionHandler';
-import { getTodoListContext, setTodoListContext } from '../tools/todoListRegistry';
+import { setTodoListContext } from '../tools/todoListRegistry';
 import {
   CONTEXT_SURFACE_RENDER_VERSION,
   freezePruneParams,
@@ -1608,7 +1607,6 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     },
     toolOutputTruncation: buildToolOutputTruncation(payload.settings),
     toolContextConfig: buildToolContextConfig(payload.settings),
-    todoListGuard: () => hasUnsettledTodoTasks(getTodoListContext(payload.sessionId)),
     contextCompaction: createContextCompactionHandler(
       payload.settings,
       payload.providerName,

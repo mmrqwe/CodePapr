@@ -279,22 +279,20 @@ export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, filterTool
 export type { AgentDefinition, AgentMode, AgentToolProfile, MinimalAgentToolName } from './agent/agentConfig';
 export {
   TODO_TOOL_NAME,
-  DEFAULT_TODO_MAX_RETRIES,
+  TODO_CREATE_REJECTED_NOTICE,
   buildTodoToolDefinition,
   createEmptyTodoListContext,
   writeTodoList,
   updateTodoList,
-  completeCurrentTodo,
+  inferCurrentTaskId,
+  applyTodoToolRequest,
   renderTodoListDigest,
   parseTodoUpdatePatches,
   parseTodoGoal,
-  TODO_GUARD_NUDGE,
   hasUnsettledTodoTasks,
   convergeUnconfirmedRunningTasks,
-  evaluateTodoReplan,
-  describeTodoReplanImpact,
 } from './agent/todoList';
-export type { TodoUpdatePatch, TodoReplanImpact } from './agent/todoList';
+export type { TodoUpdatePatch, TodoToolRequestResult } from './agent/todoList';
 export { createTaskSlot, withTaskSlot, TASK_PARALLEL_CONCURRENCY } from './agent/taskSlot';
 export { selectSubagentExecutionRoute } from './agent/subagentRoute';
 export type { SubagentExecutionRoute, SubagentRouteSettings } from './agent/subagentRoute';

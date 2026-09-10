@@ -47,6 +47,29 @@ export function todoContextToChecklist(
  */
 const todoContexts = new Map<string, TodoListContext>();
 
+/**
+ * 创建窗口：每条用户消息发送时 open（携带用户原文作 goal 兜底），
+ * 被一次 `tasks` 全量覆盖消耗后 close。窗口关闭期间到达的 tasks 调用
+ * 由工具 handler 直接拒绝——「创建是回合级事件」这条纪律的强制执行点。
+ */
+const creationWindows = new Map<string, string>();
+
+export function openTodoCreationWindow(sessionId: string, goalText?: string): void {
+  creationWindows.set(sessionId, (goalText ?? '').trim().slice(0, 400));
+}
+
+export function closeTodoCreationWindow(sessionId: string): void {
+  creationWindows.delete(sessionId);
+}
+
+export function isTodoCreationWindowOpen(sessionId: string): boolean {
+  return creationWindows.has(sessionId);
+}
+
+export function getTodoCreationWindowGoal(sessionId: string): string {
+  return creationWindows.get(sessionId) ?? '';
+}
+
 type ChecklistListener = (sessionId: string, checklist: TaskChecklist | null) => void;
 
 let checklistListener: ChecklistListener | null = null;
@@ -71,8 +94,8 @@ export function getTodoListContext(sessionId: string): TodoListContext | null {
 /**
  * 写入上下文并按模式通知监听：
  * - `'rendered'`（默认）：推送渲染结构（工具提交、持久化恢复）
- * - `'null'`：推送空值（新建空清单时旧实现即推 null，保持一致）
- * - `'none'`：不通知（rememberTodoGoal 仅改 goal，旧实现不推送）
+ * - `'null'`：推送空值（新建空清单时不渲染空卡片）
+ * - `'none'`：不通知
  */
 export type TodoChecklistNotification = 'rendered' | 'null' | 'none';
 
@@ -94,6 +117,7 @@ export function commitTodoListContext(sessionId: string, ctx: TodoListContext): 
 
 export function resetTodoListContext(sessionId: string): void {
   todoContexts.delete(sessionId);
+  creationWindows.delete(sessionId);
   notifyChecklist(sessionId, null);
 }
 
@@ -103,6 +127,7 @@ export function clearAllTodoListContexts(): void {
     notifyChecklist(sessionId, null);
   }
   todoContexts.clear();
+  creationWindows.clear();
 }
 
 /** 获取所有 TodoList 上下文，供持久化使用。 */
