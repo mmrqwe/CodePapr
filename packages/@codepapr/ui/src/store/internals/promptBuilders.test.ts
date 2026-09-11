@@ -207,7 +207,9 @@ describe('buildAgentRuntimeSystemPrompt', () => {
     // 含陈旧交叉引用的行整行剔除（[read] 教用已移除的 list/glob、[edit/patch/write]
     // 教用已移除的 patch）；allowlist 工具的正确用法仍随 schema description 下发。
     expect(prompt).not.toContain('[read]');
-    expect(prompt).not.toContain('[项目记忆]');
+    // [项目记忆] 不是工具提示，而是写作纪律：write 在极简 allowlist 内，
+    // 模型仍可能试图直写 MEMORY.md（会被拦截），因此该行保留。
+    expect(prompt).toContain('[项目记忆]');
     // 无陈旧引用的行保留。
     expect(prompt).toContain('[bash]');
     expect(prompt).toContain('[web]');
