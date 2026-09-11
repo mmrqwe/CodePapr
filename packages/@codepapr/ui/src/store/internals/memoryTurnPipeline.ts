@@ -9,7 +9,9 @@
  *   新记忆立刻随 epoch 生效。
  *
  * 两个卡点都绝不抛错、绝不阻塞主流程（AbortError 除外语义在这里不适用：curator
- * 超时/失败只记审计）。最近一次动作记录在模块状态里，供面板展示「curator 状态行」。
+ * 超时/失败只记审计）。pre-compact 超时即 abort 在飞会话 + 写盘前 aborted 检查，
+ * 不允许压缩提交后迟到落盘（记忆与 epoch 的时序始终可解释）。最近一次动作记录在
+ * 模块状态里，供面板展示「curator 状态行」。
  */
 
 import type { CompactionSettings, UIMessage } from './types';
@@ -98,15 +100,23 @@ async function runCuratorSafe(params: {
   try {
     const currentMd = await readMemoryMd(workspacePath);
     type RunOutcome = CuratorOutcome | { kind: 'timeout' };
+    // 超时不只是「不再等待」：abort 在飞会话，防止它在压缩提交之后迟到写盘
+    // （记忆落后/领先一个 epoch 的时序必须可控）。runMemoryCurator 在写盘前
+    // 也会检查 aborted，provider 不响应取消时仍不会落盘。
+    const controller = new AbortController();
     const task: Promise<RunOutcome> = runMemoryCurator({
       workspacePath,
       currentMd,
       material,
       settings,
       lang: settings.lang === 'en' ? 'en' : settings.lang === 'zh-TW' ? 'zh-TW' : 'zh-CN',
+      abortSignal: controller.signal,
     });
     const outcome = timeoutMs
-      ? await withTimeout<RunOutcome>(task, timeoutMs, () => ({ kind: 'timeout' as const }))
+      ? await withTimeout<RunOutcome>(task, timeoutMs, () => {
+          controller.abort();
+          return { kind: 'timeout' as const };
+        })
       : await task;
     record(
       workspacePath,
@@ -161,7 +171,8 @@ export function scheduleDeliveryCuratorForTurn(params: {
 
 /**
  * 卡点 2：pre-compact 触发（无条件 + 超时）。在 epoch 重渲染 Bootstrap **之前**
- * await，让 curator 写入的新记忆随本 epoch 立即生效。
+ * await，让 curator 写入的新记忆随本 epoch 立即生效；超时则 abort 在飞会话，
+ * 本轮记忆保持压缩前状态（落后一个 epoch，面板状态行显示 timeout）。
  */
 export async function runPreCompactCurator(params: {
   workspacePath: string;

@@ -34,14 +34,14 @@
 internal 子代理（零工具、fast 档、复用压缩模型/温度、prompt 运行时注入）。两个卡点：
 
 - **交付卡点**：回合结束，多信号门命中才跑——显式记忆意图（「记住 / 以后都 / please remember…」）、持久禁令（「不要再用 / never … again」）、**Agent 主动提议**（最终答复里以「记忆候选：」/`Memory candidate:` 标记的稳定事实），或本回合有验证成功的测试/构建命令。命中则 fire-and-forget（不阻塞回合收尾）。**Ask 模式永不触发**；普通模态词（必须 / 务必 / always…）不触发——它们是日常任务指令的高频词，纳入会每回合误触（费 token + 前缀缓存抖动），兜底交给压缩前卡点。
-- **压缩前卡点**：任意压缩入口（回合末 epoch、`/compact`、Goal force、mid-loop 提交前）**无条件**运行，20s 超时。压缩本来就重置前缀缓存，这一刀零额外成本；写入发生在 epoch 重渲染 Bootstrap 之前，新记忆立刻随 epoch 生效。
+- **压缩前卡点**：任意压缩入口（回合末 epoch、`/compact`、Goal force、mid-loop 提交前）**无条件**运行，20s 超时；超时即 abort 在飞会话（写盘前 aborted 检查兜底），本 epoch 沿用压缩前记忆，面板状态行显示 timeout。压缩本来就重置前缀缓存，这一刀零额外成本；写入发生在 epoch 重渲染 Bootstrap 之前，新记忆立刻随 epoch 生效。
 
 管家输出三选一：完整 MEMORY.md 内容 / `NO_CHANGE` / 拒绝说明。写入走 `requestMemoryMdWrite` 单飞队列 + `expectedContent` 并发守卫（读取后被并发修改则拒绝，面板重载后再试）。
 
 ### 3. 素材边界与机械门
 
 - **素材只含**：本回合用户原话 + assistant 最终文本（交付卡点）/ 将被折叠的 v4 骨架 + 活动文本（压缩卡点）。**绝不含原始工具输出**（防注入、防大段转录）。
-- **机械门**（LLM 之外）：`redactSecrets` 强制脱敏；`envelopeContent` 风险标记（注入指令 / 危险命令 / 策略绕过）拒写；行数/token 上限；**mass-drop 规则**——零新增条目且删除超过一半 = 拒写（防管家把用户记忆整段洗掉）。
+- **机械门**（LLM 之外）：`redactSecrets` 强制脱敏；`envelopeContent` 风险标记（注入指令 / 危险命令 / 策略绕过）拒写；行数/token 上限；**mass-drop 规则**——零新增且删除超过一半既有**单元** = 拒写（单元覆盖列表 / 表格 / 段落，标题与表格分隔行不计，防管家把用户记忆整段洗掉）。
 
 ### 4. Agent 无记忆工具
 

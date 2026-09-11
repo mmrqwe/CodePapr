@@ -94,6 +94,28 @@ describe('validateMemoryMdContent', () => {
     const smallLoss = `${base}- 端口固定 5432\n- 测试用 pnpm test\n`;
     expect(validateMemoryMdContent(prev, smallLoss, 'memory-curator').ok).toBe(true);
   });
+
+  it('mass-drop 覆盖表格与段落（不只看 `- ` 列表行）', () => {
+    const prev = [
+      '# 项目与用户长期记忆',
+      '## 技术栈与环境约束',
+      '端口固定 5432，测试实例 5433。',
+      '| 环境 | 地址 |',
+      '| --- | --- |',
+      '| dev | localhost:5432 |',
+      '| prod | db.internal:5432 |',
+      '',
+    ].join('\n');
+    // 只留段落、丢掉整个表格（零新增，2/4 过半）→ 拒写。
+    const washed = '# 项目与用户长期记忆\n## 技术栈与环境约束\n端口固定 5432，测试实例 5433。\n';
+    const verdict = validateMemoryMdContent(prev, washed, 'memory-curator');
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reasons.some((reason) => reason.startsWith('mass-drop'))).toBe(true);
+
+    // 标题与表格分隔行不算单元：只改标题措辞不触发（无条目丢失）。
+    const retitled = prev.replace('# 项目与用户长期记忆', '# 项目长期记忆');
+    expect(validateMemoryMdContent(prev, retitled, 'memory-curator').ok).toBe(true);
+  });
 });
 
 describe('requestMemoryMdWrite', () => {

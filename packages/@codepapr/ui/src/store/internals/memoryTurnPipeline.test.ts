@@ -168,10 +168,14 @@ describe('pre-compact 卡点（无条件）', () => {
     expect(getLastCuratorOutcome('/ws')).toMatchObject({ kind: 'nochange', trigger: 'compact' });
   });
 
-  it('超时（20s）→ 记录 timeout，不阻塞', async () => {
+  it('超时（20s）→ abort 在飞会话并记录 timeout，不阻塞', async () => {
     vi.useFakeTimers();
     try {
-      runMemoryCuratorMock.mockImplementation(() => new Promise(() => undefined));
+      let capturedSignal: AbortSignal | undefined;
+      runMemoryCuratorMock.mockImplementation((...callArgs: unknown[]) => {
+        capturedSignal = (callArgs[0] as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
+        return new Promise(() => undefined);
+      });
       const pending = runPreCompactCurator({
         workspacePath: '/ws-timeout',
         skeleton: [{ userId: 'u1', q: 'q', a: 'a' }],
@@ -179,6 +183,7 @@ describe('pre-compact 卡点（无条件）', () => {
       });
       await vi.advanceTimersByTimeAsync(20_100);
       await pending;
+      expect(capturedSignal?.aborted).toBe(true);
       expect(getLastCuratorOutcome('/ws-timeout')).toMatchObject({ kind: 'timeout', trigger: 'compact' });
     } finally {
       vi.useRealTimers();

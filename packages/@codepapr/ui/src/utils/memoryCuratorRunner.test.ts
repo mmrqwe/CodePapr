@@ -208,4 +208,25 @@ describe('runMemoryCurator', () => {
       })
     ).rejects.toThrow('aborted');
   });
+
+  it('abortSignal 已中止 → 写盘前中止（不落盘，AbortError 上抛）', async () => {
+    const updatedMd = `${currentMd}- 端口固定 5432\n`;
+    runCompactorSessionMock.mockResolvedValue({ content: updatedMd });
+    invokeMock.mockImplementation(async (cmd) =>
+      cmd === 'read_text_file' ? { content: currentMd } : {}
+    );
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      runMemoryCurator({
+        workspacePath: '/ws',
+        currentMd,
+        material: 'User: 端口是 5432\nAssistant: 已确认',
+        settings,
+        lang: 'zh-CN',
+        abortSignal: controller.signal,
+      })
+    ).rejects.toThrow('aborted');
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'write_text_file')).toBe(false);
+  });
 });

@@ -299,11 +299,11 @@ Cross-session project memory is a single file in your workspace: **`.CodePapr/ME
 | Checkpoint | When | Trigger |
 | --- | --- | --- |
 | Delivery | End of turn | Multi-signal: explicit memory intent (“remember / from now on / please remember…”), durable prohibitions (“never use … again”), the Agent's `Memory candidate:` proposal in its final answer, or a verified test/build command. Never in Ask mode; plain modal words (“must / always…”) do not trigger |
-| Pre-compaction | Before any compaction commit (turn-end epoch, `/compact`, Goal, mid-loop) | Always runs, 20s timeout |
+| Pre-compaction | Before any compaction commit (turn-end epoch, `/compact`, Goal, mid-loop) | Always runs, 20s timeout (on timeout the in-flight session is cancelled; this epoch keeps the pre-compaction memory) |
 
 The curator only sees the turn's user text and the assistant's final text (for compaction it sees the skeleton being folded) — **never raw tool output**. It returns the full file content or `NO_CHANGE`, and writes immediately.
 
-**Mechanical guardrails**: secrets are redacted; injection instructions / dangerous commands / policy bypasses are rejected; files over 120 lines or ~4000 tokens are rejected; “no additions while dropping more than half the items” is treated as memory-washing and rejected; a concurrent edit causes a conflict, reload and retry from the panel. **Shell paths**: the Agent's `write / patch / diff` are rejected; `bash / exec` is blocked kernel-level on macOS and rolled back by a before/after check on Windows/Linux — the file is only maintained by the curator and the panel.
+**Mechanical guardrails**: secrets are redacted; injection instructions / dangerous commands / policy bypasses are rejected; files over 120 lines or ~4000 tokens are rejected; “no additions while dropping more than half the items” is treated as memory-washing and rejected (lists, tables, and paragraphs all count; headings and table separators do not); a concurrent edit causes a conflict, reload and retry from the panel. **Shell paths**: the Agent's `write / patch / diff` are rejected; `bash / exec` is blocked kernel-level on macOS and rolled back by a before/after check on Windows/Linux — the file is only maintained by the curator and the panel.
 
 **The Agent does not write memory**: `memory_write / memory_search / memory_list / memory_forget` are retired, and direct writes to `.CodePapr/MEMORY.md` by the Agent are intercepted and rejected. When the Agent finds a durable fact, it should end its final answer with a separate line starting with `Memory candidate:` — the delivery gate then triggers the curator to validate and fold it in (a controlled proposal, not a raw write), and you can confirm or correct it in the conversation or the panel.
 

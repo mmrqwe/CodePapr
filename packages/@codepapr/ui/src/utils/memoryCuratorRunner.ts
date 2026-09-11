@@ -182,6 +182,11 @@ export async function runMemoryCurator(
     if (outcome.kind !== 'updated') {
       return outcome;
     }
+    // 卡点超时会 abort 在飞会话：即使 provider 未及时响应取消，也绝不在超时
+    // 之后落盘——否则「记忆落后/领先一个 epoch」的时序不可解释。
+    if (abortSignal?.aborted) {
+      throw new DOMException('Memory curator aborted before write', 'AbortError');
+    }
     const written = await requestMemoryMdWrite(workspacePath, outcome.content, {
       expectedContent: currentMd,
       origin: 'memory-curator',

@@ -77,13 +77,25 @@ export interface MemoryMdGateVerdict {
   reasons: string[];
 }
 
-/** 列表行归一化：只比较 `- xxx` 条目内容（忽略所在小节），用于丢行检查。 */
-function listItemLines(md: string): string[] {
+/**
+ * 记忆单元归一化：供 mass-drop 丢行检查（覆盖常见记忆形态，不只看 `- ` 列表）：
+ * `- / * / +` 列表、`1. / 1)` 有序列表、表格数据行、普通段落行；
+ * 空行、Markdown 标题、表格分隔行（|---|）不算单元（结构而非条目）。
+ * 归一化（去项目符号 / 折叠空白 / 小写）让「改括号、加空格」这类等义改写
+ * 不被误判为删除+新增。
+ */
+function memoryUnitLines(md: string): string[] {
   const items: string[] = [];
-  for (const line of md.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('- ')) continue;
-    const body = trimmed.slice(2).replace(/\s+/g, ' ').trim();
+  for (const rawLine of md.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (/^#{1,6}\s/.test(line)) continue;
+    if (/^\|?[\s:|-]+\|?$/.test(line)) continue;
+    const body = line
+      .replace(/^[-*+]\s+/, '')
+      .replace(/^\d+[.)]\s+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (body) items.push(body.toLowerCase());
   }
   return items;
@@ -125,10 +137,11 @@ export function validateMemoryMdContent(
     reasons.push('max-lines');
   }
   // 4) mass-drop 检查：合并/冲突更新是 curator 的合法动作（素材带来新条目时
-  // 允许删旧）；「没有任何新增却丢掉过半既有条目」才是失控重写，拒写。
+  // 允许删旧）；「没有任何新增却丢掉过半既有单元」才是失控重写，拒写。
+  // 单元覆盖列表 / 表格 / 段落（标题与分隔行除外），不只看 `- ` 行。
   if (prev) {
-    const nextItems = listItemLines(trimmed);
-    const prevItems = listItemLines(prev);
+    const nextItems = memoryUnitLines(trimmed);
+    const prevItems = memoryUnitLines(prev);
     const nextSet = new Set(nextItems);
     const prevSet = new Set(prevItems);
     const dropped = prevItems.filter((item) => !nextSet.has(item));
