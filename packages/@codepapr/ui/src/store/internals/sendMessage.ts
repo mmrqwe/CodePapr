@@ -77,7 +77,9 @@ import {
   markCompactionInFlight,
   verifyCompactionLanded,
 } from './contextSurfaceStore';
-import { loadMemoryBootstrapSection, loadMemoryBootstrapSectionStrict, refreshMemoryLedgerProjection } from './memoryLedgerStore';
+import { refreshMemoryLedgerProjection } from './memoryLedgerStore';
+import { runPreCompactCurator, scheduleDeliveryCuratorForTurn } from './memoryTurnPipeline';
+import { loadMemorySectionForPrompt } from '../../utils/memoryFile';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import {
   buildRecallInsertion,
@@ -698,6 +700,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   };
                 });
 
+                // v5 卡点 2（/compact 入口）：骨架先经 curator 落 MEMORY.md，
+                // 再走提交；invalidate 后下一发送按新文件重算 Bootstrap。
+                if (compactApplied && workspaceForSlash) {
+                  const manualPayload = checkpointResult.message.contextCheckpoint;
+                  await runPreCompactCurator({
+                    workspacePath: workspaceForSlash,
+                    skeleton: manualPayload?.skeleton ?? [],
+                    activityText: manualPayload?.activityText,
+                    summaryBlock: manualPayload?.summaryBlock,
+                    settings: normalizedSettings,
+                  });
+                }
+
                 // PR1：压缩提交（ADR-005）——单事务写 compaction 行 + 新 surface
                 // generation；失败记 failed 行并回滚 checkpoint 消息（不变式 5）。
                 // commitCheckpointOrdered 保证 checkpoint 消息先落 archive 再提交。
@@ -1211,7 +1226,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // Cache not available - proceed without
           }
           const memorySection = workspacePath
-            ? await loadMemoryBootstrapSection(workspacePath)
+            ? (await loadMemorySectionForPrompt(workspacePath, normalizedSettings.lang)) ?? undefined
             : undefined;
           ensureNotStopped();
           let mcpToolDefinitions: IToolDefinition[] = [];
@@ -1250,6 +1265,15 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               });
               throw new Error(validated.error);
             }
+            // v5 卡点 2（mid-loop 入口）：worker 生成的 v4 骨架同样先过 curator
+            // 再提交/replaceLog（超时 20s 由 pipeline 内部兜底，不阻塞换 epoch）。
+            await runPreCompactCurator({
+              workspacePath,
+              skeleton: commitPayload?.skeleton ?? [],
+              activityText: commitPayload?.activityText,
+              summaryBlock: commitPayload?.summaryBlock,
+              settings: normalizedSettings,
+            });
             const liveMessages = get().sessionMessages[sid] ?? [];
             const insertIndex = findCheckpointInsertIndex(
               liveMessages,
@@ -2103,6 +2127,16 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             sessionId: string;
           }): Promise<boolean> => {
             const { checkpoint, baseMessages, trigger, inFlightTurn, sessionId: sid } = params;
+            // v5 卡点 2（pre-compact）：素材=本次将折叠的骨架；写入在 epoch
+            // 重渲染 Bootstrap 之前完成 → 新记忆随本 epoch 立即生效。
+            const preCompactPayload = checkpoint.message.contextCheckpoint;
+            await runPreCompactCurator({
+              workspacePath,
+              skeleton: preCompactPayload?.skeleton ?? [],
+              activityText: preCompactPayload?.activityText,
+              summaryBlock: preCompactPayload?.summaryBlock,
+              settings: normalizedSettings,
+            });
             const prevAgent = get()._agent;
             const prevAgentOwner = get()._agentSessionId;
             // 压缩 = epoch 变化：Bootstrap 随 epoch 刷新。重读账本重渲染，写回
@@ -2111,7 +2145,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // （绝不产出无记忆前缀的新 epoch）。
             let epochBootstrap = runtimeSessionBootstrapPrompt;
             try {
-              const epochMemorySection = await loadMemoryBootstrapSectionStrict(workspacePath);
+              const epochMemorySection = (await loadMemorySectionForPrompt(workspacePath, normalizedSettings.lang)) ?? undefined;
               epochBootstrap = buildAgentSessionBootstrapPrompt(
                 normalizedSettings,
                 workspacePath,
@@ -2773,6 +2807,18 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             } catch {
               // Silent fail - don't disrupt the session
             }
+          }
+          // v5 卡点 1（交付）：双信号门 curator，fire-and-forget。只切「本回合」
+          // 消息——历史里的旧「必须…」线索不该每回合重复触发。
+          if (activeSessionId && get().workspacePath === workspacePath) {
+            const turnHistory = get().sessionMessages[activeSessionId] ?? [];
+            const turnAnchorIndex = userMsg ? turnHistory.findIndex((m) => m.id === userMsg.id) : -1;
+            scheduleDeliveryCuratorForTurn({
+              workspacePath,
+              turnMessages:
+                turnAnchorIndex >= 0 ? turnHistory.slice(turnAnchorIndex) : turnHistory.slice(-6),
+              settings: normalizedSettings,
+            });
           }
           // #15：checkpoint 计划基于该数组计算；压缩模型调用期间用户可能
           // reset/清空/追加消息，应用前必须校验（见 isSafeCheckpointInsert）。

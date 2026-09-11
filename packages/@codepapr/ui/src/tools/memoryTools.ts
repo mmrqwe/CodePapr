@@ -46,9 +46,9 @@ const MEMORY_CATEGORIES = MEMORY_KINDS;
  *  「可入队但永不可准入」的契约断裂。 */
 const MEMORY_WRITE_MAX_CHARS = MEMORY_REPORTED_MAX_CHARS;
 
-/** 拦截路径归一化后与 .CodePapr/memory.md 比对。
- *  大小写不敏感：macOS 默认 APFS 大小写不敏感，`.codepapr/memory.md` 等
- *  变体指向同一文件，严格大小写比对会被绕过（注入内容直接落盘）。 */
+/** 拦截路径归一化后与记忆文件比对：旧 .CodePapr/memory.md（账本时代）与
+ *  新 .CodePapr/MEMORY.md（v5）。大小写不敏感：macOS 默认 APFS 大小写不敏感，
+ *  `.codepapr/memory.md` 等变体指向同一文件，严格大小写比对会被绕过。 */
 export function isMemoryFilePath(relativePath: string): boolean {
   const normalized = relativePath
     .replace(/\\/g, '/')
@@ -56,6 +56,9 @@ export function isMemoryFilePath(relativePath: string): boolean {
     .replace(/\/{2,}/g, '/')
     .replace(/\/+$/, '')
     .toLowerCase();
+  // 小写比对一个串即可同时命中两个名字：账本时代的 memory.md 与 v5 的
+  // MEMORY.md（lowercase 后相同）。APFS 大小写不敏感，二者本就互斥共存于
+  // 同一文件名槽位。
   return normalized === '.codepapr/memory.md';
 }
 
@@ -110,7 +113,7 @@ export async function proposeMemoryCandidateFromWrite(params: {
 }
 
 export const MEMORY_WRITE_INTERCEPT_NOTE =
-  '没有独立的 memory.md。Agent 直接写入已被拦截，并按自动策略写入记忆账本（或因风险丢弃）。请改用 memory_write，手写笔记请在记忆面板添加。';
+  '项目记忆文件（.CodePapr/MEMORY.md / 旧 memory.md）由记忆管家与用户在面板维护，Agent 直接写入已被拦截。本轮请继续用 memory_write 记录候选事实；要立即修改记忆请提示用户在「上下文检查器 → 项目记忆」编辑。';
 
 /** memory_search 创建的 re-recall 审计行 id，按 session 归集；回合结束由
  *  sendMessage 排空并归档（ADR-009 生命周期：turn 结束 status='archived'）。 */

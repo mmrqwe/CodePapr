@@ -102,7 +102,7 @@ import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
 import { createSendMessage, invalidateAgentHandle, isTurnInFlight, resetSendMessageWorkspaceGuards } from './internals/sendMessage';
 import { clearSessionBootstrapCache } from './internals/sessionBootstrapCache';
 import { resetWorkspaceEphemeralState } from './internals/workspaceEphemeralReset';
-import { loadMemoryBootstrapSection } from './internals/memoryLedgerStore';
+import { loadMemorySectionForPrompt } from '../utils/memoryFile';
 import { finalizeCancelledToolInvocations } from './internals/messageMutators';
 import { useGoalStore } from './goalStore';
 import { upsertRecentWorkspace, sortRecentWorkspaces } from './internals/recentWorkspaces';
@@ -369,7 +369,7 @@ async function ensureAgentForAppInternal(
 
   let memorySection: string | undefined;
   try {
-    memorySection = await loadMemoryBootstrapSection(workspacePath);
+    memorySection = (await loadMemorySectionForPrompt(workspacePath, normalizedSettings.lang)) ?? undefined;
   } catch {
     memorySection = undefined;
   }
@@ -1128,7 +1128,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         let memorySection: string | undefined;
         try {
-          memorySection = await loadMemoryBootstrapSection(workspacePath);
+          memorySection = (await loadMemorySectionForPrompt(workspacePath, normalizedSettings.lang)) ?? undefined;
         } catch {
           memorySection = undefined;
         }

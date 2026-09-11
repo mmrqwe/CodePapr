@@ -48,7 +48,7 @@ import {
 import { resolveProviderName } from './settingsNormalizer';
 import { modelSupportsVision, shouldExposeReadImage } from '../../utils/visionRouting';
 import { replaceImagesInToolResult } from '../../utils/visionOffload';
-import { loadMemoryBootstrapSectionStrict } from './memoryLedgerStore';
+import { loadMemorySectionForPrompt } from '../../utils/memoryFile';
 import { primeSessionBootstrap } from './sessionBootstrapCache';
 import {
   buildAgentSessionBootstrapPrompt,
@@ -117,7 +117,7 @@ function buildBootstrapRefresher(
   return async () => {
     let bootstrap: string;
     try {
-      const memorySection = await loadMemoryBootstrapSectionStrict(workspacePath);
+      const memorySection = (await loadMemorySectionForPrompt(workspacePath, settings.lang)) ?? undefined;
       bootstrap = buildAgentSessionBootstrapPrompt(
         settings,
         workspacePath,

@@ -996,8 +996,22 @@ Debugging / refactoring / performance optimization questions:
     model: 'fast',
     tools: {},
     internal: true,
-    // v3 状态合并的系统提示词由压缩管线（contextCheckpoint.buildStateMergePrompt）
+    // v4 二级摘要的系统提示词由压缩管线（SKELETON_SUMMARY_SYSTEM_PROMPTS）
     // 在运行时注入，这里不保留静态正文。
+    prompt: '',
+  },
+  {
+    name: 'memory-curator',
+    description: {
+      'zh-CN': '记忆管家：把本轮稳定事实整存整取进 .CodePapr/MEMORY.md（仅供运行时记忆维护内部使用）',
+      'zh-TW': '記憶管家：把本輪穩定事實整存整取進 .CodePapr/MEMORY.md（僅供執行階段記憶維護內部使用）',
+      en: 'Memory curator: folds durable facts from this turn into .CodePapr/MEMORY.md (internal use by the memory maintenance pipeline)',
+    },
+    mode: 'subagent',
+    model: 'fast',
+    tools: {},
+    internal: true,
+    // 维护提示词由 memoryCuratorRunner 在运行时注入（当前文件 + 提取素材）。
     prompt: '',
   },
 ];
