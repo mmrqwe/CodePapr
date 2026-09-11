@@ -119,6 +119,9 @@ export interface RecallDisplayItem {
   content: string;
   confidence: string;
   trust: string;
+  /** 检索输出（memory_search）可带标识后缀：entry id 供 memory_forget 使用；
+   *  自动 Recall / re-recall 插入不设置，保持请求上下文纯净。 */
+  idLabel?: string;
 }
 
 /** 与 Rust `char_bigram_set` 同口径：只留字母数字（含 CJK），小写，取相邻
@@ -219,7 +222,7 @@ export function renderRecallBlock(
       maxItemTokens
     );
     if (!content) continue;
-    const line = `- **${item.title}** ${badge}\n  ${content}`;
+    const line = `- **${item.title}** ${badge}${item.idLabel ? ` (${item.idLabel})` : ''}\n  ${content}`;
     const lineTokens = estimateTokens(line);
     if (tokens + lineTokens > maxTokens) continue;
     lines.push(line);

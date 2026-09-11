@@ -4,6 +4,14 @@
 - 日期: 2026-08-16
 - 关联: ADR-001（L4 层）、ADR-010
 
+> **⚠️ 归档快照（MEM-05）**：自 ADR-011 起 `memory.md` 双区模型**已整体退役**，
+> 正文保留仅作决策历史。现行记忆架构（账本 + 面板、零审核写入、Recall、
+> Bootstrap 渲染）以 [ADR-010](./ADR-010-memory-zero-inbox.md) /
+> [ADR-011](./ADR-011-retire-memory-md.md) /
+> [ADR-014](./ADR-014-retire-cold-start-memory-bootstrap.md) 为准。
+> 正文中的行号（如 `sendMessage.ts:843 / 2099-2110`）与「回合后 consolidation」
+> 等均为当时快照，已失效，勿作为现状引用。
+
 ## 背景
 
 memory.md 目前有四个写路径：

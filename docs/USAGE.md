@@ -337,7 +337,8 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 | 种类 | 存在哪 | 进哪一层 | 何时进当前会话的模型 | 怎么变 |
 |---|---|---|---|---|
 | 用户手写笔记 | 账本；面板「每次会话」 | Session Bootstrap（稳定前缀） | 会话启动从账本渲染；压缩 epoch 会刷新 | 你在面板增改立刻落库；**当前会话前缀不重建**，下次会话或压缩后才带上 |
-| 偏好 / 约束 / 项目事实 | 账本；面板「每次会话」 | 同上，Bootstrap | 同上：本回合写入账本，**下一次 Bootstrap 刷新**才进前缀 | 你说「记住 / 必须 / 不要」、工作区实证、测试成功、Agent `memory_write` → 立刻 persist，无需点同意 |
+| 偏好 / 约束 / 项目事实 | 账本；面板「每次会话」 | 同上，Bootstrap | 同上：本回合写入账本，**下一次 Bootstrap 刷新**才进前缀 | 你说「记住 / 必须 / 不要」（回合后自动抽取）、工作区实证、测试成功 → 立刻 persist 成 `[verified]`，无需点同意 |
+| Agent 便签（`memory_write`） | 账本；面板「按需召回」 | Turn-scoped Recall / `memory_search` | 写入后的**下一用户回合**，若检索命中 | 立刻 persist、无需审核，但恒为 `[reported]`（未证实），**永不进固定前缀**；Agent 不得声称它能让某事实每次会话自动可见 |
 | 踩坑经验 (`procedure`) | 账本；面板「按需召回」 | Turn-scoped Recall / `memory_search` | 写入后的**下一用户回合**，若检索命中 | 同一错误踩两次等；不进每次会话的前缀 |
 | 网页 / MCP 引用 (`citation`) | 账本；面板「仅搜索」 | 仅 `memory_search` | 模型主动搜索才会看到 | web / MCP / `https` 证据；**永不进 Bootstrap，自动 Recall 也跳过** |
 | 当前任务目标 / 待办 | Session Checkpoint | Session State | 压缩后作为检查点 | 随压缩 epoch 变；**不是**跨会话项目记忆 |

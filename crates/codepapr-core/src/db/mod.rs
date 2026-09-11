@@ -4470,7 +4470,9 @@ pub fn search_memory_for_recall(
                 .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
                 .collect::<String>()
                 .to_lowercase();
-            if cleaned.is_empty() || cleaned.len() < 2 {
+            // 按字符而非 UTF-8 字节过滤：单字 CJK 是 3 字节，用 len() 会与
+            // TS 侧（memoryRecall.ts 按 code unit）口径漂移（MEM-07）。
+            if cleaned.is_empty() || cleaned.chars().count() < 2 {
                 None
             } else {
                 Some(cleaned)
@@ -4495,43 +4497,84 @@ pub fn search_memory_for_recall(
 
     // ── 语料 1：active memory_entries ──
     {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, category, content, confidence, trust, source_session_id,
+        // MEM-08：旧路径永远先按 verified_at 取 top-500 再过滤 FTS 候选——
+        // active 条目一旦超过 500，更老的条目会被 Recall 静默永久丢弃，这是
+        // 正确性上限而不只是性能问题。FTS 命中 → 按候选 id 精确取回（不设
+        // 条数上限）；回退路径（无 FTS / 全短 token，如纯 CJK bigram）→
+        // 全量评分，LIMIT 只作为极端账本的护栏，不再是常规截断点。
+        type EntryRow = (
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+        );
+        let map_entry_row = |row: &rusqlite::Row| -> rusqlite::Result<EntryRow> {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+            ))
+        };
+        let select_cols = "SELECT id, category, content, confidence, trust, source_session_id,
                         source_message_ids, verified_at
-                 FROM memory_entries
-                 WHERE status = 'active'
-                 ORDER BY verified_at DESC, created_at DESC
-                 LIMIT 500",
-            )
-            .map_err(|err| format!("准备记忆条目检索失败: {err}"))?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<i64>>(7)?,
-                ))
-            })
-            .map_err(|err| format!("读取记忆条目检索失败: {err}"))?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|err| format!("收集记忆条目检索失败: {err}"))?;
+                 FROM memory_entries";
+        let rows: Vec<EntryRow> = match &fts_candidates {
+            Some(ids) => {
+                let mut ids: Vec<String> = ids.iter().cloned().collect();
+                ids.sort();
+                // SQLite 绑定变量上限护栏：分块 IN。
+                let mut out: Vec<EntryRow> = Vec::with_capacity(ids.len());
+                for chunk in ids.chunks(500) {
+                    let placeholders = vec!["?"; chunk.len()].join(",");
+                    let sql = format!(
+                        "{select_cols}
+                         WHERE status = 'active' AND id IN ({placeholders})"
+                    );
+                    let mut stmt = conn
+                        .prepare(&sql)
+                        .map_err(|err| format!("准备记忆条目检索失败: {err}"))?;
+                    out.extend(
+                        stmt.query_map(rusqlite::params_from_iter(chunk.iter()), map_entry_row)
+                            .map_err(|err| format!("读取记忆条目检索失败: {err}"))?
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                            .map_err(|err| format!("收集记忆条目检索失败: {err}"))?,
+                    );
+                }
+                out
+            }
+            None => {
+                let sql = format!(
+                    "{select_cols}
+                     WHERE status = 'active'
+                     ORDER BY verified_at DESC, created_at DESC
+                     LIMIT 5000"
+                );
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|err| format!("准备记忆条目检索失败: {err}"))?;
+                let scanned = stmt
+                    .query_map([], map_entry_row)
+                    .map_err(|err| format!("读取记忆条目检索失败: {err}"))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(|err| format!("收集记忆条目检索失败: {err}"))?;
+                scanned
+            }
+        };
 
         for (id, category, content, confidence, trust, session_id, message_ids, verified_at) in rows {
             // ADR-009 第9条：untrusted 默认不自动召回。准入策略已挡住
             // 主路径；此处硬跳过是防御纵深（评分 -50 仍可被高 overlap 过线）。
             if trust == "untrusted" {
                 continue;
-            }
-            if let Some(candidates) = &fts_candidates {
-                if !candidates.contains(&id) {
-                    continue;
-                }
             }
             let overlap = token_overlap_score(&tokens, &content);
             if overlap == 0 {
@@ -4580,6 +4623,9 @@ pub fn search_memory_for_recall(
 
     // ── 语料 2：历史 session checkpoint（messages.extras JSON） ──
     {
+        // 已知上限（MEM-08 有意保留）：messages 表可达数万行，extras LIKE
+        // 子串扫无索引，只能按时间取最近 300 条 checkpoint 候选。老会话的
+        // 结论依赖回合后抽取进账本，checkpoint 语料只兜「近期上下文」。
         let mut stmt = conn
             .prepare(
                 "SELECT id, session_id, extras, timestamp
@@ -6571,6 +6617,46 @@ mod tests {
             "untrusted entries must not be recalled"
         );
         assert!(items.is_empty());
+    }
+
+    #[test]
+    fn search_memory_for_recall_finds_entries_beyond_the_top500_scan_window() {
+        let workspace = TestWorkspace::new("memory-recall-cap");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+
+        {
+            let (conn, ..) = open_project_db(&ws).unwrap();
+            // 502 条 active：verified_at 最小的那条带唯一 token。旧实现先按
+            // verified_at 取 top-500 再过滤 FTS 候选——它会被静默丢出 Recall
+            // （MEM-08：正确性上限，不只是性能）。修复后 FTS 路径按候选集精确
+            // 取回、回退路径 LIMIT 5000 护栏，两种 SQLite 下都必能召回。
+            for i in 1..=502i64 {
+                let token = if i == 1 {
+                    "zebratoken".to_string()
+                } else {
+                    format!("filler{i}")
+                };
+                conn.execute(
+                    "INSERT INTO memory_entries
+                       (id, category, content, content_hash, confidence, trust, status,
+                        created_at, verified_at)
+                     VALUES (?1, 'fact', ?2, ?3, 'confirmed', 'trusted', 'active', ?4, ?4)",
+                    params![format!("e-{i}"), format!("project note {token}"), format!("h-{i}"), i],
+                )
+                .unwrap();
+            }
+        }
+
+        let query = serde_json::json!({ "tokens": ["zebratoken"], "limit": 8 });
+        let items = search_memory_for_recall(ws, query.to_string()).expect("search");
+        assert!(
+            items
+                .iter()
+                .any(|item| item.id == "e-1" && item.content.contains("zebratoken")),
+            "oldest entry beyond the 500-window must still be recalled, got {:?}",
+            items.iter().map(|item| item.id.clone()).collect::<Vec<_>>()
+        );
     }
 
     #[test]

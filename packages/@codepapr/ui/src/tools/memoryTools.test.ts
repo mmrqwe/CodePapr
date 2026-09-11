@@ -124,6 +124,33 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(result.id).toBe('entry-dup');
   });
 
+  it('memory_write after forget reports the forgotten state, not a fake "already exists" (MEM-02)', async () => {
+    let lastCandidateHash = '';
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'save_memory_candidate') {
+        const candidate = JSON.parse(String(args?.candidateJson ?? '{}')) as { contentHash?: string };
+        lastCandidateHash = candidate.contentHash ?? '';
+        return false; // 候选闸门：同 hash 永久去重，不看 entry 状态
+      }
+      if (command === 'load_memory_entries') {
+        return [{ id: 'entry-f', contentHash: lastCandidateHash, status: 'forgotten' }];
+      }
+      return {};
+    });
+    const registry = buildRegistry();
+    const result = (await registry.execute('memory_write', {
+      content: '项目使用 pnpm workspace',
+    })) as { status: string; note: string; id: string };
+
+    expect(result.status).toBe('duplicate');
+    // 既不能谎称「已存在」，也不给一个不可 forget 的 id：forgotten 只能面板恢复。
+    expect(result.id).toBe('');
+    expect(result.note).toContain('已被遗忘');
+    expect(result.note).toContain('entry-f');
+    expect(result.note).toContain('面板');
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'admit_memory_candidate')).toBe(false);
+  });
+
   it('memory_write stores web evidence as citation and does not project bootstrap', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'save_memory_candidate') return true;
@@ -170,6 +197,18 @@ describe('memoryTools (ADR-008 PR4)', () => {
             messageIds: null,
             verifiedAt: 1,
           },
+          {
+            id: 'cp-m1',
+            source: 'session-checkpoint',
+            title: '历史会话结论',
+            content: '上次会话确定了部署流程',
+            confidence: 'reported',
+            trust: 'derived',
+            score: 20,
+            sessionId: 'session-old',
+            messageIds: 'm1',
+            verifiedAt: null,
+          },
         ];
       }
       if (command === 'save_memory_recall') {
@@ -190,6 +229,10 @@ describe('memoryTools (ADR-008 PR4)', () => {
     };
 
     expect(result.results).toContain('npm test');
+    // MEM-01：Search→forget 工作流要求结果暴露 entry id（cp-* 显式标注不可遗忘）。
+    expect(result.results).toContain('id: e1');
+    expect(result.results).toContain('不支持 memory_forget');
+    expect(result.results).not.toContain('id: cp-m1');
     expect(result.reRecallInsertion).toBeDefined();
     expect(result.reRecallInsertion!.anchorMessageId).toBe('user-msg-1');
     expect(result.reRecallInsertion!.order).toBe(1);
@@ -320,6 +363,39 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(result.count).toBe(1);
     expect(result.memories).toContain('e1');
     expect(result.memories).toContain('pnpm');
+  });
+
+  it('memory_list declares preview truncation instead of implying full coverage (MEM-06)', async () => {
+    const many = Array.from({ length: 41 }, (_, i) => ({
+      id: `e${i}`,
+      category: 'fact',
+      content: `记忆条目 ${i}`,
+      contentHash: `h${i}`,
+      confidence: 'confirmed',
+      trust: 'trusted',
+      status: 'active',
+      sourceSessionId: null,
+      sourceMessageIds: null,
+      evidence: null,
+      createdAt: 1,
+      verifiedAt: null,
+      supersededBy: null,
+    }));
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'load_memory_entries') return many;
+      return {};
+    });
+    const registry = buildRegistry();
+    const result = (await registry.execute('memory_list', {})) as {
+      count: number;
+      memories: string;
+    };
+    expect(result.count).toBe(41);
+    expect(result.memories).toContain('e0');
+    expect(result.memories).not.toContain('id: e40');
+    // 截断必须显式说明「前 40 条，共 41 条」，不能让模型以为看到了全部 id。
+    expect(result.memories).toContain('仅预览前 40 条');
+    expect(result.memories).toContain('共 41 条');
   });
 
   it('memory_list refuses admit and reject: no review queue', async () => {

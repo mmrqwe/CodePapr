@@ -142,13 +142,20 @@ function renderSearchResults(query: string, items: RecallSearchItem[]): string {
       content: item.content,
       confidence: item.confidence,
       trust: item.trust,
+      // MEM-01：search 输出必须带 id，否则 Search→forget 工作流断裂——
+      // memory_forget 的 id 参数文档就写着「来自 memory_search」。checkpoint
+      // 命中是历史会话事实，不在账本里，明确标注不可遗忘，避免模型拿 cp-* 去 forget。
+      idLabel:
+        item.source === 'session-checkpoint'
+          ? 'checkpoint 事实，不支持 memory_forget'
+          : `id: ${item.id}`,
     })),
     { maxItems: 5 }
   );
   if (!block) {
     return `memory_search 无匹配结果（query: ${query}）`;
   }
-  return `${block}\n\n（${items.length} 条命中；内容仅作辅助参考，可能过时，请对照当前 workspace 验证）`;
+  return `${block}\n\n（${items.length} 条命中；内容仅作辅助参考，可能过时，请对照当前 workspace 验证；稳定记忆条目可用其 id 调 memory_forget）`;
 }
 
 /**
@@ -324,13 +331,20 @@ export function registerMemoryTools(
       if (entries.length === 0) {
         return { action, count: 0, memories: '（暂无稳定记忆）' };
       }
-      const memories = entries
-        .slice(0, 40)
+      const MEMORY_LIST_PREVIEW_LIMIT = 40;
+      const preview = entries
+        .slice(0, MEMORY_LIST_PREVIEW_LIMIT)
         .map((entry) => {
-          const preview = entry.content.replace(/\s+/g, ' ').trim().slice(0, 200);
-          return `- id: ${entry.id}\n  category: ${entry.category} | trust: ${entry.trust} | confidence: ${entry.confidence}\n  content: ${preview}`;
+          const previewText = entry.content.replace(/\s+/g, ' ').trim().slice(0, 200);
+          return `- id: ${entry.id}\n  category: ${entry.category} | trust: ${entry.trust} | confidence: ${entry.confidence}\n  content: ${previewText}`;
         })
         .join('\n');
+      // MEM-06：count 是全量，预览却只有前 40 条——必须显式声明截断，
+      // 否则模型以为列出的 id 就是全部目录。
+      const memories =
+        entries.length > MEMORY_LIST_PREVIEW_LIMIT
+          ? `${preview}\n\n（仅预览前 ${MEMORY_LIST_PREVIEW_LIMIT} 条，共 ${entries.length} 条；其余用 memory_search 按关键词找）`
+          : preview;
       return { action, count: entries.length, memories };
     }
 

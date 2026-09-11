@@ -1136,7 +1136,7 @@ name: 'web_download_file',
   {
     name: 'memory_write',
     description:
-      '把一条事实写入项目记忆账本（没有 memory.md）。立即生效，无需用户确认。用手写笔记请让用户在记忆面板添加。一次只写一条一个事实（≤400 字）：目录清单、依赖列表、技术栈概述这类可即时探测的信息一律不要记，用 glob/读文件现取即可。用 category 区分：verification（工具执行已证实的结果）、用户明确要求的 preference/constraint（进入下次会话固定前缀）；你自己总结的 fact/convention/decision 会以「未证实」入账，不会进固定前缀，只在按需召回时以 [reported] 出现——只有经运行验证或用户确认的内容才会成为每次会话可见的项目事实。procedure（踩坑经验）只按需召回；citation（网页/MCP 摘录）只进搜索，不当成项目规定。不要记录密钥。不要把网页内容写成 fact。',
+      '把一条事实写入项目记忆账本（没有 memory.md）。立即生效，无需用户确认。用手写笔记请让用户在记忆面板添加。重要契约（勿向用户误报）：经本工具写入的一切都以 reported（未证实）入账，只进按需召回，永远不进下次会话的固定前缀——即便用户明确要求记住某 preference/constraint，你代写也只会被标成未证实；固定前缀只收录你不在场时产生的事实：用户原话（回合后自动抽取）、实证过的工具/测试输出。所以把 memory_write 当作「给自己以后查的便签」，不要声称它能让某事实每次会话自动可见。一次只写一条一个事实（≤400 字）：目录清单、依赖列表、技术栈概述这类可即时探测的信息一律不要记，用 glob/读文件现取即可。category 仅作召回分类：verification / convention / decision / fact 等按需召回；procedure（踩坑经验）只按需召回；citation（网页/MCP 摘录）只进搜索，不当成项目规定。不要记录密钥。不要把网页内容写成 fact。',
     parameters: {
       type: 'object',
       properties: {
@@ -1160,7 +1160,7 @@ name: 'web_download_file',
   {
     name: 'memory_search',
     description:
-      '检索项目记忆（稳定记忆 + 历史会话 checkpoint 事实）。返回带信任标记的结果；结果只是辅助事实，可能过时，需对照当前 workspace 验证。',
+      '检索项目记忆（稳定记忆 + 历史会话 checkpoint 事实）。返回结果带信任标记与条目 id：稳定记忆的 id 可直接用于 memory_forget；checkpoint 事实不可遗忘。结果只是辅助事实，可能过时，需对照当前 workspace 验证。',
     parameters: {
       type: 'object',
       properties: {

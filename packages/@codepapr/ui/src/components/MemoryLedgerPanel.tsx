@@ -384,6 +384,8 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
 
       {notice ? <p className="text-xs text-fg-muted">{notice}</p> : null}
 
+      <p className="text-[11px] leading-relaxed text-fg-muted">{t.memoryLedgerHint}</p>
+
       <section className="space-y-2 rounded-lg border border-line bg-raised px-3 py-2">
         <h3 className="text-xs font-semibold text-fg-soft">{t.memoryLedgerAddNote}</h3>
         <textarea
