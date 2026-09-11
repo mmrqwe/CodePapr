@@ -191,7 +191,6 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
   const renderEntry = (entry: PersistedMemoryEntry) => {
     const badge = trustBadge(entry, t);
     const bootstrap = memoryEntryProjectsToBootstrap(entry.category, entry.confidence);
-    const isNote = entry.category === 'user-note';
     const busy = busyIds.has(entry.id);
     const editing = editingId === entry.id;
     return (
@@ -224,7 +223,7 @@ export function MemoryLedgerPanel({ workspacePath, lang }: MemoryLedgerPanelProp
             </span>
           ) : null}
           <span className="ml-auto flex gap-1">
-            {entry.status === 'active' && isNote ? (
+            {entry.status === 'active' ? (
               <button
                 type="button"
                 disabled={busy}

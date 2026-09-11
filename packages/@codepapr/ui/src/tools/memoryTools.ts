@@ -2,6 +2,7 @@
  * 记忆工具：memory_write / memory_search / memory_forget / memory_list。
  *
  * - memory_write：按确定性策略立刻 persist 或 drop，不排队等用户审核；
+ *   写即更新——近义/显式 supersedesEntryId 命中旧 active 条目时替换它；
  * - memory_search：检索稳定记忆 + checkpoint 事实；可触发受控 re-recall；
  * - memory_forget：active → forgotten（手写笔记只能在面板遗忘）；
  * - memory_list：列出已写入的记忆目录（原名 memory_review_candidates，
@@ -155,7 +156,7 @@ function renderSearchResults(query: string, items: RecallSearchItem[]): string {
   if (!block) {
     return `memory_search 无匹配结果（query: ${query}）`;
   }
-  return `${block}\n\n（${items.length} 条命中；内容仅作辅助参考，可能过时，请对照当前 workspace 验证；稳定记忆条目可用其 id 调 memory_forget）`;
+  return `${block}\n\n（${items.length} 条命中；内容仅作辅助参考，可能过时，请对照当前 workspace 验证；稳定记忆条目可用其 id 调 memory_forget，更正旧条目用 memory_write 的 supersedesEntryId）`;
 }
 
 /**
@@ -180,6 +181,8 @@ export function registerMemoryTools(
     const evidence = asOptionalString(args.evidence)?.trim();
     const origin =
       evidence && /^https?:\/\//i.test(evidence) ? evidence : 'memory_write';
+    // 写即更新：可选指名要替换的旧条目 id（跨 category 允许）。
+    const supersedesEntryId = asOptionalString(args.supersedesEntryId)?.trim();
 
     const envelope = envelopeContent({
       source: 'agent-proposed',
@@ -196,6 +199,7 @@ export function registerMemoryTools(
       sessionId,
       envelope,
       category,
+      supersedesEntryId,
     });
     if (result.status === 'dropped') {
       return {
@@ -208,6 +212,7 @@ export function registerMemoryTools(
     return {
       id: result.id,
       status: result.status,
+      action: result.action,
       kind: result.kind,
       note: result.note,
     };
@@ -309,7 +314,12 @@ export function registerMemoryTools(
     } catch (err) {
       throw new Error(`遗忘失败: ${err instanceof Error ? err.message : String(err)}`);
     }
-    return { forgotten: id, note: '已遗忘（软删除）。下次会话前缀将不再包含该条目。' };
+    return {
+      forgotten: id,
+      note:
+        '已遗忘（软删除）。下次会话前缀将不再包含该条目。' +
+        '提示：更正旧事实不必先 forget——memory_write 写新表述会直接替换近义旧条目。',
+    };
   });
 
   registry.register(toolByName('memory_list'), async (args) => {

@@ -253,9 +253,11 @@ pub async fn admit_memory_candidate(
     workspace_path: String,
     candidate_id: String,
     entry_id: String,
+    supersedes_entry_id: Option<String>,
 ) -> Result<Value, String> {
     rpc(&app, "db/admitMemoryCandidate", json!({
         "workspacePath": workspace_path, "candidateId": candidate_id, "entryId": entry_id,
+        "supersedesEntryId": supersedes_entry_id,
     })).await
 }
 

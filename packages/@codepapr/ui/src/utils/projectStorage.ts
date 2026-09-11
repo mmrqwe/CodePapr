@@ -907,15 +907,25 @@ export async function saveMemoryCandidate(
   });
 }
 
+/** 准入结果：上层（memory_write 的 note）必须按 action 出话，不得一律
+ *  谎报「已记住」。kept-confirmed = 命中用户原话/实证条目，未证实候选
+ *  不得覆盖原文。 */
+export interface MemoryAdmitOutcome {
+  entryId: string;
+  action: 'inserted' | 'superseded' | 'existing' | 'kept-confirmed';
+}
+
 export async function admitMemoryCandidate(
   workspacePath: string,
   candidateId: string,
-  entryId: string
-): Promise<string> {
-  return invoke<string>('admit_memory_candidate', {
+  entryId: string,
+  supersedesEntryId?: string
+): Promise<MemoryAdmitOutcome> {
+  return invoke<MemoryAdmitOutcome>('admit_memory_candidate', {
     workspacePath: workspacePath.trim(),
     candidateId,
     entryId,
+    supersedesEntryId: supersedesEntryId?.trim() || undefined,
   });
 }
 

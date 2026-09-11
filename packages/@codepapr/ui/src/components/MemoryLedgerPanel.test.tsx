@@ -10,12 +10,14 @@ const {
   reviveMemoryEntryMock,
   ingestLegacyMemoryMdMock,
   collapseMemoryDuplicatesMock,
+  updateMemoryEntryContentMock,
 } = vi.hoisted(() => ({
   loadMemoryEntriesMock: vi.fn(async (): Promise<unknown[]> => []),
   forgetMemoryEntryMock: vi.fn(async (): Promise<void> => undefined),
   reviveMemoryEntryMock: vi.fn(async (): Promise<void> => undefined),
   ingestLegacyMemoryMdMock: vi.fn(async () => ({ ingested: 0, deletedFile: false })),
   collapseMemoryDuplicatesMock: vi.fn(async (): Promise<number> => 0),
+  updateMemoryEntryContentMock: vi.fn(async (): Promise<void> => undefined),
 }));
 
 vi.mock('../utils/projectStorage', () => ({
@@ -23,7 +25,7 @@ vi.mock('../utils/projectStorage', () => ({
   forgetMemoryEntry: forgetMemoryEntryMock,
   reviveMemoryEntry: reviveMemoryEntryMock,
   ingestLegacyMemoryMd: ingestLegacyMemoryMdMock,
-  updateMemoryEntryContent: vi.fn(async (): Promise<void> => undefined),
+  updateMemoryEntryContent: updateMemoryEntryContentMock,
   collapseMemoryDuplicates: collapseMemoryDuplicatesMock,
 }));
 
@@ -47,9 +49,10 @@ async function flush(): Promise<void> {
 }
 
 function clickButton(container: HTMLDivElement, label: string): void {
-  const button = [...container.querySelectorAll('button')].find(
-    (el) => el.textContent?.trim() === label
-  );
+  // 同名按钮取最后一个：顶部手写笔记区也有「保存」，编辑态的保存在其后。
+  const button = [...container.querySelectorAll('button')]
+    .filter((el) => el.textContent?.trim() === label)
+    .at(-1);
   if (!button) throw new Error(`按钮不存在: ${label}`);
   act(() => button.click());
 }
@@ -64,6 +67,7 @@ describe('MemoryLedgerPanel', () => {
     reviveMemoryEntryMock.mockReset();
     ingestLegacyMemoryMdMock.mockReset();
     collapseMemoryDuplicatesMock.mockReset();
+    updateMemoryEntryContentMock.mockReset();
     collapseMemoryDuplicatesMock.mockResolvedValue(0);
     loadMemoryEntriesMock.mockResolvedValue([]);
     forgetMemoryEntryMock.mockResolvedValue(undefined);
@@ -236,6 +240,43 @@ describe('MemoryLedgerPanel', () => {
     await flush();
 
     expect(forgetMemoryEntryMock).toHaveBeenCalledWith('/tmp/ws', 'e1');
+  });
+
+  it('任何 active 条目（非手写笔记）也能在面板改文——人更正走编辑而非 forget', async () => {
+    loadMemoryEntriesMock.mockResolvedValue([
+      {
+        id: 'e1',
+        category: 'verification',
+        content: '[bash] ✗ pnpm test 因 flaky 失败',
+        contentHash: 'h1',
+        confidence: 'confirmed',
+        trust: 'workspace',
+        status: 'active',
+        sourceSessionId: null,
+        sourceMessageIds: null,
+        evidence: null,
+        createdAt: 1,
+        verifiedAt: 1,
+        supersededBy: null,
+      },
+    ]);
+    updateMemoryEntryContentMock.mockResolvedValue(undefined);
+
+    await act(async () => {
+      root.render(<MemoryLedgerPanel workspacePath="/tmp/ws" lang="zh-CN" />);
+    });
+    await flush();
+
+    clickButton(container, '编辑');
+    await flush();
+    clickButton(container, '保存');
+    await flush();
+
+    expect(updateMemoryEntryContentMock).toHaveBeenCalledWith(
+      '/tmp/ws',
+      'e1',
+      '[bash] ✗ pnpm test 因 flaky 失败'
+    );
   });
 
   it('cleans duplicate memories through the collapse RPC', async () => {

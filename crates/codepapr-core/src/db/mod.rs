@@ -3349,11 +3349,13 @@ fn evidence_origin(evidence: Option<&str>) -> Option<String> {
         })?
 }
 
+/// 近义命中：返回 (entry id, confidence)——上层要按 confidence 决定
+/// 新者胜还是保留原文（reported 不得覆盖 confirmed）。
 fn find_near_duplicate_entry(
     tx: &rusqlite::Transaction<'_>,
     category: &str,
     content: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, String)>, String> {
     find_near_duplicate_with_status(tx, category, content, "active")
 }
 
@@ -3362,7 +3364,7 @@ fn find_near_duplicate_forgotten_entry(
     category: &str,
     content: &str,
 ) -> Result<Option<String>, String> {
-    find_near_duplicate_with_status(tx, category, content, "forgotten")
+    Ok(find_near_duplicate_with_status(tx, category, content, "forgotten")?.map(|(id, _)| id))
 }
 
 fn find_near_duplicate_with_status(
@@ -3370,10 +3372,10 @@ fn find_near_duplicate_with_status(
     category: &str,
     content: &str,
     status: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, String)>, String> {
     let mut stmt = tx
         .prepare(
-            "SELECT id, content FROM memory_entries
+            "SELECT id, content, confidence FROM memory_entries
              WHERE status = ?1 AND category = ?2
              ORDER BY verified_at DESC, created_at DESC
              LIMIT 200",
@@ -3381,15 +3383,19 @@ fn find_near_duplicate_with_status(
         .map_err(|err| format!("准备近义记忆检测失败: {err}"))?;
     let rows = stmt
         .query_map(params![status, category], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })
         .map_err(|err| format!("读取近义记忆检测失败: {err}"))?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|err| format!("收集近义记忆检测失败: {err}"))?;
     Ok(rows
         .into_iter()
-        .find(|(_, existing)| is_near_duplicate(content, existing))
-        .map(|(id, _)| id))
+        .find(|(_, existing, _)| is_near_duplicate(content, existing))
+        .map(|(id, _, confidence)| (id, confidence)))
 }
 
 /// 同源条目：`evidence.origin` 相同的 active 派生条目（冷启动摘要、同一条
@@ -3425,14 +3431,33 @@ fn find_same_origin_active_entries(
         .collect())
 }
 
-/// 准入：候选 → entry（单事务），并 supersede 同内容哈希的旧 active entry。
-/// 幂等与遗忘保护：同 hash 已有 forgotten entry → 拒绝（候选标记 rejected）；
-/// 同 hash 已有 active entry → 不新建条目，仅标记候选 admitted 并返回既有 id。
+/// 准入结果：entry id + 实际发生了什么。上层 note 必须按 action 出话——
+/// 近义合并曾谎报「已记住」，Agent 以为新内容落库了，实际旧文本原样保留。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryAdmitOutcome {
+    pub entry_id: String,
+    /// 'inserted' 新建 | 'superseded' 新条目替换旧条目（近义/同源/显式） |
+    /// 'existing' 同内容 active 已存在（幂等） | 'kept-confirmed' 命中
+    /// confirmed 条目，未证实候选不得覆盖原文（保留旧条目）。
+    pub action: String,
+}
+
+/// 准入：候选 → entry（单事务）。写即更新（upsert）：
+/// - 同 category 近义命中 active 条目 → 新者胜：写入新条目、旧的 superseded；
+/// - 显式 supersedes_entry_id → 指名替换该条目（跨 category 允许，人/Agent
+///   都要有把旧事实改掉的正门，不必先 forget）；
+/// - 护栏：candidate reported 不得覆盖 confirmed（confirmed 来自用户原话或
+///   工具实证，Agent 改不动，只能由用户在面板更正）；
+/// - 遗忘守卫保留（精确 hash + 同类近义）：自动路径永不复活用户遗忘的条目，
+///   唯一复活通道是面板 revive；
+/// - 同 hash active 已存在 → 幂等返回既有 entry id。
 pub fn admit_memory_candidate(
     workspace_path: String,
     candidate_id: String,
     entry_id: String,
-) -> Result<String, String> {
+    supersedes_entry_id: Option<String>,
+) -> Result<MemoryAdmitOutcome, String> {
     let (conn, ..) = open_project_db(&workspace_path)?;
     let tx = conn
         .unchecked_transaction()
@@ -3467,6 +3492,16 @@ pub fn admit_memory_candidate(
     // active entry 上不会出现有意义的 risk_flags。
     let (category, content, content_hash, confidence, trust, source_session_id, source_message_ids, evidence, _risk_flags, created_at) = candidate;
 
+    // 标记候选 admitted 的统一出口（不新建条目的幂等/保留路径也闭环审计）。
+    let mark_admitted = |tx: &rusqlite::Transaction<'_>| -> Result<(), String> {
+        tx.execute(
+            "UPDATE memory_candidates SET status = 'admitted', decided_at = ?1 WHERE id = ?2",
+            params![unix_millis()?, candidate_id],
+        )
+        .map_err(|err| format!("标记候选已准入失败: {err}"))?;
+        Ok(())
+    };
+
     // 已遗忘条目：遗忘是用户的显式决定，自动重扫（回合后抽取会对同一命令
     // 反复生成候选）不得让它复活。精确 hash 之外还要看近义——收敛迁移和
     // 「换个说法再记一遍」都会绕过 hash 门，只挡 hash 等于没挡。候选标记
@@ -3496,7 +3531,7 @@ pub fn admit_memory_candidate(
         tx.commit()
             .map_err(|err| format!("提交候选拒绝失败: {err}"))?;
         return Err(
-            "候选内容已被遗忘（memory_forget），不再自动准入：请改写内容重新记忆，或由用户在记忆面板恢复该条目"
+            "候选内容已被遗忘（memory_forget），不再自动准入：如需找回该条目，请用户在记忆面板恢复。更正过时事实无需先 forget——直接写新表述即可替换近义旧条目（写即更新）。"
                 .to_string(),
         );
     }
@@ -3513,37 +3548,68 @@ pub fn admit_memory_candidate(
         .optional()
         .map_err(|err| format!("查询既有条目失败: {err}"))?;
     if let Some(existing_id) = existing_active {
-        tx.execute(
-            "UPDATE memory_candidates
-             SET status = 'admitted', decided_at = ?1
-             WHERE id = ?2",
-            params![unix_millis()?, candidate_id],
-        )
-        .map_err(|err| format!("标记候选已准入失败: {err}"))?;
+        mark_admitted(&tx)?;
         tx.commit()
             .map_err(|err| format!("提交候选幂等准入失败: {err}"))?;
-        return Ok(existing_id);
+        return Ok(MemoryAdmitOutcome {
+            entry_id: existing_id,
+            action: "existing".to_string(),
+        });
     }
 
-    // M4（近义合并）：同 category 的 active 条目做轻量相似检测——换个说法
-    // 重写同一事实不再堆叠占预算，幂等返回既有条目 id。
-    // 例外：同源单例 origin（冷启动摘要）走「新者胜」，插新条目并 supersede
-    // 旧的，不能把最新一版内容丢掉。
+    // 同源单例 origin（冷启动摘要）本身就是「新者胜」路径，跳过近义探测。
     let collapse_origin = evidence_origin(evidence.as_deref())
         .filter(|origin| origin_collapses_same_source(origin));
-    if collapse_origin.is_none() {
-        if let Some(similar_id) = find_near_duplicate_entry(&tx, &category, &content)? {
-            tx.execute(
-                "UPDATE memory_candidates
-             SET status = 'admitted', decided_at = ?1
-             WHERE id = ?2",
-                params![unix_millis()?, candidate_id],
+
+    // ── 写即更新：解析替换目标（显式优先，其次同类近义命中）────────────
+    // reported 候选不得覆盖 confirmed（用户原话/实证内容以原文为准）：
+    // 命中时不丢弃审计（候选仍标 admitted），但既不新建也不改旧文。
+    let mut replaced_ids: Vec<String> = Vec::new();
+    let mut kept_confirmed_id: Option<String> = None;
+    let explicit_target = supersedes_entry_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    if let Some(target_id) = explicit_target.as_deref() {
+        let target_confidence: Option<String> = tx
+            .query_row(
+                "SELECT confidence FROM memory_entries
+                  WHERE id = ?1 AND status = 'active'",
+                params![target_id],
+                |row| row.get(0),
             )
-            .map_err(|err| format!("标记候选近义合并失败: {err}"))?;
-            tx.commit()
-                .map_err(|err| format!("提交候选近义合并失败: {err}"))?;
-            return Ok(similar_id);
+            .optional()
+            .map_err(|err| format!("查询替换目标失败: {err}"))?;
+        let target_confidence =
+            target_confidence.ok_or_else(|| "替换目标不存在或已不是 active 条目".to_string())?;
+        if target_confidence == "confirmed" && confidence != "confirmed" {
+            kept_confirmed_id = Some(target_id.to_string());
+        } else {
+            replaced_ids.push(target_id.to_string());
         }
+    } else if collapse_origin.is_none() {
+        // M4（写即更新）：同 category 近义命中不再「丢弃新句、保留旧文」，
+        // 而是新者胜——Agent 更正旧事实的自然动作就是写新表述。
+        if let Some((similar_id, similar_confidence)) =
+            find_near_duplicate_entry(&tx, &category, &content)?
+        {
+            if similar_confidence == "confirmed" && confidence != "confirmed" {
+                kept_confirmed_id = Some(similar_id);
+            } else {
+                replaced_ids.push(similar_id);
+            }
+        }
+    }
+
+    if let Some(keep_id) = kept_confirmed_id {
+        mark_admitted(&tx)?;
+        tx.commit()
+            .map_err(|err| format!("提交候选准入失败: {err}"))?;
+        return Ok(MemoryAdmitOutcome {
+            entry_id: keep_id,
+            action: "kept-confirmed".to_string(),
+        });
     }
 
     let verified_at = unix_millis()?;
@@ -3569,13 +3635,16 @@ pub fn admit_memory_candidate(
     )
     .map_err(|err| format!("写入记忆条目失败: {err}"))?;
 
-    tx.execute(
-        "UPDATE memory_entries
-         SET status = 'superseded', superseded_by = ?1
-         WHERE content_hash = ?2 AND status = 'active' AND id != ?1",
-        params![entry_id, content_hash],
-    )
-    .map_err(|err| format!("标记旧条目失败: {err}"))?;
+    let mut superseded_count = 0usize;
+
+    superseded_count += tx
+        .execute(
+            "UPDATE memory_entries
+             SET status = 'superseded', superseded_by = ?1
+             WHERE content_hash = ?2 AND status = 'active' AND id != ?1",
+            params![entry_id, content_hash],
+        )
+        .map_err(|err| format!("标记旧条目失败: {err}"))?;
 
     // 同源单例：冷启动摘要这类 origin 是「机器周期性重出的同一份产物」，
     // 每次新生成都应覆盖旧版（新者胜），否则同一事实的 N 个改述会各自
@@ -3589,20 +3658,34 @@ pub fn admit_memory_candidate(
                 params![entry_id, stale_id],
             )
             .map_err(|err| format!("标记同源旧条目失败: {err}"))?;
+            superseded_count += 1;
         }
     }
 
-    tx.execute(
-        "UPDATE memory_candidates
-         SET status = 'admitted', decided_at = ?1
-         WHERE id = ?2",
-        params![unix_millis()?, candidate_id],
-    )
-    .map_err(|err| format!("标记候选已准入失败: {err}"))?;
+    // 显式/near-dup 替换目标。
+    for stale_id in &replaced_ids {
+        tx.execute(
+            "UPDATE memory_entries
+             SET status = 'superseded', superseded_by = ?1
+             WHERE id = ?2 AND status = 'active'",
+            params![entry_id, stale_id],
+        )
+        .map_err(|err| format!("标记被替换条目失败: {err}"))?;
+        superseded_count += 1;
+    }
+
+    mark_admitted(&tx)?;
 
     tx.commit()
-        .map_err(|err| format!("提交准入事务失败: {err}"))?;
-    Ok(entry_id)
+        .map_err(|err| format!("提交候选准入失败: {err}"))?;
+    Ok(MemoryAdmitOutcome {
+        entry_id,
+        action: if superseded_count > 0 {
+            "superseded".to_string()
+        } else {
+            "inserted".to_string()
+        },
+    })
 }
 
 /// 记忆面板「清理重复」：手动跑一次 v8 的收敛（同源 + 近义），返回被
@@ -4110,7 +4193,9 @@ pub fn ingest_legacy_memory_md(workspace_path: String) -> Result<IngestLegacyMem
     })
 }
 
-/// 面板编辑手写笔记（仅 user-note）。
+/// 面板编辑记忆条目（任意 active 条目）。人是最高权威：confirmed/reported
+/// 只约束 Agent 的覆盖权，不限制用户改自己项目里的记忆。confidence/trust
+/// 保持不变（编辑不改变来源属性；手写笔记仍由排序优先投影）。
 pub fn update_memory_entry_content(
     workspace_path: String,
     entry_id: String,
@@ -4118,23 +4203,24 @@ pub fn update_memory_entry_content(
 ) -> Result<(), String> {
     let trimmed = content.trim();
     if trimmed.chars().count() < 8 {
-        return Err("笔记太短".to_string());
+        return Err("内容太短".to_string());
     }
     if trimmed.chars().count() > 8_000 {
-        return Err("笔记超过 8000 字符上限".to_string());
+        return Err("内容超过 8000 字符上限".to_string());
     }
     let (conn, ..) = open_project_db(&workspace_path)?;
-    let category: String = conn
+    let status: Option<String> = conn
         .query_row(
-            "SELECT category FROM memory_entries WHERE id = ?1 AND status = 'active'",
+            "SELECT status FROM memory_entries WHERE id = ?1",
             params![entry_id],
             |row| row.get(0),
         )
         .optional()
-        .map_err(|err| format!("读取记忆条目失败: {err}"))?
-        .ok_or_else(|| "记忆条目不存在或已遗忘".to_string())?;
-    if category != "user-note" {
-        return Err("只能编辑手写笔记".to_string());
+        .map_err(|err| format!("读取记忆条目失败: {err}"))?;
+    match status.as_deref() {
+        Some("active") => {}
+        Some(_) => return Err("只能编辑 active 条目（已遗忘/被替换的请恢复或新写）".to_string()),
+        None => return Err("记忆条目不存在".to_string()),
     }
     let hash = sha256_hex(trimmed);
     let affected = conn
@@ -4144,9 +4230,9 @@ pub fn update_memory_entry_content(
              WHERE id = ?4 AND status = 'active'",
             params![trimmed, hash, unix_millis()?, entry_id],
         )
-        .map_err(|err| format!("更新手写笔记失败: {err}"))?;
+        .map_err(|err| format!("更新记忆条目失败: {err}"))?;
     if affected == 0 {
-        return Err("记忆条目不存在或已遗忘".to_string());
+        return Err("记忆条目不存在或已不是 active".to_string());
     }
     Ok(())
 }
@@ -5634,7 +5720,7 @@ mod tests {
             "createdAt": 1i64,
         });
         save_memory_candidate(ws.clone(), candidate.to_string()).expect("save candidate");
-        admit_memory_candidate(ws.clone(), "cand-1".to_string(), "entry-1".to_string())
+        admit_memory_candidate(ws.clone(), "cand-1".to_string(), "entry-1".to_string(), None)
             .expect("admit");
 
         // 相关检索命中 stable-memory 且得分 > 0
@@ -5695,7 +5781,7 @@ mod tests {
             "createdAt": 1i64,
         });
         save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
-        admit_memory_candidate(ws.clone(), "cand-id".to_string(), "entry-id".to_string())
+        admit_memory_candidate(ws.clone(), "cand-id".to_string(), "entry-id".to_string(), None)
             .expect("admit");
 
         // 下划线标识符（原实现剥离 `_` 后永不匹配）
@@ -5727,7 +5813,7 @@ mod tests {
             "evidence": null, "riskFlags": null, "createdAt": 1i64,
         });
         save_memory_candidate(ws.clone(), c_cjk.to_string()).expect("save cjk");
-        admit_memory_candidate(ws.clone(), "c-cjk".to_string(), "e-cjk".to_string())
+        admit_memory_candidate(ws.clone(), "c-cjk".to_string(), "e-cjk".to_string(), None)
             .expect("admit cjk");
 
         let c_ui = serde_json::json!({
@@ -5738,7 +5824,7 @@ mod tests {
             "evidence": null, "riskFlags": null, "createdAt": 2i64,
         });
         save_memory_candidate(ws.clone(), c_ui.to_string()).expect("save ui");
-        admit_memory_candidate(ws.clone(), "c-ui".to_string(), "e-ui".to_string())
+        admit_memory_candidate(ws.clone(), "c-ui".to_string(), "e-ui".to_string(), None)
             .expect("admit ui");
 
         // 1. CJK 短语子串（trigram 预筛路径）
@@ -5775,7 +5861,7 @@ mod tests {
             "createdAt": 1i64,
         });
         save_memory_candidate(ws.clone(), candidate.to_string()).expect("save candidate");
-        admit_memory_candidate(ws.clone(), "cand-f1".to_string(), "entry-f1".to_string())
+        admit_memory_candidate(ws.clone(), "cand-f1".to_string(), "entry-f1".to_string(), None)
             .expect("admit");
 
         // 遗忘：active → forgotten，理由落 forgotten_reason
@@ -5978,7 +6064,7 @@ mod tests {
         );
 
         // 准入后同 hash 依然去重（不再重复入队/准入）
-        admit_memory_candidate(ws.clone(), "c1".to_string(), "e1".to_string()).expect("admit");
+        admit_memory_candidate(ws.clone(), "c1".to_string(), "e1".to_string(), None).expect("admit");
         assert_eq!(
             save_memory_candidate(ws.clone(), candidate("c3").to_string()).expect("save 3"),
             false
@@ -6047,7 +6133,7 @@ mod tests {
         //    遗忘内容不再重新入队提议）。
         save_memory_candidate(ws.clone(), candidate("c1", "h-f", "过时事实").to_string())
             .expect("save c1");
-        admit_memory_candidate(ws.clone(), "c1".to_string(), "e1".to_string()).expect("admit c1");
+        admit_memory_candidate(ws.clone(), "c1".to_string(), "e1".to_string(), None).expect("admit c1");
         forget_memory_entry(ws.clone(), "e1".to_string(), None).expect("forget");
         assert_eq!(
             save_memory_candidate(ws.clone(), candidate("c2", "h-f", "过时事实").to_string())
@@ -6079,7 +6165,7 @@ mod tests {
             candidate("c3", &zone_hash, "用户写过后又作废的内容").to_string(),
         )
         .expect("save c3");
-        let err = admit_memory_candidate(ws.clone(), "c3".to_string(), "e3".to_string())
+        let err = admit_memory_candidate(ws.clone(), "c3".to_string(), "e3".to_string(), None)
             .expect_err("admit forgotten content must fail");
         assert!(err.contains("遗忘"));
         let rejected = load_memory_candidates(ws.clone(), Some("rejected".to_string()))
@@ -6098,9 +6184,10 @@ mod tests {
         };
         save_memory_candidate(ws.clone(), candidate("c4", &zone_hash2, "稳定的项目事实").to_string())
             .expect("save c4");
-        let existing = admit_memory_candidate(ws.clone(), "c4".to_string(), "e4".to_string())
+        let existing = admit_memory_candidate(ws.clone(), "c4".to_string(), "e4".to_string(), None)
             .expect("idempotent admit");
-        assert_eq!(existing, "user-zone");
+        assert_eq!(existing.entry_id, "user-zone");
+        assert_eq!(existing.action, "existing");
         let entries = load_memory_entries(ws.clone(), Some(false)).expect("load all");
         assert_eq!(
             entries.iter().filter(|e| e.content_hash == zone_hash2).count(),
@@ -6112,9 +6199,10 @@ mod tests {
         assert!(admitted.iter().any(|c| c.id == "c4"));
     }
 
-    /// M4：同 category 近义改写不再堆叠——幂等返回既有条目 id。
+    /// 写即更新：同 category 近义改写不再「丢弃新句、保留旧文」——
+    /// 新者胜，写入新条目并把旧的标 superseded。
     #[test]
-    fn admit_memory_candidate_merges_near_duplicate() {
+    fn admit_memory_candidate_supersedes_near_duplicate_with_new_text() {
         let workspace = TestWorkspace::new("memory-near-dup");
         fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
         let ws = workspace.workspace_arg();
@@ -6140,33 +6228,46 @@ mod tests {
                 .to_string(),
         )
         .expect("save nd-1");
-        let id1 = admit_memory_candidate(ws.clone(), "nd-1".to_string(), "e-nd1".to_string())
-            .expect("admit nd-1");
+        let outcome1 =
+            admit_memory_candidate(ws.clone(), "nd-1".to_string(), "e-nd1".to_string(), None)
+                .expect("admit nd-1");
+        assert_eq!(outcome1.entry_id, "e-nd1");
+        assert_eq!(outcome1.action, "inserted");
 
-        // 近义改写（不同 hash、高 bigram 重叠）→ 合并到既有条目，不新建。
+        // 近义改写（不同 hash、高 bigram 重叠）→ 新句替换旧句，不再吞并。
         save_memory_candidate(
             ws.clone(),
             candidate("nd-2", "h-nd2", "本项目所有提交都必须先运行 pnpm lint 再推送到远端仓库")
                 .to_string(),
         )
         .expect("save nd-2");
-        let id2 = admit_memory_candidate(ws.clone(), "nd-2".to_string(), "e-nd2".to_string())
-            .expect("admit nd-2");
-        assert_eq!(id1, id2);
+        let outcome2 =
+            admit_memory_candidate(ws.clone(), "nd-2".to_string(), "e-nd2".to_string(), None)
+                .expect("admit nd-2");
+        assert_eq!(outcome2.entry_id, "e-nd2");
+        assert_eq!(outcome2.action, "superseded");
+        let all = load_memory_entries(ws.clone(), Some(false)).expect("load all");
+        let old = all.iter().find(|e| e.id == "e-nd1").expect("e-nd1 exists");
+        assert_eq!(old.status, "superseded");
+        assert_eq!(old.superseded_by.as_deref(), Some("e-nd2"));
 
-        // 冲突表述（改一词翻转语义）不得被吞并。
+        // 冲突表述（改一词翻转语义）不是近义：新旧并存，不误替换。
         save_memory_candidate(
             ws.clone(),
             candidate("nd-3", "h-nd3", "本项目所有提交都禁止先运行 pnpm lint 再推送到远端")
                 .to_string(),
         )
         .expect("save nd-3");
-        let id3 = admit_memory_candidate(ws.clone(), "nd-3".to_string(), "e-nd3".to_string())
-            .expect("admit nd-3");
-        assert_ne!(id1, id3);
+        let outcome3 =
+            admit_memory_candidate(ws.clone(), "nd-3".to_string(), "e-nd3".to_string(), None)
+                .expect("admit nd-3");
+        assert_eq!(outcome3.entry_id, "e-nd3");
+        assert_eq!(outcome3.action, "inserted");
 
         let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
         assert_eq!(active.len(), 2);
+        assert!(active.iter().any(|e| e.id == "e-nd2"));
+        assert!(active.iter().any(|e| e.id == "e-nd3"));
     }
 
 
@@ -6258,9 +6359,9 @@ mod tests {
         assert!(!is_near_duplicate("测试命令是 pnpm test --watch", "测试命令是 pnpm test --coverage"));
     }
 
-    /// 准入路径：不同 hash 的长改述幂等合并到既有条目。
+    /// 准入路径：不同 hash 的长改述（containment 命中）→ 新者胜替换旧文。
     #[test]
-    fn admit_memory_candidate_merges_long_rephrased_entry() {
+    fn admit_memory_candidate_supersedes_long_rephrased_entry() {
         let workspace = TestWorkspace::new("memory-long-near-dup");
         fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
         let ws = workspace.workspace_arg();
@@ -6281,14 +6382,19 @@ mod tests {
         };
         save_memory_candidate(ws.clone(), candidate("ln-1", "h-ln1", BOOTSTRAP_FIXTURE_A).to_string())
             .expect("save ln-1");
-        let id1 = admit_memory_candidate(ws.clone(), "ln-1".to_string(), "e-ln1".to_string())
+        let id1 = admit_memory_candidate(ws.clone(), "ln-1".to_string(), "e-ln1".to_string(), None)
             .expect("admit ln-1");
         save_memory_candidate(ws.clone(), candidate("ln-2", "h-ln2", BOOTSTRAP_FIXTURE_B).to_string())
             .expect("save ln-2");
-        let id2 = admit_memory_candidate(ws.clone(), "ln-2".to_string(), "e-ln2".to_string())
+        let id2 = admit_memory_candidate(ws.clone(), "ln-2".to_string(), "e-ln2".to_string(), None)
             .expect("admit ln-2");
-        assert_eq!(id1, id2, "长改述必须合并到既有条目");
-        assert_eq!(load_memory_entries(ws, Some(true)).expect("load").len(), 1);
+        assert_eq!(id1.entry_id, "e-ln1");
+        assert_eq!(id2.entry_id, "e-ln2", "长改述新句必须落库（新者胜）");
+        assert_eq!(id2.action, "superseded");
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load");
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "e-ln2");
+        assert_eq!(active[0].content, BOOTSTRAP_FIXTURE_B);
     }
 
     /// 同源单例：冷启动摘要换个 origin 之外的任何理由都不允许堆叠——
@@ -6316,14 +6422,15 @@ mod tests {
         };
         save_memory_candidate(ws.clone(), candidate("cs-1", "h-cs1", BOOTSTRAP_FIXTURE_A).to_string())
             .expect("save cs-1");
-        admit_memory_candidate(ws.clone(), "cs-1".to_string(), "e-cs1".to_string()).expect("admit cs-1");
+        admit_memory_candidate(ws.clone(), "cs-1".to_string(), "e-cs1".to_string(), None).expect("admit cs-1");
         // 差异大到近义判定不命中，也必须被同源规则收敛。
         let other = BOOTSTRAP_FIXTURE_C.to_string();
         save_memory_candidate(ws.clone(), candidate("cs-2", "h-cs2", &other).to_string())
             .expect("save cs-2");
-        let id2 = admit_memory_candidate(ws.clone(), "cs-2".to_string(), "e-cs2".to_string())
+        let id2 = admit_memory_candidate(ws.clone(), "cs-2".to_string(), "e-cs2".to_string(), None)
             .expect("admit cs-2");
-        assert_eq!(id2, "e-cs2", "同源新内容应成为 active 的那条");
+        assert_eq!(id2.entry_id, "e-cs2", "同源新内容应成为 active 的那条");
+        assert_eq!(id2.action, "superseded");
         let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].id, "e-cs2");
@@ -6363,9 +6470,247 @@ mod tests {
             "createdAt": 2i64,
         });
         save_memory_candidate(ws.clone(), candidate.to_string()).expect("save candidate");
-        let err = admit_memory_candidate(ws, "fg-c".to_string(), "e-fg-c".to_string())
+        let err = admit_memory_candidate(ws, "fg-c".to_string(), "e-fg-c".to_string(), None)
             .expect_err("near duplicate of forgotten must be blocked");
         assert!(err.contains("遗忘"), "got: {err}");
+    }
+
+    /// 显式替换：memory_write 带 supersedes_entry_id 直接替换目标条目，
+    /// 跨 category 允许（旧事实归到别的类下也要有正门可改）。
+    #[test]
+    fn admit_memory_candidate_explicit_supersedes_allows_cross_category() {
+        let workspace = TestWorkspace::new("memory-explicit-supersedes");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        {
+            let (conn, ..) = open_project_db(&ws).expect("open db");
+            conn.execute(
+                "INSERT INTO memory_entries
+                   (id, category, content, content_hash, confidence, trust, status,
+                    evidence, created_at, verified_at)
+                 VALUES ('x-old', 'fact', '旧结论：缓存用 Redis', 'h-xold', 'reported',
+                         'derived', 'active', NULL, 1, 1)",
+                [],
+            )
+            .expect("insert old entry");
+        }
+        let candidate = serde_json::json!({
+            "id": "x-c",
+            // 近义探测根本到不了（不同 category），靠显式 id 完成更正。
+            "category": "decision",
+            "content": "更正：缓存已迁到 Valkey，Redis 说法作废",
+            "contentHash": "h-xc",
+            "confidence": "reported",
+            "trust": "derived",
+            "sourceSessionId": "s2",
+            "sourceMessageIds": "[]",
+            "evidence": "{\"origin\":\"memory_write\"}",
+            "riskFlags": null,
+            "createdAt": 2i64,
+        });
+        save_memory_candidate(ws.clone(), candidate.to_string()).expect("save candidate");
+        let outcome = admit_memory_candidate(
+            ws.clone(),
+            "x-c".to_string(),
+            "x-new".to_string(),
+            Some("x-old".to_string()),
+        )
+        .expect("admit with explicit supersedes");
+        assert_eq!(outcome.entry_id, "x-new");
+        assert_eq!(outcome.action, "superseded");
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load active");
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "x-new");
+        let all = load_memory_entries(ws.clone(), Some(false)).expect("load all");
+        let old = all.iter().find(|e| e.id == "x-old").expect("old kept for audit");
+        assert_eq!(old.status, "superseded");
+        assert_eq!(old.superseded_by.as_deref(), Some("x-new"));
+    }
+
+    /// 显式替换目标必须是 active：不存在/已遗忘 → 报错（候选留 pending，
+    /// 不静默吞掉 Agent 的意图）。
+    #[test]
+    fn admit_memory_candidate_rejects_invalid_supersedes_target() {
+        let workspace = TestWorkspace::new("memory-supersedes-target-guard");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        save_memory_candidate(
+            ws.clone(),
+            serde_json::json!({
+                "id": "g-c", "category": "fact", "content": "普通新事实一条",
+                "contentHash": "h-gc", "confidence": "reported", "trust": "derived",
+                "sourceSessionId": "s1", "sourceMessageIds": "[]",
+                "evidence": null, "riskFlags": null, "createdAt": 1i64,
+            })
+            .to_string(),
+        )
+        .expect("save");
+        let err = admit_memory_candidate(
+            ws.clone(),
+            "g-c".to_string(),
+            "g-new".to_string(),
+            Some("no-such-entry".to_string()),
+        )
+        .expect_err("nonexistent target must fail");
+        assert!(err.contains("active"), "got: {err}");
+        // 候选仍可被后续正确调用消费（未被误标）。
+        let outcome =
+            admit_memory_candidate(ws.clone(), "g-c".to_string(), "g-new".to_string(), None)
+                .expect("retry admit without target");
+        assert_eq!(outcome.entry_id, "g-new");
+    }
+
+    /// 信任护栏：reported 候选不得覆盖 confirmed 条目——无论近义命中还是
+    /// 显式指定。confirmed 来自用户原话/实证，Agent 只能提示，不能改文。
+    #[test]
+    fn admit_memory_candidate_reported_cannot_override_confirmed() {
+        let workspace = TestWorkspace::new("memory-confirmed-guard");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        {
+            let (conn, ..) = open_project_db(&ws).expect("open db");
+            conn.execute(
+                "INSERT INTO memory_entries
+                   (id, category, content, content_hash, confidence, trust, status,
+                    evidence, created_at, verified_at)
+                 VALUES ('u-1', 'constraint', '本项目所有提交都必须先运行 pnpm lint 再推送到远端', 'h-u1',
+                         'confirmed', 'trusted', 'active', NULL, 1, 1)",
+                [],
+            )
+            .expect("insert confirmed entry");
+        }
+        // 1. 近义命中 confirmed：保留原文，动作 kept-confirmed，不新建条目。
+        save_memory_candidate(
+            ws.clone(),
+            serde_json::json!({
+                "id": "u-c1", "category": "constraint",
+                "content": "本项目所有提交都必须先运行 pnpm lint 再推送到远端仓库",
+                "contentHash": "h-uc1", "confidence": "reported", "trust": "derived",
+                "sourceSessionId": "s1", "sourceMessageIds": "[]",
+                "evidence": null, "riskFlags": null, "createdAt": 2i64,
+            })
+            .to_string(),
+        )
+        .expect("save u-c1");
+        let outcome =
+            admit_memory_candidate(ws.clone(), "u-c1".to_string(), "u-e1".to_string(), None)
+                .expect("admit u-c1");
+        assert_eq!(outcome.entry_id, "u-1");
+        assert_eq!(outcome.action, "kept-confirmed");
+        let all = load_memory_entries(ws.clone(), Some(false)).expect("load all");
+        assert_eq!(all.len(), 1, "不得新建条目");
+        assert_eq!(
+            all[0].content,
+            "本项目所有提交都必须先运行 pnpm lint 再推送到远端"
+        );
+
+        // 2. 显式指定 confirmed 条目为替换目标：同样保留原文。
+        save_memory_candidate(
+            ws.clone(),
+            serde_json::json!({
+                "id": "u-c2", "category": "constraint",
+                "content": "用户原话被 Agent 换掉了：提交前不用跑 lint",
+                "contentHash": "h-uc2", "confidence": "reported", "trust": "derived",
+                "sourceSessionId": "s1", "sourceMessageIds": "[]",
+                "evidence": null, "riskFlags": null, "createdAt": 3i64,
+            })
+            .to_string(),
+        )
+        .expect("save u-c2");
+        let outcome = admit_memory_candidate(
+            ws.clone(),
+            "u-c2".to_string(),
+            "u-e2".to_string(),
+            Some("u-1".to_string()),
+        )
+        .expect("admit u-c2");
+        assert_eq!(outcome.entry_id, "u-1");
+        assert_eq!(outcome.action, "kept-confirmed");
+        assert_eq!(load_memory_entries(ws, Some(false)).expect("load all").len(), 1);
+    }
+
+    /// confirmed 候选（用户原话/实证）近义命中 confirmed 旧条目：新者胜——
+    /// 用户后来说的话要能改掉先前的说法，无需先 forget。
+    #[test]
+    fn admit_memory_candidate_confirmed_replaces_confirmed_near_duplicate() {
+        let workspace = TestWorkspace::new("memory-confirmed-replaces");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        let candidate = |id: &str, hash: &str, content: &str, confidence: &str| {
+            serde_json::json!({
+                "id": id, "category": "constraint", "content": content,
+                "contentHash": hash, "confidence": confidence, "trust": "trusted",
+                "sourceSessionId": "s1", "sourceMessageIds": "[]",
+                "evidence": null, "riskFlags": null, "createdAt": 1i64,
+            })
+        };
+        save_memory_candidate(
+            ws.clone(),
+            candidate("q-1", "h-q1", "以后所有回复都必须使用中文简体输出", "confirmed").to_string(),
+        )
+        .expect("save q-1");
+        admit_memory_candidate(ws.clone(), "q-1".to_string(), "e-q1".to_string(), None)
+            .expect("admit q-1");
+        save_memory_candidate(
+            ws.clone(),
+            candidate(
+                "q-2",
+                "h-q2",
+                "以后所有回复都必须使用中文简体输出规范",
+                "confirmed",
+            )
+            .to_string(),
+        )
+        .expect("save q-2");
+        let outcome =
+            admit_memory_candidate(ws.clone(), "q-2".to_string(), "e-q2".to_string(), None)
+                .expect("admit q-2");
+        assert_eq!(outcome.entry_id, "e-q2");
+        assert_eq!(outcome.action, "superseded");
+        let active = load_memory_entries(ws, Some(true)).expect("load active");
+        assert_eq!(active.len(), 1);
+        assert!(active[0].content.contains("规范"));
+    }
+
+    /// 面板编辑：任意 active 条目都可改文（人不只对自己手写的笔记负责）；
+    /// 改文换 hash、verified_at 前移；非 active（forgotten/superseded）拒改。
+    #[test]
+    fn update_memory_entry_content_allows_any_active_entry() {
+        let workspace = TestWorkspace::new("memory-panel-edit");
+        fs::create_dir_all(workspace.file_path(".CodePapr")).expect("create project dir");
+        let ws = workspace.workspace_arg();
+        save_memory_candidate(
+            ws.clone(),
+            serde_json::json!({
+                "id": "pe-c", "category": "verification",
+                "content": "[bash] ✗ pnpm test 因 flaky 失败",
+                "contentHash": "h-pe", "confidence": "confirmed", "trust": "workspace",
+                "sourceSessionId": "s1", "sourceMessageIds": "[]",
+                "evidence": null, "riskFlags": null, "createdAt": 1i64,
+            })
+            .to_string(),
+        )
+        .expect("save");
+        admit_memory_candidate(ws.clone(), "pe-c".to_string(), "pe-e".to_string(), None)
+            .expect("admit");
+
+        update_memory_entry_content(
+            ws.clone(),
+            "pe-e".to_string(),
+            "[bash] ✓ pnpm test 全部通过（面板更正）".to_string(),
+        )
+        .expect("edit derived entry allowed");
+        let active = load_memory_entries(ws.clone(), Some(true)).expect("load");
+        assert_eq!(active[0].content, "[bash] ✓ pnpm test 全部通过（面板更正）");
+
+        forget_memory_entry(ws.clone(), "pe-e".to_string(), None).expect("forget");
+        let err = update_memory_entry_content(
+            ws.clone(),
+            "pe-e".to_string(),
+            "给已遗忘条目改文的内容".to_string(),
+        )
+        .expect_err("forgotten entry not editable");
+        assert!(err.contains("active"), "got: {err}");
     }
 
     /// v8 迁移：历史项目里堆叠的同源冷启动摘要收敛到 1 条，用户手写不动。
@@ -6491,7 +6836,7 @@ mod tests {
             "createdAt": 1i64,
         });
         save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
-        admit_memory_candidate(ws.clone(), "rv-1".to_string(), "e-rv".to_string())
+        admit_memory_candidate(ws.clone(), "rv-1".to_string(), "e-rv".to_string(), None)
             .expect("admit");
         forget_memory_entry(ws.clone(), "e-rv".to_string(), None).expect("forget");
 
@@ -6537,7 +6882,7 @@ mod tests {
             "createdAt": 1i64,
         });
         save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
-        admit_memory_candidate(ws.clone(), "cb-1".to_string(), "e-cb".to_string())
+        admit_memory_candidate(ws.clone(), "cb-1".to_string(), "e-cb".to_string(), None)
             .expect("admit");
 
         // 「测试框架是啥」→ bigram tokens（虚词「什么/怎么」类由 TS 侧过滤）。
@@ -6580,7 +6925,7 @@ mod tests {
         assert_eq!(loaded.source_message_ids.as_deref(), Some("[\"m1\",\"m2\"]"));
         assert_eq!(loaded.risk_flags.as_deref(), Some("[]"));
 
-        admit_memory_candidate(ws.clone(), "cand-p".to_string(), "entry-p".to_string())
+        admit_memory_candidate(ws.clone(), "cand-p".to_string(), "entry-p".to_string(), None)
             .expect("admit");
         let entries = load_memory_entries(ws.clone(), Some(true)).expect("load entries");
         let entry = entries.iter().find(|e| e.id == "entry-p").expect("entry");
@@ -7152,7 +7497,7 @@ mod tests {
             "createdAt": 1i64,
         });
         save_memory_candidate(ws.clone(), candidate.to_string()).expect("save");
-        admit_memory_candidate(ws.clone(), "c-ecole".to_string(), "e-ecole".to_string())
+        admit_memory_candidate(ws.clone(), "c-ecole".to_string(), "e-ecole".to_string(), None)
             .expect("admit");
         let query = serde_json::json!({ "tokens": ["école"], "limit": 8 });
         let items = search_memory_for_recall(ws, query.to_string()).expect("search");

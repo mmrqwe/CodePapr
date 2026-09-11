@@ -1136,7 +1136,7 @@ name: 'web_download_file',
   {
     name: 'memory_write',
     description:
-      '把一条事实写入项目记忆账本（没有 memory.md）。立即生效，无需用户确认。用手写笔记请让用户在记忆面板添加。重要契约（勿向用户误报）：经本工具写入的一切都以 reported（未证实）入账，只进按需召回，永远不进下次会话的固定前缀——即便用户明确要求记住某 preference/constraint，你代写也只会被标成未证实；固定前缀只收录你不在场时产生的事实：用户原话（回合后自动抽取）、实证过的工具/测试输出。所以把 memory_write 当作「给自己以后查的便签」，不要声称它能让某事实每次会话自动可见。一次只写一条一个事实（≤400 字）：目录清单、依赖列表、技术栈概述这类可即时探测的信息一律不要记，用 glob/读文件现取即可。category 仅作召回分类：verification / convention / decision / fact 等按需召回；procedure（踩坑经验）只按需召回；citation（网页/MCP 摘录）只进搜索，不当成项目规定。不要记录密钥。不要把网页内容写成 fact。',
+      '把一条事实写入项目记忆账本（没有 memory.md）。立即生效，无需用户确认。用手写笔记请让用户在记忆面板添加。重要契约（勿向用户误报）：经本工具写入的一切都以 reported（未证实）入账，只进按需召回，永远不进下次会话的固定前缀——即便用户明确要求记住某 preference/constraint，你代写也只会被标成未证实；固定前缀只收录你不在场时产生的事实：用户原话（回合后自动抽取）、实证过的工具/测试输出。所以把 memory_write 当作「给自己以后查的便签」，不要声称它能让某事实每次会话自动可见。写即更新（更正旧记忆的正门）：写入与既有 active 条目近义的新表述会自动替换旧条目（新者胜）；差异大或跨类别检测不到时，传 supersedesEntryId 指名替换。不要「先 forget 再重写」——遗忘后同义表述会被拒且不可复活，confirmed（用户原话/实证）条目你也改不动，只能请用户在面板更正。一次只写一条一个事实（≤400 字）：目录清单、依赖列表、技术栈概述这类可即时探测的信息一律不要记，用 glob/读文件现取即可。category 仅作召回分类：verification / convention / decision / fact 等按需召回；procedure（踩坑经验）只按需召回；citation（网页/MCP 摘录）只进搜索，不当成项目规定。不要记录密钥。不要把网页内容写成 fact。',
     parameters: {
       type: 'object',
       properties: {
@@ -1152,6 +1152,11 @@ name: 'web_download_file',
         evidence: {
           type: 'string',
           description: '可选。支撑证据（测试输出摘要、文件路径、或来源 URL）。传入 http(s) URL 时将按引用保存。',
+        },
+        supersedesEntryId: {
+          type: 'string',
+          description:
+            '可选。要替换的既有记忆条目 id（来自 memory_search / memory_list，跨类别允许）。新内容入账后旧条目标记 superseded。confirmed 条目（用户原话/实证）不可被替换。',
         },
       },
       required: ['content'],
@@ -1179,7 +1184,7 @@ name: 'web_download_file',
   {
     name: 'memory_forget',
     description:
-      '遗忘一条稳定记忆（软删除：不再参与投影与召回）。仅当记忆被确认过时、错误或不再适用时使用。',
+      '遗忘一条稳定记忆（软删除：不再参与投影与召回，且同义表述不可再自动写入）。仅当记忆被确认不再适用、需要整体删除时使用；若只是内容过时，改用 memory_write 写新表述（写即更新）或传 supersedesEntryId 指名替换，不要先 forget 再重写。',
     parameters: {
       type: 'object',
       properties: {
@@ -1198,7 +1203,7 @@ name: 'web_download_file',
   {
     name: 'memory_list',
     description:
-      '列出当前项目的稳定记忆目录（已写入的条目，不是审核队列；记忆写入零人工审核）。查无可用检索词时用本工具兜底；错误或过时条目用 memory_forget。',
+      '列出当前项目的稳定记忆目录（已写入的条目，不是审核队列；记忆写入零人工审核）。查无可用检索词时用本工具兜底；错误或过时条目用 memory_write 写新表述更正（写即更新），确认作废才用 memory_forget。',
     parameters: {
       type: 'object',
       properties: {

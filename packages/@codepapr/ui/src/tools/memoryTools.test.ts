@@ -62,7 +62,7 @@ describe('memoryTools (ADR-008 PR4)', () => {
   it('memory_write persists immediately (no review queue)', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'save_memory_candidate') return true;
-      if (command === 'admit_memory_candidate') return 'e1';
+      if (command === 'admit_memory_candidate') return { entryId: 'e1', action: 'inserted' };
       if (command === 'load_memory_entries') return [];
       return {};
     });
@@ -97,6 +97,49 @@ describe('memoryTools (ADR-008 PR4)', () => {
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'admit_memory_candidate')).toBe(true);
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'write_text_file')).toBe(false);
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'project_memory_file')).toBe(false);
+  });
+
+  it('memory_write with supersedesEntryId replaces the target entry (write-as-update)', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'save_memory_candidate') return true;
+      if (command === 'admit_memory_candidate')
+        return { entryId: 'e-new', action: 'superseded' };
+      return {};
+    });
+    const registry = buildRegistry();
+    const result = (await registry.execute('memory_write', {
+      content: '测试命令是 pnpm vitest run',
+      category: 'fact',
+      supersedesEntryId: 'e-old',
+    })) as { id: string; status: string; action?: string; note: string };
+
+    expect(result.status).toBe('saved');
+    expect(result.id).toBe('e-new');
+    expect(result.action).toBe('superseded');
+    expect(result.note).toContain('替换');
+    const admitCall = invokeMock.mock.calls.find(([cmd]) => cmd === 'admit_memory_candidate');
+    expect(admitCall![1]).toMatchObject({ supersedesEntryId: 'e-old' });
+  });
+
+  it('memory_write on a kept-confirmed collision does not fake a save', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'save_memory_candidate') return true;
+      if (command === 'admit_memory_candidate')
+        return { entryId: 'u-1', action: 'kept-confirmed' };
+      return {};
+    });
+    const registry = buildRegistry();
+    const result = (await registry.execute('memory_write', {
+      content: '本项目所有提交都必须先运行 pnpm lint 再推送到远端仓库',
+      category: 'constraint',
+    })) as { id: string; action?: string; note: string };
+
+    // id 指向保留的既有 confirmed 条目；note 必须明说没有写入新内容。
+    expect(result.id).toBe('u-1');
+    expect(result.action).toBe('kept-confirmed');
+    expect(result.note).toContain('confirmed');
+    expect(result.note).toContain('面板');
+    expect(result.note).not.toContain('已记住');
   });
 
   it('memory_write reports duplicate when the same content was already proposed', async () => {
@@ -154,7 +197,7 @@ describe('memoryTools (ADR-008 PR4)', () => {
   it('memory_write stores web evidence as citation and does not project bootstrap', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'save_memory_candidate') return true;
-      if (command === 'admit_memory_candidate') return 'e1';
+      if (command === 'admit_memory_candidate') return { entryId: 'e1', action: 'inserted' };
       return {};
     });
     const registry = buildRegistry();
@@ -433,7 +476,7 @@ describe('memory.md write interception (ADR-008)', () => {
   it('workspace_write_file to memory.md is intercepted and auto-persisted', async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'save_memory_candidate') return true;
-      if (command === 'admit_memory_candidate') return 'e1';
+      if (command === 'admit_memory_candidate') return { entryId: 'e1', action: 'inserted' };
       if (command === 'load_memory_entries') return [];
       return {};
     });
