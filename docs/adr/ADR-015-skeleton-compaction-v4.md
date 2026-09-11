@@ -50,7 +50,7 @@ provider 实测与估算取大者；`/compact`/Goal force 可越过触发线，�
 
 ### 4. 统一 epoch 提交（所有主线程入口）
 
-`applyEpochCompaction`：重读账本重渲染 Bootstrap → prime 缓存 + 写回 runtime config
+`applyEpochCompaction`：重读记忆（v5 起为 `.CodePapr/MEMORY.md`）重渲染 Bootstrap → 写回 runtime config
 → 基座校验插 checkpoint → 就地重建 agent → **await** `commitCheckpointOrdered`
 （ADR-005 单事务，失败回滚）。回合末、`/compact`、Goal 循环全部走这一条路；
 Goal 每 5 迭代的压缩自此成为真压缩。mid-loop 在 worker 侧同引擎、主线程校验通过后
@@ -69,8 +69,9 @@ archive / bootstrap prime（前缀在 ImmutablePrefix，不在 log）。internal
 
 - 正面：主压缩零 LLM 成本零失败模式；触发条件一句话说得清；Goal/子代理不再是
   压缩盲区；void 提交竞态消灭；记忆 epoch 在每条路径兑现。
-- 代价：A 抽取是截断而非理解（长结论中段有损，靠 `[第 n 轮 · N 次工具调用]` 注记 +
-  `history_read_artifact` + checkpoint 检索语料兜底）；prune 层删除后，保留回合内
+- 代价：A 抽取是截断而非理解（长结论中段有损——已加结构感知缓解：行边界吸附、
+  代码围栏平衡、中段首条标题/代码块优先保留；更细的语义仍靠 `[第 n 轮 · N 次工具调用]`
+  注记 + `history_read_artifact` + checkpoint 检索语料兜底）；prune 层删除后，保留回合内
   的旧工具结果不再瘦身（由入口护栏与 5 轮上限约束）；`decideContextBudgetAction`
   的 prune 分支成为死代码（soft == hard），物理删除留作后续清理。
 - 设置迁移：`maxConversationRounds` / `prune*` 字段从设置与类型中移除，旧存档值被

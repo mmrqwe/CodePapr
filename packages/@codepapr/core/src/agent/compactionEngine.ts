@@ -36,7 +36,8 @@ export const TAIL_ROUNDS_VERBATIM = 5;
 export const TAIL_ROUNDS_FLOOR = 1;
 /** 轮内折叠：逐字保留回合尾部的 turn 组数（从该值降到 1）。 */
 export const TAIL_TURNS_VERBATIM = 3;
-/** 骨架行截断参数（确定性：Q 保头 300；A 保头 300 + 尾 100）。 */
+/** 骨架行截断参数（确定性：Q 保头 300；A 头 300 + 尾 100，结构感知、
+ *  行边界吸附、中段标题/代码块优先）。 */
 export const SKELETON_Q_MAX_CHARS = 300;
 export const SKELETON_A_HEAD_CHARS = 300;
 export const SKELETON_A_TAIL_CHARS = 100;
@@ -188,10 +189,86 @@ function clip(text: string, maxChars: number): string {
   return `${normalized.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 
+/** 行内空白折叠、保留换行与段落（结构信息是标题/代码围栏识别的前提）。 */
+function normalizeStructuredText(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** ``` 开/闭都是整行标记；奇数 = 片段起始于未闭合围栏内。 */
+function countFenceLines(text: string): number {
+  return (text.match(/^```/gm) ?? []).length;
+}
+
+/** 中段被丢弃时的优先片段：首条标题 + 首个代码块（各截断），总长 ≤ budget。 */
+function extractPrioritySnippets(dropped: string, budget: number): string[] {
+  if (budget <= 0) return [];
+  const snippets: string[] = [];
+  let remaining = budget;
+  const heading = /^#{1,6}\s+\S.*$/m.exec(dropped)?.[0]?.trim();
+  if (heading) {
+    const clipped = heading.length > 60 ? `${heading.slice(0, 59)}…` : heading;
+    snippets.push(clipped);
+    remaining -= clipped.length + 1;
+  }
+  const fence = /^(`{3,})[^\n]*\n([\s\S]*?)\n\1\s*$/m.exec(dropped);
+  if (fence && remaining > 24) {
+    const openLine = fence[0].split('\n', 1)[0]!.trimEnd();
+    const bodyBudget = remaining - openLine.length - 8;
+    if (bodyBudget > 16) {
+      let body = fence[2]!.trim();
+      if (body.length > bodyBudget) {
+        body = `${body.slice(0, Math.max(1, bodyBudget - 1)).trimEnd()}…`;
+      }
+      snippets.push(`${openLine}\n${body}\n\`\`\``);
+    }
+  }
+  return snippets;
+}
+
+/**
+ * 结构感知的头尾截断（长方案轮防「中段全丢」）：
+ * - 行边界吸附：切点优先落在换行处，不把标题/列表/代码行劈成两半；
+ * - 代码围栏平衡：head 内围栏奇数补闭合、tail 起于未闭合围栏内补开，
+ *   单条骨架行始终可独立阅读；
+ * - 标题/代码块优先：被丢弃的中段若含标题或 fenced code，保留首条标题与
+ *   首个代码块（在头尾最小预算之外，总长仍受 headChars + tailChars 约束）。
+ * 单行文本（无换行）退化为纯头尾切片，保持既有 401 字形状。
+ */
 function clipHeadTail(text: string, headChars: number, tailChars: number): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = normalizeStructuredText(text);
+  if (!normalized.includes('\n')) {
+    const flat = normalized.replace(/\s+/g, ' ').trim();
+    if (flat.length <= headChars + tailChars) return flat;
+    return `${flat.slice(0, headChars)}…${flat.slice(-tailChars)}`;
+  }
   if (normalized.length <= headChars + tailChars) return normalized;
-  return `${normalized.slice(0, headChars)}…${normalized.slice(-tailChars)}`;
+
+  const minHead = Math.floor(headChars * 0.6);
+  const minTail = Math.floor(tailChars * 0.5);
+  let headEnd = normalized.lastIndexOf('\n', headChars);
+  if (headEnd < minHead) headEnd = headChars;
+  let tailStart = normalized.indexOf('\n', normalized.length - tailChars);
+  if (tailStart === -1 || tailStart > normalized.length - minTail) {
+    tailStart = normalized.length - tailChars;
+  }
+  const extraBudget = Math.max(0, headChars + tailChars - minHead - minTail);
+  let extras = extractPrioritySnippets(normalized.slice(headEnd, tailStart), extraBudget);
+  if (extras.length > 0) {
+    // 优先片段从头预算里扣；头至少保留 minHead。
+    headEnd = Math.min(headEnd, Math.max(minHead, headChars - extras.join('\n').length));
+    extras = extractPrioritySnippets(normalized.slice(headEnd, tailStart), extraBudget);
+  }
+  let head = normalized.slice(0, headEnd).trimEnd();
+  let tail = normalized.slice(tailStart).trimStart();
+  if (countFenceLines(head) % 2 === 1) head = `${head}\n\`\`\``;
+  if (countFenceLines(normalized.slice(0, tailStart)) % 2 === 1) tail = `\`\`\`\n${tail}`;
+  const middle = extras.length > 0 ? `\n…\n${extras.join('\n')}` : '';
+  return `${head}${middle}\n…\n${tail}`;
 }
 
 /** IMessage → 回合结构。首条 user 之前的 assistant/tool 归入匿名前导回合。 */

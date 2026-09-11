@@ -89,10 +89,12 @@ function listItemLines(md: string): string[] {
   return items;
 }
 
+export type MemoryMdWriteOrigin = 'memory-curator' | 'panel' | 'migration' | 'guard';
+
 export function validateMemoryMdContent(
   prev: string | null,
   next: string,
-  origin: 'memory-curator' | 'panel' | 'migration'
+  origin: MemoryMdWriteOrigin
 ): MemoryMdGateVerdict {
   const reasons: string[] = [];
   const trimmed = next.trim();
@@ -103,10 +105,12 @@ export function validateMemoryMdContent(
   if (redactSecrets(trimmed) !== trimmed) {
     reasons.push('secrets');
   }
-  // 2) 注入式内容风险（复用账本时代的 envelope 风险门）。
+  // 2) 注入式内容风险（复用账本时代的 envelope 风险门）。guard 回滚的是
+  // 磁盘上已存在的可信内容（面板/用户手写），按 trusted 处理。
+  const trusted = origin === 'panel' || origin === 'guard';
   const envelope = envelopeContent({
-    source: origin === 'panel' ? 'user' : 'memory-candidate',
-    trust: origin === 'panel' ? 'trusted' : 'derived',
+    source: trusted ? 'user' : 'memory-candidate',
+    trust: trusted ? 'trusted' : 'derived',
     origin: `memory-md:${origin}`,
     content: trimmed,
   });
@@ -137,10 +141,16 @@ export function validateMemoryMdContent(
 }
 
 // ── 单飞写队列 ────────────────────────────────────────────────────────
-// 所有对 MEMORY.md 的写（curator 落盘 / 面板保存 / 迁移种子）串行执行，
-// 并在写前重读文件做「期望内容」比对：读入之后文件已被其他路径改动 → 放弃
-// 本次写（防并发会话/连点保存互相覆盖）。
+// 所有对 MEMORY.md 的写（curator 落盘 / 面板保存 / 迁移种子 / 越权写回滚）
+// 串行执行，并在写前重读文件做「期望内容」比对：读入之后文件已被其他路径
+// 改动 → 放弃本次写（防并发会话/连点保存互相覆盖）。
 let writeChain: Promise<unknown> = Promise.resolve();
+/** 受信写入序号：memoryShellGuard 用它区分「合法写入赢得竞态」与越权写。 */
+let writeSeq = 0;
+
+export function getMemoryMdWriteSeq(): number {
+  return writeSeq;
+}
 
 export interface MemoryMdWriteResult extends MemoryMdGateVerdict {
   /** 因外部并发修改被守卫拒绝。 */
@@ -153,7 +163,7 @@ export async function requestMemoryMdWrite(
   options: {
     /** 生成 next 时读到的当前内容；null = 期望文件不存在。不匹配则拒绝。 */
     expectedContent: string | null;
-    origin: 'memory-curator' | 'panel' | 'migration';
+    origin: MemoryMdWriteOrigin;
     /** 迁移种子的生成场景：expected 为 null 且允许跳过「已有文件」。 */
     skipIfExists?: boolean;
   }
@@ -184,6 +194,7 @@ export async function requestMemoryMdWrite(
     } catch (err) {
       return { ok: false, reasons: [`write-failed:${err instanceof Error ? err.message : String(err)}`] };
     }
+    writeSeq += 1;
     return { ok: true, reasons: [] };
   };
   const queued = writeChain.then(run, run);

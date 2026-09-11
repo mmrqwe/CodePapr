@@ -28,6 +28,7 @@ import {
 } from './workspaceToolHelpers';
 import { type WorkspaceToolContext } from './workspaceToolContext';
 import { agentSandboxArgs, assertShellCodePaprAccess, effectiveCodePaprMode } from './codepaprAgentAccess';
+import { attachMemoryGuardNote, runWithMemoryShellGuard } from '../utils/memoryShellGuard';
 
 const SYSTEM_COMMAND_PATHS = [
   '/bin/',
@@ -128,13 +129,17 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
         void invoke('cancel_running_command', { token: cancelToken }).catch(() => undefined);
       }, { once: true });
     }
-    return await invoke('run_workspace_command', {
-      workspacePath: workspace(),
-      command: parsed.command,
-      args: parsed.args,
-      timeoutSeconds: parsed.timeoutSeconds,
-      cancelToken,
-    });
+    // P2-4：非 macOS 平台无进程级沙箱，命令前后比对 MEMORY.md，越权写回滚。
+    const guarded = await runWithMemoryShellGuard(workspace(), () =>
+      invoke('run_workspace_command', {
+        workspacePath: workspace(),
+        command: parsed.command,
+        args: parsed.args,
+        timeoutSeconds: parsed.timeoutSeconds,
+        cancelToken,
+      })
+    );
+    return guarded.intercepted ? attachMemoryGuardNote(guarded.result) : guarded.result;
   });
 
   registry.register(toolByName('workspace_run_shell_command'), async (args: Record<string, unknown>, context) => {
@@ -152,14 +157,18 @@ export function registerWorkspaceExecTools(ctx: WorkspaceToolContext): void {
         void invoke('cancel_running_command', { token: cancelToken }).catch(() => undefined);
       }, { once: true });
     }
-    return await invoke('run_workspace_shell_command', {
-      workspacePath: workspace(),
-      command,
-      workdir,
-      timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
-      sandbox,
-      cancelToken,
-    });
+    // P2-4：同 workspace_run_command（bash 工具路径）。
+    const guarded = await runWithMemoryShellGuard(workspace(), () =>
+      invoke('run_workspace_shell_command', {
+        workspacePath: workspace(),
+        command,
+        workdir,
+        timeoutSeconds: asOptionalNumber(args.timeoutSeconds),
+        sandbox,
+        cancelToken,
+      })
+    );
+    return guarded.intercepted ? attachMemoryGuardNote(guarded.result) : guarded.result;
   });
 
   registry.register(toolByName('workspace_start_shell_background_command'), async (args: Record<string, unknown>, context) => {

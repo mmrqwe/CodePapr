@@ -47,6 +47,8 @@ internal 子代理（零工具、fast 档、复用压缩模型/温度、prompt �
 
 `memory_write` / `memory_search` / `memory_list` / `memory_forget` 全部退役。Agent 被明确告知：「不要自己写 MEMORY.md——直接写入会被拒绝。发现值得长期记住的事实，在最终答复末尾另起一行以『记忆候选：』写明。」`workspaceFileTools` 对 `.CodePapr/MEMORY.md` 的 `write` / `patch` / `diff` 直接抛错拒绝。Agent 由此获得的是**受控提议通道**（标记 → 交付门 → 管家校验落盘），不是裸写权限；提议与实际落盘之间永远隔着管家提示词 + 机械门。
 
+**shell 路径补齐**：`exec` / `bash` 无法走文件工具的拦截。macOS 由 `sandbox-exec` profile 对 `.CodePapr` 整树 `deny file-write*`（内核级，见 `shell/sandbox.rs`）；Windows/Linux 进程级沙箱不生效，由 `memoryShellGuard` 兜底——命令前后比对 MEMORY.md，内容被非受信通道改动则用单飞队列回滚（`getMemoryMdWriteSeq` 区分「curator/面板合法写入赢得竞态」，不回滚用户并发保存；命令新建文件只告警不删，避免误删）。
+
 ### 5. 注入：每回合直读，不再冻结
 
 `loadMemorySectionForPrompt(workspacePath)` 每回合读文件，渲染进 Session Bootstrap。文件没变 → promptKey 相同 → 复用 agent；文件变了 → promptKey 变化 → 下回合重建 agent（一次性前缀 miss）。契约从「缓存稳定优先」反转为「保存即下回合生效优先」。

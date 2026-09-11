@@ -88,6 +88,38 @@ describe('skeleton entries', () => {
     expect(entry.assistantId).toBe('a1');
   });
 
+  it('A 结构感知：中段被丢弃时优先保留标题与代码块', () => {
+    const longPlan = [
+      '# 重构方案',
+      '步骤说明 '.repeat(40),
+      'x'.repeat(400),
+      '## 关键决策',
+      '```ts',
+      'const value = 1;',
+      '```',
+      'z'.repeat(300),
+    ].join('\n');
+    const rounds = roundsFromCoreMessages([user('u1', 'q'), assistant('a1', longPlan, [])]);
+    const entry = skeletonEntryFromRound(rounds[0]!, 'zh-CN');
+    expect(entry.a).toContain('## 关键决策');
+    expect(entry.a).toContain('```ts');
+    expect(entry.a).toContain('const value = 1;');
+    expect((entry.a.match(/```/g) ?? []).length % 2).toBe(0);
+  });
+
+  it('A 结构感知：头部切断代码块时补闭合围栏，单行可独立阅读', () => {
+    const longCode = [
+      '```ts',
+      ...Array.from({ length: 40 }, (_, i) => `const v${i} = ${i};`),
+      '```',
+      'z'.repeat(300),
+    ].join('\n');
+    const rounds = roundsFromCoreMessages([user('u1', 'q'), assistant('a1', longCode, [])]);
+    const entry = skeletonEntryFromRound(rounds[0]!, 'zh-CN');
+    expect(entry.a.startsWith('```ts\n')).toBe(true);
+    expect((entry.a.match(/```/g) ?? []).length % 2).toBe(0);
+  });
+
   it('marks tool-only rounds with an explicit no-text note and counts dropped calls', () => {
     // 构造一个纯工具回合验证 noAnswer 分支。
     const toolOnly = roundsFromCoreMessages([
