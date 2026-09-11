@@ -432,7 +432,6 @@ export type IChatStreamEvent =
       }
   | { type: 'context-compacted'; round: number }
   /** PR2：soft~hard 区间原地裁剪旧工具结果（非压缩 epoch 重置）。 */
-  | { type: 'context-pruned'; round: number }
   /** C：压缩熔断——本回合不再尝试 mid-loop 压缩（真超限由 provider overflow
    *  路径与 reject-request 兜底）。reason：
    *  - 'no-effective-shrink'：连续多次压缩后上线体量没有实质下降；

@@ -9,8 +9,7 @@
  * contextCompaction.ts:185-191）。
  */
 
-import type { CompactionTrigger, FrozenPruneParams } from '@codepapr/types';
-import type { PruneOptions } from '@codepapr/core';
+import type { CompactionTrigger } from '@codepapr/types';
 import {
   getLatestCheckpoint,
   type ContextCheckpointPayload,
@@ -234,78 +233,21 @@ function lastIndexOfAny(
   return null;
 }
 
-/** PruneOptions（Set）→ 可序列化冻结形式（ADR-006）。 */
-export function freezePruneParams(pruneOptions: PruneOptions): FrozenPruneParams {
-  return {
-    enabled: pruneOptions.enabled,
-    protectRecentRounds: pruneOptions.protectRecentRounds,
-    minPrunableChars: pruneOptions.minPrunableChars,
-    protectedTools: [...pruneOptions.protectedTools],
-    placeholder: pruneOptions.placeholder,
-  };
-}
-
 /**
- * generation 0（未压缩会话）的冻结参数：该 epoch 从未经过 prune，重启重建
- * 必须同样不 prune 才能与 live 字节一致（ADR-006）。
+ * generation 行 render_params 列的 JSON（ADR-006 列保留，v4 起恒为「禁用
+ * prune」常量形状）：prune 层随 v4 骨架引擎删除，但该列是 Rust/DB 与旧存档
+ * 的既有契约，保留列与形状、只停止语义化使用——旧行里的 prune 参数不再被
+ * 读取，重建路径与实时路径天然一致。
  */
-export function buildDisabledFrozenPruneParams(): FrozenPruneParams {
-  return {
-    enabled: false,
-    protectRecentRounds: 0,
-    minPrunableChars: 0,
-    protectedTools: [],
-    placeholder: '',
-  };
-}
-
-function pruneOptionsFromFrozen(params: FrozenPruneParams): PruneOptions {
-  const protectedTools = new Set<string>();
-  if (Array.isArray(params.protectedTools)) {
-    for (const tool of params.protectedTools) {
-      if (typeof tool === 'string') protectedTools.add(tool);
-    }
-  }
-  return {
-    enabled: params.enabled === true,
-    protectRecentRounds: typeof params.protectRecentRounds === 'number' ? params.protectRecentRounds : 0,
-    minPrunableChars: typeof params.minPrunableChars === 'number' ? params.minPrunableChars : 0,
-    protectedTools,
-    placeholder: typeof params.placeholder === 'string' ? params.placeholder : '',
-  };
-}
-
-/** ADR-006：解析失败时的确定性回退（禁用 prune），不得用当前 settings。 */
-export function disabledPruneOptions(): PruneOptions {
-  return pruneOptionsFromFrozen(buildDisabledFrozenPruneParams());
-}
-
-/** 冻结形式 → PruneOptions（string[] → Set）。解析失败返回 null。 */
-export function parseRenderParams(json: string): { pruneOptions: PruneOptions } | null {
-  try {
-    const parsed: unknown = JSON.parse(json);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const record = parsed as { pruneParams?: FrozenPruneParams };
-    const params = record.pruneParams;
-    if (!params || typeof params !== 'object') return null;
-    return { pruneOptions: pruneOptionsFromFrozen(params) };
-  } catch {
-    return null;
-  }
-}
-
-/** generation 行 render_params 列的 JSON（ADR-006）。 */
-export function serializeRenderParams(pruneOptions: PruneOptions): string {
-  return JSON.stringify({
-    pruneParams: freezePruneParams(pruneOptions),
-    renderVersion: CONTEXT_SURFACE_RENDER_VERSION,
-  });
-}
-
-/** generation 0 的 render_params JSON（禁用 prune，见 buildDisabledFrozenPruneParams）。 */
 export function serializeDisabledRenderParams(): string {
   return JSON.stringify({
-    pruneParams: buildDisabledFrozenPruneParams(),
+    pruneParams: {
+      enabled: false,
+      protectRecentRounds: 0,
+      minPrunableChars: 0,
+      protectedTools: [],
+      placeholder: '',
+    },
     renderVersion: CONTEXT_SURFACE_RENDER_VERSION,
   });
 }

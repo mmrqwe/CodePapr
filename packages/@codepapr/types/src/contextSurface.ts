@@ -28,11 +28,10 @@ export type CompactionStatus = 'started' | 'completed' | 'failed';
 export type SummaryMode = 'llm' | 'local-fallback';
 
 /**
- * 冻结的 prune 参数（ADR-006）。
+ * 冻结的 prune 参数（ADR-006 的历史列形状；v4 起 prune 层已删除）。
  *
- * 与 core 的 PruneOptions 结构对应，但 protectedTools 用可序列化的
- * string[]（core 侧是 Set），便于存入 surface 行的 render_params JSON。
- * PR1 落库时由 UI 侧做 Set ↔ string[] 转换。
+ * render_params 列仍在 DB/Rust 契约中，v4 后写入的恒为「全部禁用」常量
+ * （见 UI serializeDisabledRenderParams），此类型仅描述该线格式。
  */
 export interface FrozenPruneParams {
   enabled: boolean;

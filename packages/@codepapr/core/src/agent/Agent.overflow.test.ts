@@ -89,15 +89,8 @@ function buildAgent(options: BuildOptions) {
     cacheValidator,
     maxToolRounds: 5,
     contextCompaction: {
+      // v4：maxContextTokens 即触发线（窗口 × 90% 由调用方换算），无 soft 层。
       maxContextTokens: 1_000,
-      softMaxTokens: 800,
-      pruneOptions: {
-        enabled: true,
-        protectRecentRounds: 1,
-        minPrunableChars: 10,
-        protectedTools: new Set(['todo']),
-        placeholder: '[Old tool result content cleared]',
-      },
       handler: options.compactionHandler as never,
       ...options.contextCompaction,
     },
@@ -222,43 +215,7 @@ describe('Agent round-start context budget decision (PR2)', () => {
     return responseWithToolCalls([{ id, name, arguments: {} }]);
   }
 
-  it('soft~hard 区间：prune-tool-results 原地裁剪，不调用压缩 handler', async () => {
-    const handler = vi.fn(async () => COMPACTION_RESULT);
-    const big = 'x'.repeat(500);
-    const chat = vi.fn<ILLMProvider['chat']>()
-      .mockResolvedValueOnce(bigOutputToolResponse('t0'))
-      .mockResolvedValueOnce(bigOutputToolResponse('t1'))
-      .mockResolvedValueOnce(okResponse('done'));
-    const { agent, log } = buildAgent({
-      provider: buildProvider(chat),
-      compactionHandler: handler,
-      tools: [{ def: makeToolDefinition('read'), handler: () => big }],
-      contextCompaction: {
-        softMaxTokens: 400,
-        pruneOptions: {
-          enabled: true,
-          protectRecentRounds: 0,
-          minPrunableChars: 10,
-          protectedTools: new Set(['todo']),
-          placeholder: '[Old tool result content cleared]',
-        },
-      },
-    });
-
-    const events: IChatStreamEvent[] = [];
-    const response = await agent.chat('hi', (event) => events.push(event));
-
-    expect(response.content).toBe('done');
-    expect(handler).not.toHaveBeenCalled();
-    expect(events.some((event) => event.type === 'context-pruned')).toBe(true);
-    const prunedCount = log
-      .getAllMessages()
-      .filter((m) => m.role === 'tool' && m.content === '[Old tool result content cleared]')
-      .length;
-    expect(prunedCount).toBeGreaterThan(0);
-  });
-
-  it('低于 soft 预算：不裁剪、不压缩', async () => {
+  it('低于触发线：不压缩', async () => {
     const handler = vi.fn(async () => COMPACTION_RESULT);
     const chat = vi.fn<ILLMProvider['chat']>().mockResolvedValueOnce(okResponse('ok'));
     const { agent } = buildAgent({ provider: buildProvider(chat), compactionHandler: handler });
@@ -267,11 +224,10 @@ describe('Agent round-start context budget decision (PR2)', () => {
     await agent.chat('hi', (event) => events.push(event));
 
     expect(handler).not.toHaveBeenCalled();
-    expect(events.some((event) => event.type === 'context-pruned')).toBe(false);
     expect(events.some((event) => event.type === 'context-compacted')).toBe(false);
   });
 
-  it('超过 hard 预算：走压缩 handler（token-limit）', async () => {
+  it('超过触发线：走压缩 handler（token-limit）', async () => {
     const handler = vi.fn(async () => COMPACTION_RESULT);
     const big = 'y'.repeat(20_000);
     const chat = vi.fn<ILLMProvider['chat']>()
@@ -290,12 +246,13 @@ describe('Agent round-start context budget decision (PR2)', () => {
     expect((handler.mock.calls[0] as unknown[])[1]).toBe('token-limit');
   });
 
-  it('PR2：provider 实测对账——续写前 log 未变，实测超软预算则 prune 后重发', async () => {
+  it('v4：provider 实测对账——续写前实测超触发线也不换 epoch（保住已合并的部分输出），续写照常发出', async () => {
     const handler = vi.fn(async () => COMPACTION_RESULT);
     const big = 'x'.repeat(500);
-    // 两轮工具调用（t0/t1，log 增长；heuristic ~650 < soft 800 → none）；
-    // 第三轮 finishReason=length 触发续写，usage 实测 900 token →
-    // 续写请求前 provider 对账判定 prune，裁剪旧工具结果 t0 后重发。
+    // 两轮工具调用后第三轮 finishReason=length 触发续写，usage 实测 900 >
+    // 触发线 800：mid-loop 压缩会毁掉内存里已合并的 partial，续写路径只做
+    // reject 判断（未超硬上限不 reject），照常发续写请求；真超限由 provider
+    // overflow 的 emergency-compact 恢复兜底。
     const chat = vi.fn<ILLMProvider['chat']>()
       .mockResolvedValueOnce(bigOutputToolResponse('t0'))
       .mockResolvedValueOnce(bigOutputToolResponse('t1'))
@@ -307,35 +264,17 @@ describe('Agent round-start context budget decision (PR2)', () => {
         usage: { input_tokens: 900, output_tokens: 10 },
       })
       .mockResolvedValueOnce(okResponse('done'));
-    const { agent, log } = buildAgent({
+    const { agent } = buildAgent({
       provider: buildProvider(chat),
       compactionHandler: handler,
       tools: [{ def: makeToolDefinition('read'), handler: () => big }],
-      contextCompaction: {
-        softMaxTokens: 800,
-        pruneOptions: {
-          enabled: true,
-          protectRecentRounds: 0,
-          minPrunableChars: 10,
-          protectedTools: new Set(['todo']),
-          placeholder: '[Old tool result content cleared]',
-        },
-      },
+      contextCompaction: { maxContextTokens: 800 },
     });
 
-    const events: IChatStreamEvent[] = [];
-    const response = await agent.chat('hi', (event) => events.push(event));
+    const response = await agent.chat('hi');
 
-    // 续写语义：截断段 + 续写段合并。
     expect(response.content).toBe('partialdone');
-    // 续写路径只 prune 不 compact。
     expect(handler).not.toHaveBeenCalled();
-    expect(events.some((event) => event.type === 'context-pruned')).toBe(true);
-    const prunedCount = log
-      .getAllMessages()
-      .filter((m) => m.role === 'tool' && m.content === '[Old tool result content cleared]')
-      .length;
-    expect(prunedCount).toBeGreaterThan(0);
     // 4 次请求：工具轮 ×2 + 截断轮 + 续写轮。
     expect(chat).toHaveBeenCalledTimes(4);
   });

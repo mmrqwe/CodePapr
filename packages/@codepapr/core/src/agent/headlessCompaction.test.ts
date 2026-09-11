@@ -35,9 +35,10 @@ describe('createHeadlessCompaction（子代理 v4 引擎）', () => {
     lang: 'zh-CN',
   });
 
-  it('触发线 = 窗口 × 90%，soft 与 hard 同值（prune 层已退役）', () => {
+  it('触发线 = 窗口 × 90%（单层，无 soft/prune 层）', () => {
     expect(config.maxContextTokens).toBe(Math.floor(100_000 * COMPACT_TRIGGER_RATIO));
-    expect(config.softMaxTokens).toBe(config.maxContextTokens);
+    expect('softMaxTokens' in config).toBe(false);
+    expect('pruneOptions' in config).toBe(false);
   });
 
   it('超限 log 压缩：骨架 checkpoint 在前，最近回合逐字，工具结果不流失到块外', async () => {

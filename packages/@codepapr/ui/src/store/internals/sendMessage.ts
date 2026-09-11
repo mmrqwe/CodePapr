@@ -78,7 +78,6 @@ import {
   verifyCompactionLanded,
 } from './contextSurfaceStore';
 import { loadMemoryBootstrapSection, loadMemoryBootstrapSectionStrict, refreshMemoryLedgerProjection } from './memoryLedgerStore';
-import { buildPruneOptions } from '../../agent/compactionHandler';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import {
   buildRecallInsertion,
@@ -462,7 +461,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               sessionId,
               messages,
               trigger,
-              pruneOptions: buildPruneOptions(normalizedSettings),
             });
             if (compactionId) {
               clearCompactionInFlight(compactionId);
@@ -1482,9 +1480,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // agent 与创建它的会话绑定（logStore/上下文），切换会话后绝不复用，
           // 否则会把新会话的消息写进旧会话的上下文。
           const agentSessionId = get()._agentSessionId;
-          // PR1（ADR-006）：重建用的 prune 参数。surface 存在时取冻结参数，
-          // 供本回合内所有 createAgent（含崩溃重建/降级重建）复用。
-          let sessionPruneOptions: import('@codepapr/core').PruneOptions | undefined;
           if (!agent || agent.isCrashed() || (agentSessionId !== null && agentSessionId !== activeSessionId) || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
             if (agent) {
               try {
@@ -1511,11 +1506,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 const hydrated = await hydrateSessionContext(
                   workspacePath,
                   activeSessionId,
-                  contextMessages,
-                  buildPruneOptions(normalizedSettings)
+                  contextMessages
                 );
                 contextMessages = hydrated.messages as UIMessage[];
-                sessionPruneOptions = hydrated.pruneOptions;
               } catch {
                 // surface 读取失败 → 沿用全量数组（legacy 行为）。
               }
@@ -1535,7 +1528,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   systemPrompt: runtimeSystemPrompt,
                 },
                 runtimeAgentConfig,
-                sessionPruneOptions,
               );
               set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
             } else {
@@ -1933,12 +1925,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   return message;
                 }
 
-                if (event.type === 'context-pruned') {
-                  // 软区间原地裁剪（PR2）：log 内旧工具结果已替换为占位符，
-                  // 无消息级 UI 变更。
-                  return message;
-                }
-
                 if (event.type === 'context-compaction-blocked') {
                   // 压缩熔断：本轮不再尝试 mid-loop 压缩，给用户一条状态说明
                   // （真超限仍由 provider overflow 路径兜底）。
@@ -2017,7 +2003,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     systemPrompt: runtimeSystemPrompt,
                   },
                   runtimeAgentConfig,
-                  sessionPruneOptions,
                 )
               : createAgent(
                   normalizedSettings,
@@ -2032,7 +2017,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     systemPrompt: runtimeSystemPrompt,
                   },
                   runtimeAgentConfig,
-                  sessionPruneOptions,
                 );
             set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
           };
@@ -2178,7 +2162,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                       systemPrompt: runtimeSystemPrompt,
                     },
                     runtimeAgentConfig,
-                    buildPruneOptions(normalizedSettings),
                   )
                 : null;
 
@@ -2614,7 +2597,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 systemPrompt: runtimeSystemPrompt,
               },
               runtimeAgentConfig,
-              sessionPruneOptions,
             );
             set({ _agent: agent, _agentModel: route.model, _agentPromptKey: runtimePromptKey, _agentSessionId: activeSessionId });
 

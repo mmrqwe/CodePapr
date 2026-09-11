@@ -103,7 +103,6 @@ import { createSendMessage, invalidateAgentHandle, isTurnInFlight, resetSendMess
 import { clearSessionBootstrapCache } from './internals/sessionBootstrapCache';
 import { resetWorkspaceEphemeralState } from './internals/workspaceEphemeralReset';
 import { loadMemoryBootstrapSection } from './internals/memoryLedgerStore';
-import { buildPruneOptions } from '../agent/compactionHandler';
 import { finalizeCancelledToolInvocations } from './internals/messageMutators';
 import { useGoalStore } from './goalStore';
 import { upsertRecentWorkspace, sortRecentWorkspaces } from './internals/recentWorkspaces';
@@ -1165,16 +1164,13 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         // 与真实 agent 重建对齐：surface 节点水合 + 冻结 prune 参数，
         // 避免 Inspector 按全量 archive / 当前 settings 偏离实际请求上下文。
         let contextMessages = messages;
-        let snapshotPruneOptions = buildPruneOptions(normalizedSettings);
         try {
           const hydrated = await hydrateSessionContext(
             workspacePath,
             activeSessionId,
-            messages,
-            snapshotPruneOptions
+            messages
           );
           contextMessages = hydrated.messages as UIMessage[];
-          snapshotPruneOptions = hydrated.pruneOptions;
         } catch {
           // surface 读取失败 → 沿用全量数组（与 sendMessage 重建兜底一致）。
         }
@@ -1199,8 +1195,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
             agentDefinitions,
             sessionBootstrapPrompt,
             onWorkspaceMutated: () => {},
-          },
-          snapshotPruneOptions
+          }
         );
 
         const snapshot = buildContextSnapshot(

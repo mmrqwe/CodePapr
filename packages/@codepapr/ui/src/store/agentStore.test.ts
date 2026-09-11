@@ -4496,6 +4496,7 @@ describe('useAgentStore.closeWorkspace', () => {
 });
 
 describe('sendMessage /goal', () => {
+  const __t1 = Date.now();
   it('runs the goal loop and completes when condition is met', async () => {
     // Mock the worker agent to return a simple response
     const mockResponse = {
@@ -4721,6 +4722,113 @@ describe('sendMessage /goal', () => {
     expect(maybeGenerateContextCheckpointMock).toHaveBeenCalled();
     // 本 describe 没有 afterEach：手动恢复/清空 createAgent 间谍，避免污染
     // 后续按调用计数断言的用例（ensureAgentForApp）。
+    createAgentMock.mockImplementation((...args: never[]) =>
+      actualCreateAgentRef.current!.createAgent(...args)
+    );
+    createAgentMock.mockClear();
+  });
+
+  it('v4 Goal 循环压缩是真压缩：force 触发 epoch、checkpoint 提交保留、agent 就地重建', async () => {
+    const mockResponse = {
+      role: 'assistant' as const,
+      content: '继续尝试修复。',
+      cacheStats: { cacheCreationTokens: 0, cacheReadTokens: 0, newInputTokens: 1, outputTokens: 1, calls: 1 },
+    };
+    const chat = vi.fn(async (_prompt: string) => mockResponse);
+    // 转义注意：文件里必须是 \\"（运行时还原为 \" 给内层 JSON），
+    // 写错一层会让 provider 解析抛错 → verifier 走空完成退避（测试表现为挂起）。
+    const verifierSseBody = [
+      'data: {"id":"resp-verifier","choices":[{"index":0,"delta":{"content":"{\\"verdict\\":\\"NOT_MET\\",\\"evidence\\":\\"test still failing\\",\\"progress\\":0.2}"},"finish_reason":null}]}\n\n',
+      'data: {"id":"resp-verifier","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}\n\n',
+      'data: [DONE]\n\n',
+    ].join('');
+    vi.stubGlobal('fetch', vi.fn(() =>
+      Promise.resolve(new Response(verifierSseBody, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    ));
+    invokeMock.mockImplementation(async (command: string): Promise<Record<string, unknown>> => {
+      if (command === 'list_workspace_files') return { root: '', entries: [], truncated: false };
+      if (command === 'run_workspace_command') return { command: 'node', args: ['test.js'], status: 1, stdout: '', stderr: 'fail', timedOut: false };
+      if (command === 'write_text_file') return { path: '', bytes: 0 };
+      if (command === 'load_projectgraph_cache') return null as unknown as Record<string, unknown>;
+      if (command === 'read_text_file') return { path: '', content: '', bytes: 0 };
+      throw new Error(`Unexpected invoke: ${command}`);
+    });
+
+    // GoalRunner 每 5 迭代调一次 onCompaction（force=true）；非 force 返回 null。
+    let goalCheckpointEmitted = false;
+    maybeGenerateContextCheckpointMock.mockImplementation(async (...args: unknown[]) => {
+      if (args[2] !== true || goalCheckpointEmitted) return null;
+      goalCheckpointEmitted = true;
+      return {
+        message: {
+          id: 'goal-cp-1',
+          role: 'assistant',
+          content: '',
+          synthetic: true,
+          hidden: true,
+          timestamp: Date.now(),
+          contextCheckpoint: {
+            version: 4,
+            summary: '骨架',
+            renderedContent: '骨架内容',
+            sourceMessageCount: 2,
+            sourceChars: 200,
+            generatedAt: Date.now(),
+            modelName: 'local-checkpoint',
+            modelTier: 'local',
+            compactionId: 'goal-cp-1-cid',
+            trigger: 'manual',
+            skeleton: [{ userId: 'goal-u', assistantId: null, q: '修复测试', a: '仍未通过', droppedToolCalls: 3 }],
+            tokenStats: { estimatedTokensBefore: 500, estimatedTokensAfter: 100, sourceTokens: 400, checkpointTokens: 60 },
+          },
+        },
+        modelTier: 'local' as const,
+        insertIndex: 1,
+      };
+    });
+    const rebuiltAgent = createMockAgent({ chat, logMessages: [] });
+    createAgentMock.mockImplementation(() => rebuiltAgent as never);
+
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({
+        apiKey: 'sk-test',
+        fastModelEnabled: true,
+        fastModel: 'deepseek-v4-flash',
+        goalMaxIterations: 6,
+      }),
+      workspacePath: '/tmp/goal-test-workspace',
+      sessions: [
+        { id: 'session-1', name: 'goal', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      activeSessionId: 'session-1',
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+      isLoading: false,
+      _agent: createMockAgent({ chat, logMessages: [] }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentPromptKey: null,
+      _agentSessionId: 'session-1',
+      _gitReady: false,
+    }));
+
+    await useAgentStore.getState().sendMessage(
+      '/goal exec:node test.js',
+      '/goal exec:node test.js',
+      'agent'
+    );
+
+    // 1) Goal 路径以 force=true 生成 epoch checkpoint
+    expect(goalCheckpointEmitted).toBe(true);
+    const sessionMessages = useAgentStore.getState().sessionMessages['session-1'] ?? [];
+    // 2) await 单事务提交成功 → checkpoint 未被回滚（旧 void 提交与后续回合竞态）
+    expect(sessionMessages.some((m) => m.id === 'goal-cp-1')).toBe(true);
+    // 3) epoch 后 agent 就地重建：旧全量 log 不带着继续跑（旧假压缩不重建）
+    expect(useAgentStore.getState()._agent).toBe(rebuiltAgent);
+    // 循环确实在压缩后继续推进（多轮 worker turn）
+    expect(chat.mock.calls.length).toBeGreaterThanOrEqual(6);
+    expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
+
     createAgentMock.mockImplementation((...args: never[]) =>
       actualCreateAgentRef.current!.createAgent(...args)
     );

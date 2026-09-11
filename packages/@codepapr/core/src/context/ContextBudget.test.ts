@@ -39,38 +39,23 @@ describe('buildContextBudgetBreakdown', () => {
   });
 });
 
-describe('decideContextBudgetAction', () => {
-  const soft = 40_000;
-  const hard = 60_000;
+describe('decideContextBudgetAction（v4 单层触发线）', () => {
+  const trigger = 60_000;
 
-  it('below soft budget → none', () => {
+  it('below the trigger line → none', () => {
     const decision = decideContextBudgetAction({
       breakdown: buildContextBudgetBreakdown(stages, 2_000),
-      softBudgetTokens: soft,
-      hardBudgetTokens: hard,
+      hardBudgetTokens: trigger,
       estimateSource: 'heuristic',
     });
     expect(decision.action).toBe('none');
-    expect(decision.overSoftBy).toBe(0);
-  });
-
-  it('over soft but under hard → prune-tool-results', () => {
-    const decision = decideContextBudgetAction({
-      breakdown: buildContextBudgetBreakdown({ ...stages, retainedTailTokens: 45_000 }, 2_000),
-      softBudgetTokens: soft,
-      hardBudgetTokens: hard,
-      estimateSource: 'heuristic',
-    });
-    expect(decision.action).toBe('prune-tool-results');
-    expect(decision.overSoftBy).toBeGreaterThan(0);
     expect(decision.overHardBy).toBe(0);
   });
 
-  it('over hard without provider limit → compact', () => {
+  it('over the trigger line → compact', () => {
     const decision = decideContextBudgetAction({
       breakdown: buildContextBudgetBreakdown({ ...stages, retainedTailTokens: 90_000 }, 2_000),
-      softBudgetTokens: soft,
-      hardBudgetTokens: hard,
+      hardBudgetTokens: trigger,
       estimateSource: 'provider',
     });
     expect(decision.action).toBe('compact');
@@ -80,8 +65,7 @@ describe('decideContextBudgetAction', () => {
   it('over provider limit → emergency-compact', () => {
     const decision = decideContextBudgetAction({
       breakdown: buildContextBudgetBreakdown({ ...stages, retainedTailTokens: 90_000 }, 2_000),
-      softBudgetTokens: soft,
-      hardBudgetTokens: hard,
+      hardBudgetTokens: trigger,
       providerContextLimitTokens: 80_000,
       estimateSource: 'heuristic',
     });
@@ -93,8 +77,7 @@ describe('decideContextBudgetAction', () => {
     expect(
       decideContextBudgetAction({
         breakdown,
-        softBudgetTokens: soft,
-        hardBudgetTokens: hard,
+        hardBudgetTokens: trigger,
         providerOverflowDetected: true,
         estimateSource: 'provider',
       }).action
@@ -102,8 +85,7 @@ describe('decideContextBudgetAction', () => {
     expect(
       decideContextBudgetAction({
         breakdown,
-        softBudgetTokens: soft,
-        hardBudgetTokens: hard,
+        hardBudgetTokens: trigger,
         providerOverflowDetected: true,
         emergencyAlreadyAttempted: true,
         estimateSource: 'provider',
@@ -111,54 +93,19 @@ describe('decideContextBudgetAction', () => {
     ).toBe('reject-request');
   });
 
-  it('labels the estimate source', () => {
-    const decision = decideContextBudgetAction({
-      breakdown: buildContextBudgetBreakdown(stages, 2_000),
-      softBudgetTokens: soft,
-      hardBudgetTokens: hard,
-      estimateSource: 'provider',
-    });
-    expect(decision.estimateSource).toBe('provider');
-  });
-
   it('PR2：provider 实测 token 覆盖 heuristic 估算（estimateSource=provider）', () => {
-    // heuristic 估算低于 soft，但 provider 实测高于 soft 且低于 hard → prune。
     const heuristic = buildContextBudgetBreakdown(stages, 2_000);
-    expect(heuristic.totalTokens).toBeLessThan(soft);
+    expect(heuristic.totalTokens).toBeLessThan(trigger);
+    // 实测越过触发线 → compact，来源标记 provider。
     const decision = decideContextBudgetAction({
       breakdown: heuristic,
-      softBudgetTokens: soft,
-      hardBudgetTokens: hard,
-      providerMeasuredTotalTokens: 50_000,
-      estimateSource: 'heuristic',
-    });
-    expect(decision.action).toBe('prune-tool-results');
-    expect(decision.estimateSource).toBe('provider');
-    expect(decision.overSoftBy).toBe(10_000);
-
-    // 实测高于 hard → compact。
-    const overHard = decideContextBudgetAction({
-      breakdown: heuristic,
-      softBudgetTokens: soft,
-      hardBudgetTokens: hard,
+      hardBudgetTokens: trigger,
       providerMeasuredTotalTokens: 70_000,
       estimateSource: 'heuristic',
     });
-    expect(overHard.action).toBe('compact');
-    expect(overHard.estimateSource).toBe('provider');
-    expect(overHard.overHardBy).toBe(10_000);
-  });
-
-  it('does not hide a hard overflow when soft is misconfigured above hard', () => {
-    const decision = decideContextBudgetAction({
-      breakdown: buildContextBudgetBreakdown({ ...stages, retainedTailTokens: 90_000 }, 2_000),
-      softBudgetTokens: 200_000,
-      hardBudgetTokens: 60_000,
-      estimateSource: 'heuristic',
-    });
     expect(decision.action).toBe('compact');
-    expect(decision.overSoftBy).toBe(0);
-    expect(decision.overHardBy).toBeGreaterThan(0);
+    expect(decision.estimateSource).toBe('provider');
+    expect(decision.overHardBy).toBe(10_000);
   });
 });
 

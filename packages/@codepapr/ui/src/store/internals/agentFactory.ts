@@ -16,7 +16,6 @@ import {
   type SkillDefinition,
   type ToolOutputTruncationOptions,
   type ToolContextConfig,
-  type PruneOptions,
   SUBAGENT_WALL_CLOCK_TIMEOUT_MS,
   PERMISSION_WAITING_TOOL_TIMEOUTS,
 } from '@codepapr/core';
@@ -418,9 +417,7 @@ export function buildAgentSessionParts(
   overrides: Partial<
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
-  runtime: AgentRuntimeConfig = {},
-  /** PR1（ADR-006）：重建用的 prune 参数（surface 冻结参数优先）。 */
-  pruneOptions?: PruneOptions
+  runtime: AgentRuntimeConfig = {}
 ): AgentSessionParts {
   const mode: PromptMode = runtime.mode ?? 'agent';
   const toolRegistry = isReadOnlyMode(mode)
@@ -493,7 +490,7 @@ export function buildAgentSessionParts(
       thinkingPayload: settings.thinkingPayload,
     },
   });
-  const log = createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, pruneOptions, {
+  const log = createLogFromMessages(sessionId, messages, sessionBootstrapPrompt, {
     omitImages: !modelSupportsVision(settings, baseModel),
   });
   return { prefix, log, model: baseModel, toolRegistry, provider, providerName, uiTaskToolContext };
@@ -511,10 +508,9 @@ export function createMainThreadAgent(
   overrides: Partial<
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
-  runtime: AgentRuntimeConfig = {},
-  pruneOptions?: PruneOptions
+  runtime: AgentRuntimeConfig = {}
 ): AgentRuntimeHandle {
-  return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime, pruneOptions);
+  return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime);
 }
 
 function _createLocalAgent(
@@ -525,10 +521,9 @@ function _createLocalAgent(
   overrides: Partial<
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
-  runtime: AgentRuntimeConfig = {},
-  pruneOptions?: PruneOptions
+  runtime: AgentRuntimeConfig = {}
 ): AgentRuntimeHandle {
-  const parts = buildAgentSessionParts(settings, sessionId, workspacePath, messages, overrides, runtime, pruneOptions);
+  const parts = buildAgentSessionParts(settings, sessionId, workspacePath, messages, overrides, runtime);
   const session = new Session({
     sessionId,
     prefix: parts.prefix,
@@ -573,10 +568,7 @@ export function createAgent(
   overrides: Partial<
     Pick<Settings, 'model' | 'thinkingEnabled' | 'thinkingEffort' | 'thinkingBudgetTokens' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   > = {},
-  runtime: AgentRuntimeConfig = {},
-  /** PR1（ADR-006）：重建用的 prune 参数（surface 冻结参数优先；缺省沿用
-   *  现有行为——不 prune）。 */
-  pruneOptions?: PruneOptions,
+  runtime: AgentRuntimeConfig = {}
 ): AgentRuntimeHandle {
   const onWorkspaceMutated = runtime.onWorkspaceMutated ?? defaultOnWorkspaceMutatedResolver();
   const baseModel = (overrides.model ?? settings.model).trim();
@@ -598,7 +590,7 @@ export function createAgent(
       return new WorkerBackedAgent({
         sessionId,
         workspacePath,
-        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt, pruneOptions, {
+        initialMessages: toCoreMessages(messages, sessionBootstrapPrompt, {
           omitImages: !modelSupportsVision(settings, baseModel),
         }),
         settings: toWorkerAgentSettings(settings),
@@ -664,9 +656,7 @@ export function createAgent(
     console.warn('[Agent] Isolated runtime init failed, falling back to main-thread agent:', e);
   }
 
-  // D-8：主线程兜底必须透传 pruneOptions——否则同一会话在 worker/sidecar 路径
-  // 带 ADR-006 渲染参数冻结、兜底路径不带，两条运行时的上下文裁剪行为不一致。
-  return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime, pruneOptions);
+  return _createLocalAgent(settings, sessionId, workspacePath, messages, overrides, runtime);
 }
 
 export function getAgentMessagesSince(

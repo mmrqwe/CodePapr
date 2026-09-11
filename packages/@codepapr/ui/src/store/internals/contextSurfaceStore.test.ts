@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PruneOptions } from '@codepapr/core';
 import type { PersistedContextSurface } from '../../utils/projectStorage';
 import type { ContextMessageLike } from '../../utils/contextCompaction';
 
@@ -65,14 +64,6 @@ function surface(overrides: Partial<PersistedContextSurface> = {}): PersistedCon
     ...overrides,
   };
 }
-
-const pruneOptions: PruneOptions = {
-  enabled: false,
-  protectRecentRounds: 0,
-  minPrunableChars: 0,
-  protectedTools: new Set(),
-  placeholder: '',
-};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -178,7 +169,7 @@ describe('maintainContextSurface', () => {
     expect(saved?.nodes.map((n) => n.messageId)).toEqual(['cp-old', 'u1', 'a1']);
   });
 
-  it('bootstraps an uncompacted session with disabled prune', async () => {
+  it('v4：任何 surface 创建都写禁用 render 参数常量', async () => {
     const sid = freshSession();
     vi.mocked(loadContextSurface).mockResolvedValue(null);
     await maintainContextSurface('/ws', sid, [user('u1'), assistant('a1')]);
@@ -186,33 +177,18 @@ describe('maintainContextSurface', () => {
     expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.enabled).toBe(false);
   });
 
-  it('bootstraps a compacted legacy session with live prune params, not disabled', async () => {
-    const sid = freshSession();
-    vi.mocked(loadContextSurface).mockResolvedValue(null);
-    const live: PruneOptions = {
-      ...pruneOptions,
-      enabled: true,
-      protectRecentRounds: 6,
-    };
-    await maintainContextSurface(
-      '/ws',
-      sid,
-      [checkpoint('cp1', { compactionId: 'c1', generation: 1 }), user('u1')],
-      live
-    );
-    const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
-    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.enabled).toBe(true);
-    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.protectRecentRounds).toBe(6);
-  });
-
-  it('does not freeze disabled prune for compacted legacy sessions without live params', async () => {
+  it('v4：已压缩 legacy 会话不再被跳过建面（prune 参数语义已删除）', async () => {
     const sid = freshSession();
     vi.mocked(loadContextSurface).mockResolvedValue(null);
     await maintainContextSurface('/ws', sid, [
       checkpoint('cp1', { compactionId: 'c1', generation: 1 }),
       user('u1'),
     ]);
-    expect(saveContextSurface).not.toHaveBeenCalled();
+    const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
+    expect(saved).toBeDefined();
+    const params = JSON.parse(saved?.renderParamsJson ?? '{}');
+    expect(params.pruneParams.enabled).toBe(false);
+    expect(params.renderVersion).toBeGreaterThan(0);
   });
 });
 
@@ -226,7 +202,6 @@ describe('commitContextCheckpoint', () => {
         sessionId: sid,
         messages: [checkpoint('cp-new', { compactionId: 'comp-x' }), user('u1')],
         trigger: 'token-limit',
-        pruneOptions,
       })
     ).rejects.toThrow('db busy');
     expect(commitContextCompaction).not.toHaveBeenCalled();
@@ -241,7 +216,6 @@ describe('commitContextCheckpoint', () => {
       sessionId: sid,
       messages: [checkpoint('cp-new', { compactionId: 'comp-x' }), user('u1')],
       trigger: 'token-limit',
-      pruneOptions,
     });
 
     // 提交成功后维护必须恢复：compactionId 不再在途，同 generation 正常写。
@@ -331,8 +305,7 @@ describe('hydrateSessionContext', () => {
     const result = await hydrateSessionContext(
       '/ws',
       sid,
-      [checkpoint('cp-old', { compactionId: 'comp-parent', generation: 1 }), user('u1')],
-      pruneOptions
+      [checkpoint('cp-old', { compactionId: 'comp-parent', generation: 1 }), user('u1')]
     );
 
     expect(result.degraded).toBe(true);
@@ -352,7 +325,7 @@ describe('hydrateSessionContext', () => {
     );
 
     const archive = [user('u1'), assistant('a1')];
-    const result = await hydrateSessionContext('/ws', sid, archive, pruneOptions);
+    const result = await hydrateSessionContext('/ws', sid, archive);
 
     expect(result.degraded).toBe(true);
     expect(result.messages.map((m) => m.id)).toEqual(['u1', 'a1']);
@@ -363,7 +336,7 @@ describe('hydrateSessionContext', () => {
     expect(saved?.compactionId).toBeNull();
   });
 
-  it('does not fall back to current settings when render params are malformed (ADR-006)', async () => {
+  it('v4：render params 不再被解析——畸形 JSON 也不影响水合', async () => {
     const sid = freshSession();
     vi.mocked(loadContextSurface).mockResolvedValue(
       surface({
@@ -372,14 +345,12 @@ describe('hydrateSessionContext', () => {
         nodes: [{ position: 0, messageId: 'u1', nodeKind: 'conversation' }],
       })
     );
-    const current: PruneOptions = { ...pruneOptions, enabled: true, minPrunableChars: 99 };
-    const result = await hydrateSessionContext('/ws', sid, [user('u1')], current);
+    const result = await hydrateSessionContext('/ws', sid, [user('u1')]);
     expect(result.degraded).toBe(false);
-    expect(result.pruneOptions.enabled).toBe(false);
-    expect(result.pruneOptions.minPrunableChars).toBe(0);
+    expect(result.messages.map((m) => m.id)).toEqual(['u1']);
   });
 
-  it('rebuilds generation 0 of a compacted archive with live prune, not disabled', async () => {
+  it('v4：压缩归档重建 generation 0 也写禁用 render 参数', async () => {
     const sid = freshSession();
     vi.mocked(loadContextSurface).mockResolvedValue(
       surface({
@@ -389,15 +360,13 @@ describe('hydrateSessionContext', () => {
         nodes: [{ position: 0, messageId: 'missing-cp', nodeKind: 'checkpoint' }],
       })
     );
-    const live: PruneOptions = { ...pruneOptions, enabled: true, protectRecentRounds: 4 };
     const archive = [
       checkpoint('cp-old', { compactionId: 'comp-parent', generation: 1 }),
       user('u1'),
     ];
-    const result = await hydrateSessionContext('/ws', sid, archive, live);
+    const result = await hydrateSessionContext('/ws', sid, archive);
     expect(result.degraded).toBe(true);
     const saved = vi.mocked(saveContextSurface).mock.calls[0]?.[1];
-    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.enabled).toBe(true);
-    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.protectRecentRounds).toBe(4);
+    expect(JSON.parse(saved?.renderParamsJson ?? '{}').pruneParams.enabled).toBe(false);
   });
 });

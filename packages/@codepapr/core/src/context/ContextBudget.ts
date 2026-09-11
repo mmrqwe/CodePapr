@@ -5,18 +5,18 @@
  * 动作决策。估算来源必须标注（heuristic bytes/4 vs provider usage），
  * 可用时与 provider usage 对账。
  *
- * 决策语义（用户设定的 maxContextTokens 是权威，不按 provider 名义窗口
+ * 决策语义（v4：用户设定的 maxContextTokens 是权威，不按 provider 名义窗口
  * 硬钳制；provider limit 仅作为 overflow 预判，真实 overflow 是实证信号）：
- * - 低于 soft budget：不压缩；
- * - soft ~ hard：先 prune/externalize；
- * - 超过 hard：compact；
+ * - 未超触发线：放行；
+ * - 超过触发线（= 窗口 × COMPACT_TRIGGER_RATIO，由调用方传入）：compact；
  * - 超过 provider limit 或检测到 provider overflow：emergency-compact；
  * - emergency 已尝试仍超限：reject-request（调用方终止本轮并给结构化错误）。
+ * 旧的 soft/prune-tool-results 分层已随 v4 骨架引擎删除（工具结果只存在于
+ * 逐字 tail 内、轮外整体折叠，独立 prune 不再有存在意义）。
  */
 
 export type ContextBudgetAction =
   | 'none'
-  | 'prune-tool-results'
   | 'compact'
   | 'emergency-compact'
   | 'reject-request';
@@ -94,9 +94,8 @@ export function buildContextBudgetBreakdown(
 
 export interface ContextBudgetDecisionInput {
   breakdown: ContextBudgetBreakdown;
-  /** 用户设定的软预算（maxContextTokens 的一部分，PR3 落地配置）。 */
-  softBudgetTokens: number;
-  /** 用户设定的硬预算（= effectiveMaxContextTokens）。 */
+  /** 压缩触发线（v4：= effectiveMaxContextTokens × COMPACT_TRIGGER_RATIO，
+   *  由调用方算好传入；旧 soft/prune 分层已删除）。 */
   hardBudgetTokens: number;
   /** provider 名义上下文窗口（转发网关场景可大于名义值，仅作 overflow 预判）。 */
   providerContextLimitTokens?: number;
@@ -113,9 +112,7 @@ export interface ContextBudgetDecisionInput {
 
 export interface ContextBudgetDecision {
   action: ContextBudgetAction;
-  /** 超出 soft 的 token 数（0 表示未超）。 */
-  overSoftBy: number;
-  /** 超出 hard 的 token 数（0 表示未超）。 */
+  /** 超出触发线的 token 数（0 表示未超）。 */
   overHardBy: number;
   estimateSource: ContextEstimateSource;
 }
@@ -126,39 +123,22 @@ export function decideContextBudgetAction(input: ContextBudgetDecisionInput): Co
   const measured = input.providerMeasuredTotalTokens;
   const estimateSource = measured !== undefined ? 'provider' : input.estimateSource;
   const totalTokens = measured ?? breakdown.totalTokens;
-  const overSoftBy = Math.max(0, totalTokens - input.softBudgetTokens);
   const overHardBy = Math.max(0, totalTokens - input.hardBudgetTokens);
 
   if (input.providerOverflowDetected) {
     return {
       action: input.emergencyAlreadyAttempted ? 'reject-request' : 'emergency-compact',
-      overSoftBy,
       overHardBy,
       estimateSource,
     };
   }
 
-  // 硬预算优先：软>硬误配置时不得因 overSoftBy===0 掩盖真实溢出。
   if (overHardBy > 0) {
     if (providerLimit !== undefined && totalTokens > providerLimit) {
-      return {
-        action: 'emergency-compact',
-        overSoftBy,
-        overHardBy,
-        estimateSource,
-      };
+      return { action: 'emergency-compact', overHardBy, estimateSource };
     }
-    return { action: 'compact', overSoftBy, overHardBy, estimateSource };
+    return { action: 'compact', overHardBy, estimateSource };
   }
 
-  if (overSoftBy === 0) {
-    return { action: 'none', overSoftBy: 0, overHardBy: 0, estimateSource };
-  }
-
-  return {
-    action: 'prune-tool-results',
-    overSoftBy,
-    overHardBy: 0,
-    estimateSource,
-  };
+  return { action: 'none', overHardBy: 0, estimateSource };
 }

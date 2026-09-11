@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IMessage } from '@codepapr/types';
-import { AppendOnlyLog, Serializer, planSkeletonCompaction, roundsFromCoreMessages, type PruneOptions } from '@codepapr/core';
+import { AppendOnlyLog, Serializer, planSkeletonCompaction, roundsFromCoreMessages } from '@codepapr/core';
 import {
   buildContextCompactionTranscript,
   buildEffectiveContextMessages,
@@ -460,40 +460,18 @@ describe('contextCompaction', () => {
     expect(toolMsg?.content).toBe('{"apple":2,"zebra":1}');
   });
 
-  describe('rebuild-time tool-result pruning (prefix-cache friendly)', () => {
+  it('v4：重建保留工具结果原文（prune 层已删除，不再被占位符替换）', () => {
     const bigOutput = 'x'.repeat(300);
-    const pruneOptions: PruneOptions = {
-      enabled: true,
-      protectRecentRounds: 1,
-      minPrunableChars: 100,
-      protectedTools: new Set<string>(),
-      placeholder: '[cleared]',
-    };
-    const makeMessages = (): ContextMessageLike[] => [
+    const messages: ContextMessageLike[] = [
       createAssistantWithTools('a1', '', [
         { id: 't1', name: 'read', arguments: {}, status: 'success', output: bigOutput },
       ]),
       createAssistant('a2', '第二轮'),
       createAssistant('a3', '第三轮'),
     ];
-
-    it('prunes old tool results once at rebuild time when pruneOptions is provided', () => {
-      const effective = buildEffectiveContextMessages(makeMessages(), { pruneOptions });
-      const toolMsg = effective.find((m) => m.role === 'tool');
-      expect(toolMsg?.content).toBe('[cleared]');
-    });
-
-    it('leaves tool results intact when pruneOptions is omitted', () => {
-      const effective = buildEffectiveContextMessages(makeMessages());
-      const toolMsg = effective.find((m) => m.role === 'tool');
-      expect(toolMsg?.content).toBe(bigOutput);
-    });
-
-    it('is deterministic across repeated rebuilds (stable prefix bytes)', () => {
-      const first = buildEffectiveContextMessages(makeMessages(), { pruneOptions });
-      const second = buildEffectiveContextMessages(makeMessages(), { pruneOptions });
-      expect(second).toEqual(first);
-    });
+    const effective = buildEffectiveContextMessages(messages);
+    const toolMsg = effective.find((m) => m.role === 'tool');
+    expect(toolMsg?.content).toBe(bigOutput);
   });
 
   describe('tool message byte-faithfulness (contextContent, problem 1.2 fix)', () => {
@@ -674,34 +652,7 @@ describe('contextCompaction', () => {
       const toolMsgs = effective.filter((m) => m.role === 'tool');
       expect(toolMsgs[0]?.content).toBe('full-1');
       expect(toolMsgs[1]?.content).toBe('full-2');
-    });
-
-    it('layers prune (oldest→placeholder) before summarize (middle-aged→summary)', () => {
-      const big = 'y'.repeat(30_000);
-      const messages: ContextMessageLike[] = [
-        assistantWithSummary('a1', 'c1', big, '[read] summary-1'),
-        assistantWithSummary('a2', 'c2', big, '[read] summary-2'),
-        assistantWithSummary('a3', 'c3', 'full-3', '[read] summary-3'),
-      ];
-      // Reverse round counting: a tool message is checked before its calling
-      // assistant is counted, so protectRecentRounds=1 protects t2/t3 and
-      // leaves the oldest (t1) prunable — producing the placeholder tier.
-      const pruneOptions: PruneOptions = {
-        enabled: true,
-        protectRecentRounds: 1,
-        minPrunableChars: 10_000,
-        protectedTools: new Set<string>(),
-        placeholder: '[cleared]',
-      };
-      const effective = buildEffectiveContextMessages(messages, { pruneOptions });
-      const toolMsgs = effective.filter((m) => m.role === 'tool');
-      // Oldest (outside the protected window) is pruned to the placeholder…
-      expect(toolMsgs[0]?.content).toBe('[cleared]');
-      // …the middle-aged one is folded to its frozen summary…
-      expect(toolMsgs[1]?.content).toBe('[read] summary-2');
-      // …and the latest batch stays full.
-      expect(toolMsgs[2]?.content).toBe('full-3');
-    });
+      });
   });
 
   describe('orphaned tool-call repair (problem 2.2 fix)', () => {

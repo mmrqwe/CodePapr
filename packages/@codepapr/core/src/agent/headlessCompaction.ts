@@ -44,7 +44,6 @@ export function createHeadlessCompaction(
   const triggerTokens = Math.floor(params.windowTokens * COMPACT_TRIGGER_RATIO);
   return {
     maxContextTokens: triggerTokens,
-    softMaxTokens: triggerTokens,
     handler: async (coreMessages: IMessage[]) => {
       const isBootstrap = (m: IMessage) =>
         m.metadata?.sessionBootstrap === true || m.id === 'session-bootstrap';

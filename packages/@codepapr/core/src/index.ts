@@ -55,8 +55,6 @@ export type {
   ToolOutputTruncationOptions,
   TruncationResult,
 } from './tool/toolOutputTruncation';
-export { pruneOldToolResults } from './tool/pruneToolResults';
-export type { PruneOptions } from './tool/pruneToolResults';
 export {
   summarizeToolOutput,
   resolveToolContextMode,

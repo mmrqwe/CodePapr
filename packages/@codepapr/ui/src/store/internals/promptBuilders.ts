@@ -5,7 +5,6 @@ import {
   buildSkillsSection,
   buildRuntimeUserPrompt,
   Serializer,
-  type PruneOptions,
   type SkillDefinition,
   type WorkspaceProjectGraphResult,
 } from '@codepapr/core';
@@ -31,10 +30,9 @@ import {
 export function toCoreMessages(
   messages: UIMessage[],
   sessionBootstrapPrompt?: string,
-  pruneOptions?: PruneOptions,
   options?: { omitImages?: boolean }
 ): IMessage[] {
-  const restoredMessages = buildEffectiveContextMessages(messages, { pruneOptions });
+  const restoredMessages = buildEffectiveContextMessages(messages);
   const withoutImages = options?.omitImages
     ? restoredMessages.map((message) => {
         if (!message.images?.length) return message;
@@ -67,11 +65,10 @@ export function createLogFromMessages(
   sessionId: string,
   messages: UIMessage[],
   sessionBootstrapPrompt?: string,
-  pruneOptions?: PruneOptions,
   options?: { omitImages?: boolean }
 ): AppendOnlyLog {
   const log = new AppendOnlyLog(sessionId);
-  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt, pruneOptions, options);
+  const restoredMessages = toCoreMessages(messages, sessionBootstrapPrompt, options);
   if (restoredMessages.length === 0) return log;
 
   log.loadFromSnapshot({

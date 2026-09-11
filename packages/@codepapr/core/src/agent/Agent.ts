@@ -59,7 +59,6 @@ import {
   decideContextBudgetAction,
   type ContextBudgetBreakdown,
 } from '../context/ContextBudget';
-import { pruneOldToolResults, type PruneOptions } from '../tool/pruneToolResults';
 import type { LogWireFootprint } from '../context/wireShape';
 
 const log = new Logger('Agent');
@@ -471,14 +470,9 @@ export interface ICacheValidator {
  */
 export interface ContextCompactionConfig {
   maxContextTokens: number;
-  /** PR2：软预算（= 用户硬预算 × soft ratio）。soft~hard 区间先走
-   *  prune-tool-results（原地裁剪旧工具结果），超过 hard 才 compact。 */
-  softMaxTokens: number;
-  /** PR2：prune-tool-results 动作的裁剪参数。未提供时软区间动作降级为 compact。 */
-  pruneOptions?: PruneOptions;
   handler: (
     messages: IMessage[],
-    /** 压缩触发来源（PR3：round-limit / token-limit / provider-overflow）。 */
+    /** 压缩触发来源（token-limit / manual / provider-overflow）。 */
     trigger?: CompactionTrigger
   ) => Promise<{ messages: IMessage[]; cacheStats?: ICacheStatistics } | null>;
 }
@@ -929,13 +923,10 @@ export class Agent {
         });
       }
 
-      // Mid-loop context budget decision (round-start check, PR2): 7 阶段
-      // token 分解 → decideContextBudgetAction，动作在发请求前执行，保证
+      // Mid-loop context budget decision (round-start check, v4 单层触发)：
+      // 7 阶段 token 分解 → decideContextBudgetAction，动作在发请求前执行，保证
       // 任何请求都不超限：
       //  - none：放行；
-      //  - prune-tool-results（soft~hard 区间）：原地裁剪旧工具结果为占位符
-      //    （与压缩 epoch 的 prune 语义一致，见 compactionHandler），不触发
-      //    昂贵的 LLM 压缩；
       //  - compact / emergency-compact：走压缩 handler 换 epoch；
       //  - reject-request：紧急压缩已尝试仍超限 → 抛结构化错误终止回合。
       // 冷却语义（旧实现 round - lastCompactionRound >= 2）会在「刚压缩过」的
@@ -946,7 +937,6 @@ export class Agent {
         const breakdown = this.computeBudgetBreakdown(0);
         const decision = decideContextBudgetAction({
           breakdown,
-          softBudgetTokens: this.contextCompaction.softMaxTokens,
           hardBudgetTokens: this.contextCompaction.maxContextTokens,
           // PR2：provider 实测对账——log 未回退时覆盖 heuristic（实测 + 追加
           // 增量的 wire 口径）。
@@ -961,26 +951,7 @@ export class Agent {
           );
         }
 
-        if (decision.action === 'prune-tool-results' && this.contextCompaction.pruneOptions) {
-          // pruneOldToolResults 无实际裁剪时返回原数组引用；仅在有裁剪时
-          // 才 replaceLog（避免无意义地破坏 prefix 追踪）。
-          const current = this.session.logStore.getAllMessages();
-          const pruned = pruneOldToolResults(
-            current as IMessage[],
-            this.contextCompaction.pruneOptions
-          );
-          if (pruned !== (current as IMessage[])) {
-            this.session.replaceLog(pruned);
-            this.lastProviderUsage = null;
-            this.requestBuilder.resetLogTracking?.();
-            onStreamEvent?.({ type: 'context-pruned', round: roundNumber });
-          }
-        } else if (
-          decision.action === 'compact' ||
-          decision.action === 'emergency-compact' ||
-          // 软区间动作但未提供 prune 参数：降级为 compact。
-          decision.action === 'prune-tool-results'
-        ) {
+        if (decision.action === 'compact' || decision.action === 'emergency-compact') {
           const blockedReason = this.compactionBlockReason();
           if (blockedReason) {
             // 熔断：本回合不再尝试压缩（见 compactionBlockReason）。请求照发，
@@ -1086,15 +1057,14 @@ export class Agent {
             : undefined;
 
         // PR2：provider 实测对账——续写请求的 log 与上次测量时完全一致
-        // （suffix 是临时消息），用 usage.input_tokens 决策；只执行
-        // prune-tool-results / reject-request（compact 会替换 log，使已合并
-        // 的部分输出相对新 epoch 失效）。
+        // （suffix 是临时消息），用 usage.input_tokens 决策；只做
+        // reject-request（compact 会替换 log，使已合并的部分输出相对新
+        // epoch 失效）。
         if (continuationAttempt > 0 && this.contextCompaction) {
           const measured = this.currentProviderMeasuredTokens();
           if (measured !== undefined) {
             const decision = decideContextBudgetAction({
               breakdown: this.computeBudgetBreakdown(0),
-              softBudgetTokens: this.contextCompaction.softMaxTokens,
               hardBudgetTokens: this.contextCompaction.maxContextTokens,
               providerMeasuredTotalTokens: measured,
               estimateSource: 'heuristic',
@@ -1104,22 +1074,6 @@ export class Agent {
                 decision.overHardBy,
                 decision.estimateSource
               );
-            }
-            if (
-              decision.action === 'prune-tool-results' &&
-              this.contextCompaction.pruneOptions
-            ) {
-              const current = this.session.logStore.getAllMessages();
-              const pruned = pruneOldToolResults(
-                current as IMessage[],
-                this.contextCompaction.pruneOptions
-              );
-              if (pruned !== (current as IMessage[])) {
-                this.session.replaceLog(pruned);
-                this.lastProviderUsage = null;
-                this.requestBuilder.resetLogTracking?.();
-                onStreamEvent?.({ type: 'context-pruned', round: roundNumber });
-              }
             }
           }
         }
@@ -1190,7 +1144,6 @@ export class Agent {
             const breakdown = this.computeBudgetBreakdown(0);
             const decision = decideContextBudgetAction({
               breakdown,
-              softBudgetTokens: this.contextCompaction?.softMaxTokens ?? 0,
               hardBudgetTokens: this.contextCompaction?.maxContextTokens ?? 0,
               providerOverflowDetected: true,
               emergencyAlreadyAttempted: true,

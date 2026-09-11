@@ -48,13 +48,12 @@ import {
   type AppAgentPayload,
 } from './agentWorkerProtocol';
 import { parseMcpToolName, sanitizeMcpToolPart } from '../utils/mcpTypes';
-import { buildPruneOptions, createContextCompactionHandler } from './compactionHandler';
+import { createContextCompactionHandler } from './compactionHandler';
 import { effectiveMaxContextTokens } from '../utils/contextLimits';
 import { createSubagentSummarizer } from '../utils/compactorRunner';
 import { setTodoListContext } from '../tools/todoListRegistry';
 import {
   CONTEXT_SURFACE_RENDER_VERSION,
-  freezePruneParams,
 } from '../utils/contextSurface';
 import type { ContextCompactionIntent } from '@codepapr/types';
 import type { CompactionSettings } from '../store/internals/types';
@@ -781,8 +780,7 @@ async function _refreshBootstrapRequest(requestId: string): Promise<string | nul
 
 function intentFromCommit(
   sessionId: string,
-  commit: MidLoopCompactionCommit,
-  settings: WorkerAgentSettings
+  commit: MidLoopCompactionCommit
 ): ContextCompactionIntent {
   const payload = commit.checkpointMessage.contextCheckpoint;
   return {
@@ -792,8 +790,15 @@ function intentFromCommit(
     checkpointMessageId: commit.checkpointMessageId,
     sourceMessageIds: commit.sourceMessageIds,
     retainedMessageIds: commit.retainedMessageIds,
+    // v4：render_params 恒为禁用常量（prune 层已删除；列保留兼容旧存档）。
     renderParams: {
-      pruneParams: freezePruneParams(buildPruneOptions(settings as unknown as CompactionSettings)),
+      pruneParams: {
+        enabled: false,
+        protectRecentRounds: 0,
+        minPrunableChars: 0,
+        protectedTools: [],
+        placeholder: '',
+      },
       renderVersion: CONTEXT_SURFACE_RENDER_VERSION,
     },
     tokenStats: payload?.tokenStats ?? {
@@ -839,7 +844,7 @@ async function _commitContextCompactionRequest(
     chatRequestId,
     request: {
       requestId,
-      intent: intentFromCommit(sessionId, commit, settings),
+      intent: intentFromCommit(sessionId, commit),
       commit,
     },
   });
@@ -1693,10 +1698,9 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     payload.userInput,
     (event) => {
       armIdle();
-      if (event.type === 'context-compacted' || event.type === 'context-pruned') {
-        // prune-only replaceLog 与 compact 一样改写了 worker log：必须走
-        // fullMessages 回传，否则主线程镜像仍是未裁剪工具结果，下次 full
-        // sync 会把它们复活进 worker。
+      if (event.type === 'context-compacted') {
+        // mid-loop 压缩改写了 worker log：必须走 fullMessages 回传，否则
+        // 主线程镜像与 worker epoch 不一致。
         compacted = true;
       }
       postMessageToMain({

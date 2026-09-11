@@ -3,7 +3,6 @@ import {
   renderTodoListDigest,
   TOOL_SUMMARY_METADATA_KEY,
   type ContextCompactionConfig,
-  type PruneOptions,
 } from '@codepapr/core';
 import {
   buildEffectiveContextMessages,
@@ -18,20 +17,8 @@ import { getTodoListContext } from '../tools/todoListRegistry';
 import type { CompactionSettings, UIToolInvocation } from '../store/internals/types';
 import type { MidLoopCompactionCommit } from './agentWorkerProtocol';
 
-const PRUNE_PROTECTED_TOOLS = new Set(['todo', 'question', 'skill']);
-
-/** v4：prune-first 层已废除——压缩本身零 LLM（骨架装配），且工具结果在
- *  轮外即被整体丢弃，prune 不再有存在意义。全链路统一返回 disabled，
- *  保证 live 与 rebuild 上下文一致（byte-identical）。 */
-export function buildPruneOptions(_settings?: unknown): PruneOptions {
-  return {
-    enabled: false,
-    protectRecentRounds: 0,
-    minPrunableChars: 0,
-    protectedTools: PRUNE_PROTECTED_TOOLS,
-    placeholder: '[Old tool result content cleared]',
-  };
-}
+/** v4：prune 层已随骨架引擎删除（buildEffectiveContextMessages 不再裁剪；
+ *  工具结果只存在于逐字 tail 内，单条巨型输出由入口护栏约束）。 */
 
 /**
  * Convert core log messages (IMessage, with toolCalls/toolResult) into the
@@ -150,15 +137,11 @@ export function createContextCompactionHandler(
   turnUserMessageId?: string
 ): ContextCompactionConfig {
   const hardBudget = effectiveMaxContextTokens(settings, providerName);
-  // v4：单一触发线 = 窗口 × 90%（与 maybeGenerateContextCheckpoint 同源）。
-  // soft = hard：decideContextBudgetAction 的 prune-tool-results 区间为空集，
-  // prune-first 层正式退役；reject-request 超限兜底保留。
+  // v4：单一触发线 = 窗口 × 90%（与 maybeGenerateContextCheckpoint 同源）；
+  // reject-request 超限兜底保留。
   const triggerTokens = Math.floor(hardBudget * COMPACT_TRIGGER_RATIO);
   return {
     maxContextTokens: triggerTokens,
-    softMaxTokens: triggerTokens,
-    // v4：prune 全链路 disabled（live 与 rebuild 一致）。
-    pruneOptions: buildPruneOptions(),
     handler: async (
       coreMessages: IMessage[],
       trigger?: import('@codepapr/types').CompactionTrigger
@@ -272,11 +255,7 @@ async function runCompactionHandler(
     }
   }
 
-  const compacted = buildEffectiveContextMessages(
-    withCheckpoint,
-    // v4：保留 tail 逐字，prune 全链路 disabled。
-    { pruneOptions: buildPruneOptions() }
-  );
+  const compacted = buildEffectiveContextMessages(withCheckpoint);
   if (refreshBootstrap) {
     try {
       const freshBootstrap = await refreshBootstrap();

@@ -10,7 +10,6 @@ import {
   type ProjectMessage,
 } from '../../utils/projectStorage';
 import { getAllTodoListContexts } from '../../tools/todoListRegistry';
-import { buildPruneOptions } from '../../agent/compactionHandler';
 import { sanitizeSessionMessagesForPersistence } from './persistence';
 import { toast } from '../toastStore';
 import { maintainContextSurface } from './contextSurfaceStore';
@@ -103,12 +102,7 @@ async function saveProjectStateNormalized(
     // 追加时按 model-visible 投影更新节点）。压缩提交由 commit 路径负责，
     // 维护路径检测到在途/失败压缩时自动跳过。
     try {
-      await maintainContextSurface(
-        path,
-        sessionId,
-        messages as unknown as ContextMessageLike[],
-        buildPruneOptions(state.settings)
-      );
+      await maintainContextSurface(path, sessionId, messages as unknown as ContextMessageLike[]);
     } catch (err) {
       console.warn('[CodePapr] 维护 surface 失败:', err instanceof Error ? err.message : err);
     }

@@ -4,12 +4,10 @@ import { sortedStringify } from '@codepapr/common';
 import {
   stripInternalFields,
   redactTranscriptOutputString,
-  pruneOldToolResults,
   applyHistoryToolSummaries,
   describeLogWireMeta,
   measureLogWireFootprint,
   TOOL_SUMMARY_METADATA_KEY,
-  type PruneOptions,
 } from '@codepapr/core';
 import type { Lang } from './i18n';
 import type { UIToolInvocation } from '../store/internals/types';
@@ -459,8 +457,7 @@ export function renderContextCheckpointContent(
 }
 
 export function buildEffectiveContextMessages(
-  messages: readonly ContextMessageLike[],
-  options?: { pruneOptions?: PruneOptions }
+  messages: readonly ContextMessageLike[]
 ): IMessage[] {
   const checkpoint = getLatestCheckpoint(messages);
   const tailStart = checkpoint ? checkpoint.index + 1 : 0;
@@ -492,16 +489,10 @@ export function buildEffectiveContextMessages(
     result.push(...tailMessages);
   }
 
-  // Prune old tool results once, at context-rebuild time. This is idempotent for
-  // identical input and coincides with the compaction prefix rewrite, so it does
-  // not add per-round prefix-cache breaks (the old per-request sliding-window
-  // pruning mutated mid-prefix bytes on essentially every round).
-  const pruned = pruneOldToolResults(repairOrphanedToolCalls(result), options?.pruneOptions);
-  // Apply frozen history summaries (tool context mode) with the same pure rule the
-  // live RequestBuilder uses, so rebuilt history is byte-identical to live.
-  // Layering: prune (oldest → placeholder) runs first on full-content sizes,
-  // then summarization folds the middle-aged results; the latest batch stays full.
-  return applyHistoryToolSummaries(pruned);
+  // v4：prune 层已删除——工具结果只存在于逐字 tail 内（更早的已被骨架折叠），
+  // 单条巨型输出由入口护栏（截断/artifact 外置）约束。这里仍做孤儿工具修复 +
+  // 冻结摘要回写（toolContext 外置），保证重建与实时路径字节一致。
+  return applyHistoryToolSummaries(repairOrphanedToolCalls(result));
 }
 
 /**

@@ -19,7 +19,6 @@ vi.mock('./contextSurfaceStore', () => ({
   maintainContextSurface: vi.fn(async () => undefined),
 }));
 vi.mock('../../agent/compactionHandler', () => ({
-  buildPruneOptions: () => ({}),
 }));
 
 import { saveCurrentProjectState } from './projectSnapshot';

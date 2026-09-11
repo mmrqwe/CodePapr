@@ -1,17 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { PruneOptions } from '@codepapr/core';
 import {
-  buildDisabledFrozenPruneParams,
   computeCheckpointProvenanceRanges,
   computeSurfaceNodes,
   findCheckpointInsertIndex,
-  freezePruneParams,
   getLatestCheckpointPayload,
   hydrateSurfaceMessages,
   isModelVisibleUiMessage,
-  parseRenderParams,
   serializeDisabledRenderParams,
-  serializeRenderParams,
   validateCompactionCommit,
 } from './contextSurface';
 import type { ContextCheckpointPayload, ContextMessageLike } from './contextCompaction';
@@ -41,14 +36,6 @@ function checkpointPayload(overrides: Partial<ContextCheckpointPayload> = {}): C
 function checkpointMessage(id: string, payload: ContextCheckpointPayload): ContextMessageLike {
   return assistant(id, '', { synthetic: true, hidden: true, contextCheckpoint: payload });
 }
-
-const testPruneOptions: PruneOptions = {
-  enabled: true,
-  protectRecentRounds: 2,
-  minPrunableChars: 500,
-  protectedTools: new Set(['todo', 'question']),
-  placeholder: '[cleared]',
-};
 
 describe('isModelVisibleUiMessage', () => {
   it('keeps plain user/assistant messages', () => {
@@ -212,36 +199,12 @@ describe('hydrateSurfaceMessages', () => {
   });
 });
 
-describe('render params freeze', () => {
-  it('serializes prune options with Set → string[] and a stable render version', () => {
-    const frozen = freezePruneParams(testPruneOptions);
-    expect(frozen.protectedTools).toEqual(['todo', 'question']);
-    expect(frozen.enabled).toBe(true);
-    const json = serializeRenderParams(testPruneOptions);
-    const parsed = JSON.parse(json);
+describe('render params（v4：恒为禁用常量）', () => {
+  it('serializeDisabledRenderParams 输出禁用 prune 常量 + 渲染版本', () => {
+    const parsed = JSON.parse(serializeDisabledRenderParams());
+    expect(parsed.pruneParams.enabled).toBe(false);
+    expect(parsed.pruneParams.protectedTools).toEqual([]);
     expect(parsed.renderVersion).toBe(1);
-    expect(parsed.pruneParams.placeholder).toBe('[cleared]');
-  });
-
-  it('generation 0 freezes disabled params so restart rebuild does not prune', () => {
-    const disabled = buildDisabledFrozenPruneParams();
-    expect(disabled.enabled).toBe(false);
-    const json = serializeDisabledRenderParams();
-    expect(JSON.parse(json).pruneParams.enabled).toBe(false);
-  });
-
-  it('parseRenderParams round-trips freezePruneParams (string[] → Set)', () => {
-    const parsed = parseRenderParams(serializeRenderParams(testPruneOptions));
-    expect(parsed).not.toBeNull();
-    expect(parsed!.pruneOptions.enabled).toBe(true);
-    expect(parsed!.pruneOptions.protectRecentRounds).toBe(2);
-    expect([...parsed!.pruneOptions.protectedTools]).toEqual(['todo', 'question']);
-  });
-
-  it('parseRenderParams returns null on malformed input', () => {
-    expect(parseRenderParams('not json')).toBeNull();
-    expect(parseRenderParams('{}')).toBeNull();
-    expect(parseRenderParams('{"pruneParams":{"enabled":"yes"}}')).not.toBeNull();
   });
 });
 
