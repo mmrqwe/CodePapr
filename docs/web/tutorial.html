@@ -555,8 +555,7 @@ https://api.deepseek.com/v1</code></pre>
                 <li>fast model 开关 — 是否启用快速模型</li>
                 <li>fast model name — 快速模型名称（默认 <code>deepseek-v4-flash</code>）</li>
                 <li>max tool rounds — 最大工具轮次（默认 500）</li>
-                <li>max context tokens — 最大上下文 tokens（默认 500k；对 DeepSeek / OpenAI 兼容 / Claude 三种服务商统一生效，不再按服务商钳制）</li>
-                <li>max conversation rounds — 最大对话轮数（默认 24）</li>
+                <li>max context tokens — 模型输入上下文窗口（默认 200K；对 DeepSeek / OpenAI 兼容 / Claude 统一生效，不再按服务商钳制；用量达到其 <strong>90%</strong> 自动触发压缩）</li>
               </ul>
             </div>
           </div>
@@ -1146,11 +1145,11 @@ TTS 数据流：
         </ul>
 
         <h3>/compact — 强制压缩上下文</h3>
-        <p>手动触发对话压缩，将早前消息合并为结构化检查点释放 token 空间：</p>
+        <p>手动触发 v4 骨架压缩，将更早回合折叠为检查点释放 token 空间：</p>
         <ul>
-          <li><strong>强制模式：</strong>不受 <code>maxConversationRounds</code> 和 <code>maxContextTokens</code> 阈值限制</li>
-          <li><strong>Compactor 内部代理：</strong>调用压缩管线，由零工具 Compactor 子代理生成检查点（模型档位随 <code>compactionModel</code>；LLM 失败时降级为规则摘要）</li>
-          <li><strong>刷新会话引导：</strong>压缩时从账本重渲染项目记忆进入稳定前缀</li>
+          <li><strong>强制模式：</strong>不受 90% 触发线限制（无效缩容仍会被拒绝，不留空转检查点）</li>
+          <li><strong>确定性骨架：</strong>每回合保留「用户问题 + 最终结论」两行，工具调用/结果折叠为计数注记——<strong>零 LLM</strong>；最近 5 回合逐字保留。仅当骨架仍超预算时调用一次 Compactor 做二级摘要（失败则按行截断）</li>
+          <li><strong>刷新会话引导：</strong>压缩即记忆 epoch——从账本重渲染项目记忆进入稳定前缀</li>
           <li><strong>使用场景：</strong>接近上下文上限或响应变慢时，压缩即可恢复流畅对话</li>
         </ul>
 
@@ -1282,10 +1281,10 @@ TTS 数据流：
           <thead><tr><th>Agent</th><th>用途</th><th>模型</th><th>工具</th></tr></thead>
           <tbody>
             <tr><td><strong>verifier</strong></td><td>Goal 验收：只读核实 Worker 是否真正达成目标，防完工偏见、防伪造成功（<code>/goal</code>）</td><td><code>verifierModelTier</code>（快速/主/导师）</td><td>read, grep, glob, list</td></tr>
-            <tr><td><strong>compactor</strong></td><td>上下文压缩：把长会话压缩成可恢复检查点（轮间压缩与 mid-loop 压缩共用）</td><td><code>compactionModel</code>（快速/主）</td><td>无（纯推理）</td></tr>
+            <tr><td><strong>compactor</strong></td><td>上下文压缩的二级摘要：仅当确定性骨架装不下预算时，把骨架合并成一份摘要（轮间 / mid-loop / Goal / 子代理共用）</td><td><code>compactionModel</code>（快速/主）</td><td>无（纯推理）</td></tr>
           </tbody>
         </table>
-        <p><small>两个内部代理均 <code>internal: true</code>，由运行时直接调用：Verifier 由 GoalRunner 验收循环调用（专属预算：6 轮工具 / 3 分钟墙钟）；Compactor 由压缩管线调用，零工具（transcript 已含全部事实）、不注入 skills/memory/project-graph（bootstrap 隔离），墙钟沿用子代理默认 20 分钟。Compactor 在 fast 档未启用快速模型时跳过 LLM 走规则降级。</small></p>
+        <p><small>两个内部代理均 <code>internal: true</code>，由运行时直接调用：Verifier 由 GoalRunner 验收循环调用（专属预算：6 轮工具 / 3 分钟墙钟）；Compactor 由压缩管线调用，零工具（transcript 已含全部事实）、不注入 skills/memory/project-graph（bootstrap 隔离），墙钟沿用子代理默认 20 分钟。v4 压缩主路径是确定性骨架（零 LLM），Compactor 只在骨架超预算时做一次二级摘要；未启用快速模型或摘要失败时降级为按行截断，绝不递归。</small></p>
 
         <h3>自定义子代理</h3>
         <p>在 <code>.CodePapr/agents/&lt;name&gt;.md</code> 中用 YAML frontmatter + 正文声明一个子代理，主代理可以把子任务委派给它。同名 Agent 会覆盖内置定义。</p>
@@ -1366,7 +1365,7 @@ TTS 数据流：
           <tbody>
             <tr><td><code>/help</code></td><td>列出所有命令及说明</td><td>本地</td><td><code>/help</code></td></tr>
             <tr><td><code>/commands</code></td><td><code>/help</code> 的别名</td><td>本地</td><td><code>/commands</code></td></tr>
-            <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文——Compactor 内部代理生成检查点（LLM 失败时降级为规则摘要）</td><td>主 / 快速</td><td><code>/compact</code></td></tr>
+            <tr><td><code>/compact</code></td><td>强制压缩当前会话上下文——确定性骨架检查点（零 LLM；骨架超预算时一次二级摘要）</td><td>本地 / 快速</td><td><code>/compact</code></td></tr>
             <tr><td><code>/undo</code></td><td>撤销上一次对话重置（恢复被截断的对话与代码快照）</td><td>本地</td><td><code>/undo</code></td></tr>
             <tr><td><code>/goal</code></td><td>自主循环：Worker 执行 + Verifier 验收，直到验证条件通过</td><td>主模型</td><td><code>/goal exec:npm test</code></td></tr>
             <tr><td><code>/review</code></td><td>审查当前改动或指定范围</td><td>主模型</td><td><code>/review src/App.tsx</code></td></tr>
@@ -1717,7 +1716,7 @@ window.papr.events.<span class="hl-func">on</span>(<span class="hl-string">'card
           <li><strong>客观条件评估</strong>：系统自动执行验证命令，获取退出码和输出</li>
           <li><strong>Verifier 反伪造检查</strong>：只读 Verifier 子代理（read/grep/glob/list）阅读 Worker 的执行记录，对关键声称用工具亲自核实，检测是否有"声称测试通过但实际没跑"等完工偏见</li>
           <li><strong>判定</strong>：条件满足且 Verifier 确认 → <strong>SATISFIED</strong>，循环结束；否则生成详细反馈注入下一轮</li>
-          <li><strong>上下文腐烂治理</strong>：每 5 轮触发自动压缩；状态持久化到 <code>.CodePapr/goal-state.md</code></li>
+          <li><strong>上下文腐烂治理</strong>：每 5 个迭代触发自动压缩——与回合末走同一 epoch 提交（插检查点、重渲染并刷新 Bootstrap、就地重建 agent、await 单事务提交），Goal 运行时上下文真正缩小；状态持久化到 <code>.CodePapr/goal-state.md</code></li>
         </ol>
 
         <h3>安全护栏</h3>
@@ -1989,7 +1988,7 @@ X-API-Key: your-api-key</code></pre>
         <p>前缀缓存按<strong>字节前缀逐字匹配</strong>自动命中（无显式断点）。架构的第一性原则是：<strong>epoch 内前缀字节稳定（只追加），epoch 之间通过压缩有意重置。</strong></p>
         <ul>
           <li><strong>epoch</strong> = 一个 agent 生命周期内、前缀保持字节稳定的跨度。工具循环每一轮把 assistant 消息与 tool 结果<strong>追加到尾部</strong>，前缀逐字节复用 → 循环内多次调用天然高命中。</li>
-          <li><strong>epoch 边界 = 上下文压缩</strong>：达到上下文阈值时，把历史摘要成 checkpoint + 保留尾部，开启新 epoch（一次性 miss，之后重新稳定累积命中）。这对齐 OpenCode 的 Context Epoch 与 Claude Code 的 auto-compact。checkpoint 按<strong>保留边界插入</strong>（非追加到末尾），其后保留近期尾部原文（含工具调用↔结果配对，边界在 UI 消息粒度选取、不切出孤儿 tool 消息）；checkpoint 在有效上下文中以 <strong>user 轮</strong>发出，避免压缩后首条 / 连续 assistant，提升跨 provider 正确性。</li>
+          <li><strong>epoch 边界 = 上下文压缩（v4 骨架引擎）</strong>：用量达到窗口 90% 时，把更早回合折叠为<strong>确定性骨架</strong>（用户问题 + 最终结论，工具细节计数注记；零 LLM）+ 保留最近回合逐字，开启新 epoch（一次性 miss，之后重新稳定累积命中）。checkpoint 按<strong>保留边界插入</strong>（非追加到末尾；预算压力下边界可落进超长回合内部，早期工具轮折成活动行），其后保留近期尾部原文（含工具调用↔结果配对，不切出孤儿 tool 消息）；checkpoint 在有效上下文中以 <strong>user 轮</strong>发出，避免压缩后首条 / 连续 assistant，提升跨 provider 正确性。</li>
         </ul>
 
         <h3>中途溢出 → 压缩（mid-loop compaction）</h3>
@@ -1997,27 +1996,19 @@ X-API-Key: your-api-key</code></pre>
         <ul>
           <li><strong>仅轮首检查</strong>：tool 结果在一轮末尾追加，其导致的超限在<strong>下一轮轮首</strong>被拦截——任何 LLM 请求都不会用超限上下文发送；任务在压缩后基于"摘要 + 近期尾部"继续。</li>
           <li><strong>不在工具执行中途压缩</strong>：一轮内多个工具调用原子执行完再到轮边界压缩，避免破坏"工具调用↔结果"配对。</li>
-          <li><strong>防死循环</strong>：两次压缩至少间隔 2 轮。</li>
+          <li><strong>防死循环</strong>：压缩连续无效/失败会熔断（本回合不再空试）；压缩成功后日志已低于阈值，后续轮次不会反复触发。</li>
           <li><strong>防御纵深</strong>：单个 tool 结果先被截断到 ~50KB（或落盘留预览），单轮增长有界。</li>
         </ul>
 
-        <h3>剪枝是压缩的子步骤（非独立机制）</h3>
-        <p>旧 tool 结果剪枝（<code>pruneOldToolResults</code>，把超出保护窗口的大块旧结果替换为占位符）<strong>没有独立触发器</strong>，只在压缩 / 重建时作为压缩的内部瘦身子步骤执行（对齐 OpenCode 的 <code>SessionCompaction.prune</code>）。触发器只有上下文阈值一个。注意它与 <code>compactionMaxTokens</code>（压缩摘要的输出上限）是两个不同概念。</p>
+        <h3>剪枝已退役（v4）</h3>
+        <p>旧版按保护窗口裁剪工具结果的 prune 层随 v4 移除：工具结果本来就只存在于最近 ≤5 个逐字回合内，更早的已被骨架整体折叠——独立剪枝不再有意义。单条巨型输出由<strong>入口护栏</strong>约束（工具输出截断与大结果 artifact 外置，模型可用 <code>history_read_artifact</code> 回读），触发器始终只有「窗口 90%」一条线。</p>
 
-        <h3>有效上下文阈值（provider-aware）</h3>
-        <p><code>maxContextTokens</code> 默认 <strong>200K</strong>，对 DeepSeek / OpenAI 兼容 / Claude 三种服务商统一生效（不再按 provider 钳制；兼容端点常是转发大上下文模型的网关）。阈值越高 → 压缩越少 → 命中率越高（缓存读取廉价）。</p>
-        <table>
-          <thead><tr><th>provider</th><th>上下文硬上限</th><th>默认有效阈值</th></tr></thead>
-          <tbody>
-            <tr><td>DeepSeek</td><td>~1M</td><td>500K</td></tr>
-            <tr><td>Claude</td><td>200K</td><td>≈ 200K − maxTokens</td></tr>
-            <tr><td>OpenAI</td><td>128K</td><td>≈ 128K − maxTokens</td></tr>
-          </tbody>
-        </table>
+        <h3>有效上下文阈值（单一规则）</h3>
+        <p><code>maxContextTokens</code> 声明模型输入窗口，默认 <strong>200K</strong>，对 DeepSeek / OpenAI 兼容 / Claude 统一生效（不按 provider 钳制；兼容端点常是转发大上下文模型的网关）。<strong>压缩触发线 = 窗口 × 90%</strong>（常量 <code>COMPACT_TRIGGER_RATIO</code>），主会话、mid-loop、Goal、task 子代理全部同源；实测用量（provider usage）与估算取大者参与判定，超限请求仍可走紧急压缩兜底。窗口设得越高 → 压缩越少 → 命中率越高（缓存读取廉价）。</p>
 
         <h3>前缀稳定性保障</h3>
         <ul>
-          <li><strong>无每请求前缀改动</strong>：剪枝只在压缩 / 重建时执行，不在每次请求构建时滑动剪枝</li>
+          <li><strong>无每请求前缀改动</strong>：v4 不再有滑动剪枝；历史只在 epoch 边界被骨架化</li>
           <li><strong>重建序列化字节一致</strong>：对象 tool 结果用 <code>sortedStringify</code>（与实时路径一致）；空助手内容为 <code>''</code></li>
           <li><strong>reasoning 回传稳定</strong>：<code>reasoning_content</code> 按"是否存在 + 模型能力"回传，与每请求 thinking 开关解耦</li>
           <li><strong>TodoList digest 冻结</strong>：checkpoint 生成时冻结当前 digest，重建时复用而非实时重渲染</li>

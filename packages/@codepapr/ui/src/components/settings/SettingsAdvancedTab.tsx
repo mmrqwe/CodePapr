@@ -1,14 +1,6 @@
-import { DEFAULT_TOOL_CONTEXT_OVERRIDES } from '@codepapr/core';
 import { DEFAULT_MAX_CONTEXT_TOKENS } from '@codepapr/api';
 import { FieldCard, SelectField, TextField } from '../forms';
 import type { SettingsTabProps } from './types';
-
-const TOOL_CONTEXT_CATEGORIES = [
-  ['execution', 'toolContextCategoryExecution', ['bash', 'browser', 'webfetch']],
-  ['reading', 'toolContextCategoryReading', ['read', 'grep', 'glob', 'list']],
-  ['writing', 'toolContextCategoryWriting', ['write', 'edit', 'patch']],
-  ['analysis', 'toolContextCategoryAnalysis', ['graph', 'lsp', 'diagnostics', 'git']],
-] as const;
 
 export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsTabProps) {
   return (
@@ -99,19 +91,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
             title={t.maxContextTokens}
           />
           <TextField
-            label={t.maxConversationRounds}
-            type="number"
-            min="2"
-            max="500"
-            step="4"
-            value={local.maxConversationRounds}
-            onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
-              update({ maxConversationRounds: Number.isFinite(parsed) ? parsed : local.maxConversationRounds });
-            }}
-            title={t.maxConversationRounds}
-          />
-          <TextField
             label={t.chatRenderBatchRounds}
             type="number"
             min="1"
@@ -145,19 +124,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
             }}
             title={t.streamIdleTimeoutLabel}
           />
-          <TextField
-            label={t.toolOutputMiddleKeepLabel}
-            type="number"
-            min="1000"
-            max="150000"
-            step="1000"
-            value={local.toolOutputMiddleKeepChars}
-            onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
-              update({ toolOutputMiddleKeepChars: Number.isFinite(parsed) ? parsed : local.toolOutputMiddleKeepChars });
-            }}
-            title={t.toolOutputMiddleKeepLabel}
-          />
         </div>
       </FieldCard>
 
@@ -173,80 +139,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
           <option value="embedded">{t.embeddedBrowserEngineEmbedded}</option>
           <option value="headless">{t.embeddedBrowserEngineHeadless}</option>
         </select>
-      </FieldCard>
-
-      <FieldCard padding="loose">
-        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
-          {t.toolContextSettings}
-        </label>
-        <div className="grid gap-5 md:grid-cols-3">
-          <SelectField
-            label={t.toolContextDefaultModeLabel}
-            value={local.toolContextDefaultMode}
-            onChange={(e) => update({ toolContextDefaultMode: e.target.value as 'full' | 'summary' | 'auto' })}
-          >
-            <option value="full">{t.toolContextModeFull}</option>
-            <option value="summary">{t.toolContextModeSummary}</option>
-            <option value="auto">{t.toolContextModeAuto}</option>
-          </SelectField>
-          <TextField
-            label={t.toolContextSummaryMaxCharsLabel}
-            type="number"
-            min="100"
-            max="5000"
-            step="100"
-            value={local.toolContextSummaryMaxChars}
-            onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
-              update({ toolContextSummaryMaxChars: Number.isFinite(parsed) ? parsed : local.toolContextSummaryMaxChars });
-            }}
-          />
-          <TextField
-            label={t.toolContextAutoThresholdLabel}
-            type="number"
-            min="500"
-            max="50000"
-            step="500"
-            value={local.toolContextAutoThresholdChars}
-            onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
-              update({ toolContextAutoThresholdChars: Number.isFinite(parsed) ? parsed : local.toolContextAutoThresholdChars });
-            }}
-          />
-        </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          {TOOL_CONTEXT_CATEGORIES.map(([, labelKey, tools]) => {
-            const currentOverride = local.toolContextOverrides[tools[0]];
-            const effectiveDefault =
-              DEFAULT_TOOL_CONTEXT_OVERRIDES[tools[0]] ?? local.toolContextDefaultMode;
-            const mode = currentOverride ?? effectiveDefault;
-            return (
-              <div key={labelKey} className="flex items-center justify-between rounded-xl border border-line bg-base px-4 py-3">
-                <span className="text-xs text-fg-muted">{t[labelKey]}</span>
-                <select
-                  value={mode}
-                  onChange={(e) => {
-                    const value = e.target.value as 'full' | 'summary' | 'auto';
-                    const overrides = { ...local.toolContextOverrides };
-                    for (const tool of tools) {
-                      if (value === effectiveDefault) {
-                        delete overrides[tool];
-                      } else {
-                        overrides[tool] = value;
-                      }
-                    }
-                    update({ toolContextOverrides: overrides });
-                  }}
-                  className="cursor-pointer rounded-lg border border-line bg-base px-3 py-1.5 text-xs text-fg focus:border-accent-soft focus:outline-none"
-                >
-                  <option value="full">{t.toolContextModeFull}</option>
-                  <option value="summary">{t.toolContextModeSummary}</option>
-                  <option value="auto">{t.toolContextModeAuto}</option>
-                </select>
-              </div>
-            );
-          })}
-        </div>
       </FieldCard>
 
       <FieldCard padding="loose">

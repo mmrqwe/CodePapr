@@ -30,6 +30,8 @@ import {
 } from '../../agent/WorkerBackedAgent';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import { createContextCompactionHandler } from '../../agent/compactionHandler';
+import { effectiveMaxContextTokens } from '../../utils/contextLimits';
+import { createSubagentSummarizer } from '../../utils/compactorRunner';
 import { SidecarTransport } from '../../agent/sidecarTransport';
 import { registerWorkspaceTools } from '../../tools/workspaceTools';
 import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTool';
@@ -47,7 +49,7 @@ import {
 import { resolveProviderName } from './settingsNormalizer';
 import { modelSupportsVision, shouldExposeReadImage } from '../../utils/visionRouting';
 import { replaceImagesInToolResult } from '../../utils/visionOffload';
-import { loadMemoryBootstrapSection } from './memoryLedgerStore';
+import { loadMemoryBootstrapSectionStrict } from './memoryLedgerStore';
 import { primeSessionBootstrap } from './sessionBootstrapCache';
 import {
   buildAgentSessionBootstrapPrompt,
@@ -114,16 +116,24 @@ function buildBootstrapRefresher(
   sessionId: string | null
 ): () => Promise<string | null> {
   return async () => {
-    const memorySection = await loadMemoryBootstrapSection(workspacePath);
-    const bootstrap = buildAgentSessionBootstrapPrompt(
-      settings,
-      workspacePath,
-      runtime.skillDefinitions ?? [],
-      memorySection,
-      undefined,
-      runtime.mode ?? 'agent'
-    ).trim();
-    if (!bootstrap) return null;
+    let bootstrap: string;
+    try {
+      const memorySection = await loadMemoryBootstrapSectionStrict(workspacePath);
+      bootstrap = buildAgentSessionBootstrapPrompt(
+        settings,
+        workspacePath,
+        runtime.skillDefinitions ?? [],
+        memorySection,
+        undefined,
+        runtime.mode ?? 'agent'
+      ).trim();
+    } catch (err) {
+      // 账本暂时读不到：沿用本会话已冻结的 Bootstrap（epoch 刷新只是
+      // 换内容，不是删前缀）。绝不产出无记忆段的 epoch。
+      console.warn('[agent-factory] epoch Bootstrap 刷新失败，沿用旧版:', err);
+      return runtime.sessionBootstrapPrompt?.trim() || null;
+    }
+    if (!bootstrap) return runtime.sessionBootstrapPrompt?.trim() || null;
     if (runtime.sessionBootstrapSignature) {
       primeSessionBootstrap(sessionId, runtime.sessionBootstrapSignature, bootstrap);
     }
@@ -384,6 +394,14 @@ export function buildUiTaskToolContext(
     scoutMaxDepth: settings.scoutMaxDepth,
     graphToolTimeoutMs: settings.graphToolTimeoutMs,
     mode,
+    // v4：task 子代理与主会话同一压缩引擎（headless：无 surface/archive）。
+    subagentCompaction: {
+      windowTokens: effectiveMaxContextTokens(settings, providerName),
+      summarize: createSubagentSummarizer(
+        settings,
+        (runtime.lang ?? settings.lang) as 'zh-CN' | 'zh-TW' | 'en'
+      ),
+    },
   };
 }
 

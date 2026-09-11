@@ -24,11 +24,7 @@ const settings = {
   fastModelEnabled: false,
   fastModel: '',
   maxContextTokens: 200_000,
-  maxConversationRounds: 24,
   compactionMaxTokens: 8_000,
-  pruneOldToolResults: false,
-  pruneProtectRounds: 6,
-  pruneMinChars: 20_000,
 } as unknown as CompactionSettings;
 
 function uiMessage(id: string, role: 'user' | 'assistant', content: string): UIMessage {
@@ -41,9 +37,10 @@ function uiMessage(id: string, role: 'user' | 'assistant', content: string): UIM
   } as unknown as UIMessage;
 }
 
+// v4 缩容校验要求 after < before：给旧回合足够体量，骨架化才有真实收益。
 const messages = [
-  uiMessage('u1', 'user', '星球间距离、比例不对，太阳过曝了'),
-  uiMessage('a1', 'assistant', '我先诊断渲染链路，再按方向改'),
+  uiMessage('u1', 'user', '星球间距离、比例不对，太阳过曝了 ' + 'q'.repeat(2000)),
+  uiMessage('a1', 'assistant', '我先诊断渲染链路，再按方向改 ' + 'a'.repeat(4000)),
   uiMessage('u2', 'user', '继续'),
   uiMessage('a2', 'assistant', '已经缩小光晕，太阳仍偏白'),
 ];
@@ -120,7 +117,7 @@ describe('maybeGenerateContextCheckpoint：权威任务清单进正文', () => {
     expect(content).toContain('否则不要主动恢复或继续检查点中的旧任务');
   });
 
-  it('F：LLM 合并被跳过时，降级原因写进 summaryInfo（供 failure_code 审计）', async () => {
+  it('F：确定性装配零 LLM 时 summaryInfo 记 deterministic-skeleton（compactor_unavailable 见预算用例）', async () => {
     vi.mocked(getTodoListContext).mockReturnValue(activePlan);
     const result = await maybeGenerateContextCheckpoint(
       settings,
@@ -134,6 +131,7 @@ describe('maybeGenerateContextCheckpoint：权威任务清单进正文', () => {
     if (!result || !('message' in result)) throw new Error('未生成 checkpoint');
     const payload = result.message.contextCheckpoint!;
     expect(payload.summaryInfo?.kind).toBe('local-fallback');
-    expect(payload.summaryInfo?.failureCode).toBe('compactor_unavailable');
+    expect(payload.summaryInfo?.failureCode).toBe('deterministic-skeleton');
+    expect(payload.skeleton!.length).toBeGreaterThan(0);
   });
 });

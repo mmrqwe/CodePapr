@@ -5,9 +5,9 @@
  * - internal: true → 不经 task 工具暴露给主 Agent，仅供运行时压缩管线调用
  *   （轮间压缩与 mid-loop 压缩）
  * - tools: {} → 纯推理，压缩输入（transcript）已含全部事实，无需回读工作区
- * - 输出 v3 结构化检查点 state（goal/constraints/confirmedFacts/...），
- *   系统提示词由 contextCheckpoint.buildStateMergePrompt 运行时注入，
- *   解析与降级由 contextCheckpoint 管线负责
+ * - v4：输入为压缩引擎（core compactionEngine）产出的对话骨架，系统提示词
+ *   用 SKELETON_SUMMARY_SYSTEM_PROMPTS 运行时注入；仅当确定性骨架装配仍超
+ *   预算时被调用一次（二级摘要），失败由调用方确定性截断降级，绝不递归
  *
  * 与 verifier 的差异：verifier 走 uiTaskTool.runSubagent（主线程工作区工具），
  * compactor 直接调 core 的 resolveSubagentExecution + runSubagentSession——
@@ -19,6 +19,7 @@ import {
   BUILTIN_AGENTS,
   resolveSubagentExecution,
   runSubagentSession,
+  SKELETON_SUMMARY_SYSTEM_PROMPTS,
   SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS,
   ToolRegistry,
   type AgentDefinition,
@@ -143,4 +144,32 @@ export async function runCompactorSession(
     graphToolTimeoutMs: COMPACTOR_GRAPH_TOOL_TIMEOUT_MS,
     abortSignal,
   });
+}
+
+/**
+ * v4：子代理二级摘要器——把 headless 压缩的摘要输入交给 compactor 会话
+ * （零工具单轮）。fast 档未启用快速模型时返回 null（调用方确定性截断降级）。
+ * 与主会话压缩共用 SKELETON_SUMMARY_SYSTEM_PROMPTS，保证摘要口径一致。
+ */
+export function createSubagentSummarizer(
+  settings: CompactionSettings,
+  lang: 'zh-CN' | 'zh-TW' | 'en',
+): (input: string) => Promise<string | null> {
+  return async (input: string) => {
+    if (settings.compactionModel === 'fast' && !(settings.fastModelEnabled && settings.fastModel.trim())) {
+      return null;
+    }
+    const baseModel = settings.model.trim();
+    try {
+      const definition = {
+        ...buildCompactorDefinition({ settings, lang, baseModel }),
+        prompt: SKELETON_SUMMARY_SYSTEM_PROMPTS[lang],
+      };
+      const result = await runCompactorSession({ definition, prompt: input, settings, baseModel, lang });
+      return result.content?.trim() || null;
+    } catch (err) {
+      console.warn('[compactor] 子代理二级摘要失败，走确定性降级:', err);
+      return null;
+    }
+  };
 }

@@ -212,6 +212,29 @@ describe('GoalRunner', () => {
     expect(runVerifier).not.toHaveBeenCalled();
   });
 
+  it('v4：每 5 个迭代 await 一次 onCompaction epoch 回调（达成即停时不触发）', async () => {
+    const condition = parseGoalCondition('exec:npm test');
+    const onCompaction = vi.fn().mockResolvedValue(undefined);
+    const runWorkerTurn = vi.fn().mockResolvedValue(makeWorkerResult('working'));
+    const runner = new GoalRunner({
+      condition,
+      userGoalText: '',
+      limits: { maxIterations: 11, maxWallClockMs: 120_000 },
+      callbacks: {
+        runWorkerTurn,
+        runVerifier: vi.fn().mockResolvedValue(makeVerdict('NOT_MET')),
+        evaluateCondition: vi.fn().mockResolvedValue(makeConditionResult(false)),
+        onStateChange: vi.fn(),
+        onCompaction,
+        isAborted: () => false,
+      },
+    });
+    const result = await runner.run();
+    expect(result.status).toBe('limit_exceeded');
+    expect(runWorkerTurn).toHaveBeenCalledTimes(11);
+    expect(onCompaction).toHaveBeenCalledTimes(2);
+  });
+
   it('N5：verifier 调用期间点停止 → 完成后立即中断，不进入压缩/下一轮', async () => {
     const condition = parseGoalCondition('exec:npm test');
     let aborted = false;

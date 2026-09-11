@@ -92,9 +92,6 @@ describe('coreMessagesToContextMessages', () => {
 describe('createContextCompactionHandler (mid-loop retained tail)', () => {
   it('inserts the checkpoint at the retention boundary so the recent tail survives', async () => {
     const settings = {
-      pruneOldToolResults: false,
-      pruneProtectRounds: 6,
-      pruneMinChars: 20000,
       maxContextTokens: 500000,
       maxTokens: 8000,
     } as unknown as Settings;
@@ -145,9 +142,6 @@ describe('createContextCompactionHandler (mid-loop retained tail)', () => {
 
   it('returns null when no checkpoint is generated', async () => {
     const settings = {
-      pruneOldToolResults: false,
-      pruneProtectRounds: 6,
-      pruneMinChars: 20000,
       maxContextTokens: 500000,
       maxTokens: 8000,
     } as unknown as Settings;
@@ -164,9 +158,6 @@ describe('createContextCompactionHandler (mid-loop retained tail)', () => {
 
   it('attaches the turn anchor (user id + source assistant rounds) to the commit', async () => {
     const settings = {
-      pruneOldToolResults: false,
-      pruneProtectRounds: 6,
-      pruneMinChars: 20000,
       maxContextTokens: 500000,
       maxTokens: 8000,
     } as unknown as Settings;
@@ -227,9 +218,6 @@ describe('createContextCompactionHandler (mid-loop retained tail)', () => {
 
   it('omits the turn anchor when no user message id is provided', async () => {
     const settings = {
-      pruneOldToolResults: false,
-      pruneProtectRounds: 6,
-      pruneMinChars: 20000,
       maxContextTokens: 500000,
       maxTokens: 8000,
     } as unknown as Settings;
@@ -284,9 +272,6 @@ describe('createContextCompactionHandler (mid-loop retained tail)', () => {
 
 describe('createContextCompactionHandler (bootstrap refresh)', () => {
   const settings = {
-    pruneOldToolResults: false,
-    pruneProtectRounds: 6,
-    pruneMinChars: 20000,
     maxContextTokens: 500000,
     maxTokens: 8000,
   } as unknown as Settings;
@@ -393,6 +378,32 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     expect(result!.messages[0]?.content).toContain('检查点摘要');
   });
 
+  it('v4：刷新失败时沿用压缩前冻结的 bootstrap——绝不产出无记忆前缀的 epoch', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 6,
+    });
+    const logWithBootstrap: IMessage[] = [
+      {
+        id: 'session-bootstrap',
+        role: 'assistant',
+        content: '旧冻结记忆前缀',
+        timestamp: 0,
+        metadata: { sessionBootstrap: true, isPrefixSystem: true },
+      } as IMessage,
+      ...fourRounds(),
+    ];
+    const refreshBootstrap = vi.fn().mockRejectedValue(new Error('ledger unreachable'));
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test', refreshBootstrap);
+    const result = await config.handler(logWithBootstrap);
+
+    expect(result).not.toBeNull();
+    expect(result!.messages[0]?.metadata?.sessionBootstrap).toBe(true);
+    expect(result!.messages[0]?.content).toContain('旧冻结记忆前缀');
+    expect(result!.messages[1]?.content).toContain('检查点摘要');
+  });
+
   it('keeps backward compatibility when no refreshBootstrap is provided', async () => {
     vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
       message: checkpointMessage,
@@ -462,9 +473,6 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
 
 describe('createContextCompactionHandler (abort)', () => {
   const settings = {
-    pruneOldToolResults: false,
-    pruneProtectRounds: 6,
-    pruneMinChars: 20000,
     maxContextTokens: 500000,
     maxTokens: 8000,
   } as unknown as Settings;

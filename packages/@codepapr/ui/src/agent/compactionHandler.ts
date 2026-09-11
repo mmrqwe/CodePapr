@@ -7,10 +7,10 @@ import {
 } from '@codepapr/core';
 import {
   buildEffectiveContextMessages,
-  CONTEXT_COMPACTION_SOFT_BUDGET_RATIO,
   insertCheckpointAtRetainedBoundary,
   type ContextMessageLike,
 } from '../utils/contextCompaction';
+import { COMPACT_TRIGGER_RATIO } from '@codepapr/core';
 import { isModelVisibleUiMessage, SESSION_BOOTSTRAP_MESSAGE_ID } from '../utils/contextSurface';
 import { maybeGenerateContextCheckpoint } from '../store/internals/contextCheckpoint';
 import { effectiveMaxContextTokens, type ContextProvider } from '../utils/contextLimits';
@@ -20,13 +20,14 @@ import type { MidLoopCompactionCommit } from './agentWorkerProtocol';
 
 const PRUNE_PROTECTED_TOOLS = new Set(['todo', 'question', 'skill']);
 
-/** Prune options used when building the compacted context (shared with the
- *  rebuild-time pruning in agentFactory). */
-export function buildPruneOptions(settings: CompactionSettings): PruneOptions {
+/** v4：prune-first 层已废除——压缩本身零 LLM（骨架装配），且工具结果在
+ *  轮外即被整体丢弃，prune 不再有存在意义。全链路统一返回 disabled，
+ *  保证 live 与 rebuild 上下文一致（byte-identical）。 */
+export function buildPruneOptions(_settings?: unknown): PruneOptions {
   return {
-    enabled: settings.pruneOldToolResults,
-    protectRecentRounds: settings.pruneProtectRounds,
-    minPrunableChars: settings.pruneMinChars,
+    enabled: false,
+    protectRecentRounds: 0,
+    minPrunableChars: 0,
     protectedTools: PRUNE_PROTECTED_TOOLS,
     placeholder: '[Old tool result content cleared]',
   };
@@ -149,13 +150,15 @@ export function createContextCompactionHandler(
   turnUserMessageId?: string
 ): ContextCompactionConfig {
   const hardBudget = effectiveMaxContextTokens(settings, providerName);
+  // v4：单一触发线 = 窗口 × 90%（与 maybeGenerateContextCheckpoint 同源）。
+  // soft = hard：decideContextBudgetAction 的 prune-tool-results 区间为空集，
+  // prune-first 层正式退役；reject-request 超限兜底保留。
+  const triggerTokens = Math.floor(hardBudget * COMPACT_TRIGGER_RATIO);
   return {
-    maxContextTokens: hardBudget,
-    // PR2：软预算与 planContextCompaction 同源（硬预算 × soft ratio）；
-    // soft~hard 区间走 prune-tool-results，不触发昂贵的 LLM 压缩。
-    softMaxTokens: Math.floor(hardBudget * CONTEXT_COMPACTION_SOFT_BUDGET_RATIO),
-    // PR2：prune-tool-results 的裁剪参数（与压缩 epoch 的 prune 同源）。
-    pruneOptions: buildPruneOptions(settings),
+    maxContextTokens: triggerTokens,
+    softMaxTokens: triggerTokens,
+    // v4：prune 全链路 disabled（live 与 rebuild 一致）。
+    pruneOptions: buildPruneOptions(),
     handler: async (
       coreMessages: IMessage[],
       trigger?: import('@codepapr/types').CompactionTrigger
@@ -271,7 +274,8 @@ async function runCompactionHandler(
 
   const compacted = buildEffectiveContextMessages(
     withCheckpoint,
-    { pruneOptions: buildPruneOptions(settings) }
+    // v4：保留 tail 逐字，prune 全链路 disabled。
+    { pruneOptions: buildPruneOptions() }
   );
   if (refreshBootstrap) {
     try {
@@ -283,7 +287,15 @@ async function runCompactionHandler(
         };
       }
     } catch {
-      // Refresh failure is non-fatal: fall through to the bootstrap-less epoch.
+      // refresh 失败继续走下方兜底（非致命）
+    }
+    // v4：绝不允许「无 Bootstrap 的 epoch」——刷新拿不到新版时，沿用压缩前
+    // 冻结的 bootstrap 消息（记忆段可能陈旧一帧，但整体前缀不会蒸发）。
+    const frozenBootstrap = coreMessages.find(
+      (m) => m.metadata?.sessionBootstrap === true || m.id === SESSION_BOOTSTRAP_MESSAGE_ID
+    );
+    if (frozenBootstrap && compacted[0]?.id !== frozenBootstrap.id) {
+      return { messages: [frozenBootstrap, ...compacted], cacheStats: checkpoint.cacheStats };
     }
   }
   return { messages: compacted, cacheStats: checkpoint.cacheStats };

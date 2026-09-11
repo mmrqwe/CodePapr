@@ -17,6 +17,7 @@ import {
   type ContextMessageLike,
 } from './contextCompaction';
 import { CONTEXT_CHECKPOINT_VERSION_3, type ContextCheckpointPayloadV3 } from './contextCheckpointState';
+import { CONTEXT_COMPACTION_VERSION_V4 } from '@codepapr/core';
 import { validateContextCheckpointStateV3 } from './contextStateMerge';
 
 /** Worker log / 重建注入的 session bootstrap 消息 ID（不属于 archive / surface）。 */
@@ -359,6 +360,22 @@ export function validateCompactionCommit(
     const state = (payload as ContextCheckpointPayloadV3).state;
     if (!validateContextCheckpointStateV3(state)) {
       return { ok: false, error: 'checkpoint state schema 不合法' };
+    }
+  }
+  if (payload.version === CONTEXT_COMPACTION_VERSION_V4) {
+    // v4 骨架块：skeleton 必须是数组且每行有 userId/q/a；或走二级摘要
+    // （summaryBlock 非空）。两者都空 = 空转 checkpoint，拒绝。
+    const skeleton = payload.skeleton;
+    const hasSkeleton =
+      Array.isArray(skeleton) &&
+      skeleton.length > 0 &&
+      skeleton.every((e) => e && typeof e.userId === 'string' && typeof e.q === 'string' && typeof e.a === 'string');
+    const hasSummary = Boolean(payload.summaryBlock?.trim());
+    if (!hasSkeleton && !hasSummary) {
+      return { ok: false, error: 'v4 checkpoint 缺少骨架与摘要块' };
+    }
+    if (!payload.renderedContent?.trim()) {
+      return { ok: false, error: 'v4 checkpoint 缺少渲染文本' };
     }
   }
   return { ok: true };

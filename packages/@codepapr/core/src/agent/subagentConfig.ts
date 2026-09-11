@@ -16,6 +16,7 @@ import type {
   IToolDefinition,
   ThinkingPayload,
 } from '@codepapr/types';
+import { createHeadlessCompaction } from './headlessCompaction';
 import {
   Agent,
   PERMISSION_WAITING_TOOL_TIMEOUTS,
@@ -251,6 +252,12 @@ export interface SubagentSessionDeps {
   toolOutputTruncation?: ToolOutputTruncationOptions;
   toolContextConfig?: ToolContextConfig;
   onToolCallEnd?: (event: Extract<IChatStreamEvent, { type: 'tool-call-end' }>) => void;
+  /** v4：headless 压缩（同主会话引擎：90% 触发、骨架、一次二级摘要）。
+   *  internal 代理（compactor）自动跳过——压缩链深度结构上封顶为 1。 */
+  compaction?: {
+    windowTokens: number;
+    summarize?: (input: string) => Promise<string | null>;
+  };
 }
 
 export interface SubagentSessionResult {
@@ -394,6 +401,14 @@ export async function runSubagentSession(
     },
     toolOutputTruncation: deps.toolOutputTruncation,
     toolContextConfig: deps.toolContextConfig,
+    contextCompaction:
+      deps.compaction && !deps.definition.internal
+        ? createHeadlessCompaction({
+            windowTokens: deps.compaction.windowTokens,
+            lang: deps.lang === 'en' ? 'en' : deps.lang === 'zh-TW' ? 'zh-TW' : 'zh-CN',
+            summarize: deps.compaction.summarize,
+          })
+        : undefined,
   });
 
   let response;

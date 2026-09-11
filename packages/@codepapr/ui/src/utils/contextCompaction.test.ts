@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { IMessage } from '@codepapr/types';
-import { AppendOnlyLog, Serializer, type PruneOptions } from '@codepapr/core';
+import { AppendOnlyLog, Serializer, planSkeletonCompaction, roundsFromCoreMessages, type PruneOptions } from '@codepapr/core';
 import {
   buildContextCompactionTranscript,
   buildEffectiveContextMessages,
   buildLocalContextCheckpointSections,
   insertCheckpointAtRetainedBoundary,
   measureWireTokens,
-  planContextCompaction,
   renderContextCheckpointContent,
   renderContextCheckpointSummary,
   repairOrphanedToolCalls,
+  toCoreTailMessages,
   TOOL_RESULT_MISSING_ERROR,
   TOOL_RESULT_MISSING_PLACEHOLDER,
   type ContextCheckpointPayload,
@@ -387,36 +387,6 @@ describe('contextCompaction', () => {
     expect(effective[1]?.toolCalls).toBeUndefined();
   });
 
-  it('plans compaction when conversation round count exceeds maxRounds', () => {
-    const messages: ContextMessageLike[] = [];
-    for (let index = 0; index < 14; index += 1) {
-      messages.push(createUser(`u${index}`, `用户消息 ${index}`));
-      messages.push(createAssistant(`a${index}`, `助手回复 ${index}`));
-    }
-
-    const plan = planContextCompaction(messages, { maxRounds: 5 });
-
-    expect(plan.shouldCompact).toBe(true);
-    expect(plan.sourceMessages.length).toBeGreaterThan(0);
-    expect(plan.retainedMessages.length).toBeGreaterThanOrEqual(6);
-    expect(plan.retainedMessages.length).toBeLessThanOrEqual(12);
-  });
-
-  it('does not compact when round count is below the threshold, even with many assistant tool-call messages', () => {
-    const messages: ContextMessageLike[] = [];
-    // 4 conversation rounds, each with user + 5 assistant tool-call steps
-    for (let round = 0; round < 4; round += 1) {
-      messages.push(createUser(`u${round}`, `用户问题 ${round}`));
-      for (let step = 0; step < 5; step += 1) {
-        messages.push(createAssistant(`a${round}-${step}`, `工具调用结果 ${step}`));
-      }
-    }
-
-    const plan = planContextCompaction(messages, { maxRounds: 24 });
-
-    expect(plan.shouldCompact).toBe(false);
-  });
-
   it('keeps the prior checkpoint as structured state instead of re-summarizing its rendered text', () => {
     const priorSections = {
       userGoal: ['修复缓存架构'],
@@ -443,31 +413,21 @@ describe('contextCompaction', () => {
       modelTier: 'fast',
       sections: priorSections,
     };
-    const messages: ContextMessageLike[] = [
-      createUser('u1', '旧问题 1'),
-      {
-        id: 'checkpoint-1',
-        role: 'assistant',
-        content: priorCheckpoint.renderedContent,
-        synthetic: true,
-        hidden: true,
-        contextCheckpoint: priorCheckpoint,
-        timestamp: 101,
-      },
-      createUser('u2', '请把上下文压缩改成结构化 checkpoint'),
-      createAssistant('a2', '会把旧 checkpoint 合并，不再做摘要套摘要。'),
+    // v4：prior checkpoint 文本由新引擎直接并入压缩块（见 contextCheckpoint），
+    // sections 工具保留给 v2/v3 迁移路径——这里验证合并语义不丢约束/假设。
+    const sourceMessages: IMessage[] = [
+      { id: 'u2', role: 'user', content: '请把上下文压缩改成结构化 checkpoint', timestamp: 102 } as IMessage,
     ];
-
-    const plan = planContextCompaction(messages);
+    const retainedMessages: IMessage[] = [
+      { id: 'a2', role: 'assistant', content: '会把旧 checkpoint 合并，不再做摘要套摘要。', timestamp: 103 } as IMessage,
+    ];
     const sections = buildLocalContextCheckpointSections({
-      priorCheckpoint: plan.priorCheckpoint,
-      sourceMessages: plan.sourceMessages,
-      retainedMessages: plan.retainedMessages,
+      priorCheckpoint,
+      sourceMessages,
+      retainedMessages,
       lang: 'zh-CN',
     });
 
-    expect(plan.priorCheckpoint?.sections?.constraints).toContain('缓存率要高');
-    expect(plan.sourceMessages.some((message) => message.content.includes('上下文检查点'))).toBe(false);
     expect(sections.constraints).toContain('缓存率要高');
     expect(sections.assumptions).toContain('暂按 UI 与 CLI 共用一套 prompt 体系');
     expect(sections.validationNotes).toContain('npm run test -> 退出码 0');
@@ -817,18 +777,57 @@ describe('contextCompaction', () => {
       expect(insertCheckpointAtRetainedBoundary(arr, 9, -5)).toEqual([9, 1, 2, 3]);
     });
 
-    it('sets insertIndex to the list end when no compaction is needed', () => {
-      const messages = [createUser('u1', 'hi'), createAssistant('a1', 'hello')];
-      const plan = planContextCompaction(messages, { maxRounds: 24 });
-      expect(plan.shouldCompact).toBe(false);
-      expect(plan.insertIndex).toBe(messages.length);
-    });
+    it('v4：checkpoint 插在保留回合的 user 边界之前，工具组不拆散', () => {
+      const messages: ContextMessageLike[] = [];
+      for (let r = 0; r < 10; r += 1) {
+        messages.push(createUser(`u${r}`, `用户消息 ${r} ${'u'.repeat(60)}`));
+        messages.push(
+          createAssistantWithTools(`a${r}`, `处理 ${r}`, [
+            { id: `call-${r}`, name: 'read', arguments: { r }, status: 'success', output: `x`.repeat(1200) },
+          ]),
+        );
+      }
+      const plan = planSkeletonCompaction({
+        rounds: roundsFromCoreMessages(toCoreTailMessages(messages)),
+        priorFoldedText: '',
+        fixedOverheadTokens: 0,
+        triggerTokens: 1_800,
+        summaryInputTokens: 1_800,
+        lang: 'zh-CN',
+      })!;
+      expect(plan.needsSummary).toBe(false);
+      const insertIndex = messages.findIndex((m) => m.id === plan.boundaryMessageId);
+      expect(insertIndex).toBeGreaterThan(0);
+      // 边界必须落在 user 消息上（回合级 tail）
+      expect(messages[insertIndex]?.role).toBe('user');
 
-    it('compacts at least one message when there is no prior checkpoint', () => {
-      const messages = [createUser('u1', '只有一个消息')];
-      const plan = planContextCompaction(messages, { force: true });
-      expect(plan.sourceMessages.length).toBeGreaterThan(0);
-      expect(plan.insertIndex).toBeGreaterThan(0);
+      const withCheckpoint = insertCheckpointAtRetainedBoundary(
+        messages,
+        createCheckpoint('cp1', '检查点摘要内容'),
+        insertIndex,
+      );
+      const effective = buildEffectiveContextMessages(withCheckpoint);
+      expect(effective[0]?.role).toBe('user');
+      expect(effective[0]?.content).toContain('检查点摘要内容');
+
+      const toolCallMsgs = effective.filter(
+        (m) => m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0,
+      );
+      const toolResultMsgs = effective.filter((m) => m.role === 'tool');
+      expect(toolCallMsgs.length).toBeGreaterThan(0);
+      const resultIds = new Set(toolResultMsgs.map((m) => m.toolResult?.toolCallId));
+      for (const tc of toolCallMsgs) {
+        for (const call of tc.toolCalls ?? []) {
+          expect(resultIds.has(call.id)).toBe(true);
+        }
+      }
+      const callIds = new Set(toolCallMsgs.flatMap((m) => (m.toolCalls ?? []).map((c) => c.id)));
+      for (const tr of toolResultMsgs) {
+        expect(callIds.has(tr.toolResult?.toolCallId ?? '')).toBe(true);
+      }
+      // 预算内尽量多留：至少 3 个 assistant+tools 组逐字成对保留
+      expect(toolCallMsgs.length).toBeGreaterThanOrEqual(3);
+      expect(messages.length - insertIndex).toBeGreaterThanOrEqual(6);
     });
 
     it('emits the checkpoint as a user turn in effective context (problem 2 fix)', () => {
@@ -842,29 +841,36 @@ describe('contextCompaction', () => {
       expect(effective[0]?.content).toContain('检查点摘要');
     });
 
-    it('inserting the checkpoint at plan.insertIndex keeps the recent tool-call tail verbatim and paired', () => {
+    it('v4：checkpoint 插在保留回合的 user 边界之前，工具组不拆散', () => {
       const messages: ContextMessageLike[] = [];
       for (let r = 0; r < 10; r += 1) {
-        messages.push(createUser(`u${r}`, `用户消息 ${r}`));
+        messages.push(createUser(`u${r}`, `用户消息 ${r} ${'u'.repeat(60)}`));
         messages.push(
           createAssistantWithTools(`a${r}`, `处理 ${r}`, [
-            { id: `call-${r}`, name: 'read', arguments: { r }, status: 'success', output: `输出 ${r}` },
+            { id: `call-${r}`, name: 'read', arguments: { r }, status: 'success', output: `x`.repeat(1200) },
           ]),
         );
       }
-
-      const plan = planContextCompaction(messages, { maxRounds: 3 });
-      expect(plan.shouldCompact).toBe(true);
-      expect(plan.insertIndex).toBeGreaterThan(0);
-      expect(plan.insertIndex).toBeLessThanOrEqual(messages.length);
+      const plan = planSkeletonCompaction({
+        rounds: roundsFromCoreMessages(toCoreTailMessages(messages)),
+        priorFoldedText: '',
+        fixedOverheadTokens: 0,
+        triggerTokens: 1_800,
+        summaryInputTokens: 1_800,
+        lang: 'zh-CN',
+      })!;
+      expect(plan.needsSummary).toBe(false);
+      const insertIndex = messages.findIndex((m) => m.id === plan.boundaryMessageId);
+      expect(insertIndex).toBeGreaterThan(0);
+      // 边界必须落在 user 消息上（回合级 tail）
+      expect(messages[insertIndex]?.role).toBe('user');
 
       const withCheckpoint = insertCheckpointAtRetainedBoundary(
         messages,
         createCheckpoint('cp1', '检查点摘要内容'),
-        plan.insertIndex,
+        insertIndex,
       );
       const effective = buildEffectiveContextMessages(withCheckpoint);
-
       expect(effective[0]?.role).toBe('user');
       expect(effective[0]?.content).toContain('检查点摘要内容');
 
@@ -873,7 +879,6 @@ describe('contextCompaction', () => {
       );
       const toolResultMsgs = effective.filter((m) => m.role === 'tool');
       expect(toolCallMsgs.length).toBeGreaterThan(0);
-
       const resultIds = new Set(toolResultMsgs.map((m) => m.toolResult?.toolCallId));
       for (const tc of toolCallMsgs) {
         for (const call of tc.toolCalls ?? []) {
@@ -884,36 +889,55 @@ describe('contextCompaction', () => {
       for (const tr of toolResultMsgs) {
         expect(callIds.has(tr.toolResult?.toolCallId ?? '')).toBe(true);
       }
+      // 预算内尽量多留：至少 3 个 assistant+tools 组逐字成对保留
+      expect(toolCallMsgs.length).toBeGreaterThanOrEqual(3);
+      expect(messages.length - insertIndex).toBeGreaterThanOrEqual(6);
     });
 
-    it('never orphans a tool message at the retained-tail boundary', () => {
-      // Force the boundary to land right before an assistant+tools group by using
-      // a tiny retention budget; the whole group must stay together in the tail.
-      const messages: ContextMessageLike[] = [];
+    it('emits the checkpoint as a user turn in effective context (problem 2 fix)', () => {
+      const messages: ContextMessageLike[] = [
+        createUser('u1', '旧需求'),
+        createCheckpoint('cp1', '检查点摘要'),
+        createUser('u2', '新需求'),
+      ];
+      const effective = buildEffectiveContextMessages(messages);
+      expect(effective[0]?.role).toBe('user');
+      expect(effective[0]?.content).toContain('检查点摘要');
+    });
+
+    it('轮内折叠：边界落在回合内部首个保留 turn 上，effective context 不以孤立 tool 开头', () => {
+      // 单个巨型回合（Goal 循环形态）：1 user + 8 个 assistant+tool 组。
+      const messages: ContextMessageLike[] = [createUser('u1', 'long running task')];
       for (let r = 0; r < 8; r += 1) {
-        messages.push(createUser(`u${r}`, `用户消息 ${r}`));
         messages.push(
-          createAssistantWithTools(`a${r}`, '', [
-            { id: `call-${r}`, name: 'read', arguments: {}, status: 'success', output: 'x'.repeat(50) },
+          createAssistantWithTools(`a${r}`, `step ${r}`, [
+            { id: `call-${r}`, name: 'bash', arguments: { c: r }, status: 'success', output: 'x'.repeat(1200) },
           ]),
         );
       }
-
-      const plan = planContextCompaction(messages, { maxRounds: 2 });
-      expect(plan.shouldCompact).toBe(true);
-
-      // The retained partition (core) must start at a clean boundary: it cannot
-      // begin with a standalone tool message.
-      expect(plan.retainedMessages[0]?.role).not.toBe('tool');
+      const plan = planSkeletonCompaction({
+        rounds: roundsFromCoreMessages(toCoreTailMessages(messages)),
+        priorFoldedText: '',
+        fixedOverheadTokens: 0,
+        triggerTokens: 1200,
+        summaryInputTokens: 1200,
+        lang: 'zh-CN',
+      })!;
+      expect(plan.inRoundFold).not.toBeNull();
+      const insertIndex = messages.findIndex((m) => m.id === plan.boundaryMessageId);
+      expect(insertIndex).toBeGreaterThan(0);
+      // 边界消息是 assistant turn（回合内部），其工具结果成组保留
+      expect(messages[insertIndex]?.role).toBe('assistant');
 
       const withCheckpoint = insertCheckpointAtRetainedBoundary(
         messages,
         createCheckpoint('cp1', '摘要'),
-        plan.insertIndex,
+        insertIndex,
       );
       const effective = buildEffectiveContextMessages(withCheckpoint);
       // After the leading checkpoint, the first tail message is never an orphan tool.
-      expect(effective[1]?.role).not.toBe('tool');
+      expect(effective[1]?.role).toBe('assistant');
+      expect(effective[1]?.toolCalls?.length).toBeGreaterThan(0);
     });
   });
 

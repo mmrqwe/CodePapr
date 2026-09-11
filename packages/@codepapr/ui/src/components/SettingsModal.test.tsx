@@ -327,7 +327,7 @@ describe('SettingsModal', () => {
     });
 
     const maxContextInput = container.querySelector(
-      'input[title="输入上下文上限"]'
+      'input[title="模型输入上下文窗口"]'
     ) as HTMLInputElement;
     expect(maxContextInput).not.toBeNull();
     expect(maxContextInput.value).toBe('200000');

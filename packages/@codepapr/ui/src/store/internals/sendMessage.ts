@@ -66,7 +66,6 @@ import { delay, waitForPageVisible } from '../../utils/crashRecovery';
 import { insertCheckpointAtRetainedBoundary } from '../../utils/contextCompaction';
 import {
   findCheckpointInsertIndex,
-  serializeRenderParams,
   validateCompactionCommit,
 } from '../../utils/contextSurface';
 import {
@@ -76,10 +75,9 @@ import {
   getContextSurfaceCached,
   hydrateSessionContext,
   markCompactionInFlight,
-  updateSurfaceRenderParams,
   verifyCompactionLanded,
 } from './contextSurfaceStore';
-import { loadMemoryBootstrapSection, refreshMemoryLedgerProjection } from './memoryLedgerStore';
+import { loadMemoryBootstrapSection, loadMemoryBootstrapSectionStrict, refreshMemoryLedgerProjection } from './memoryLedgerStore';
 import { buildPruneOptions } from '../../agent/compactionHandler';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import {
@@ -2100,6 +2098,157 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 )
               : undefined;
 
+          type CheckpointWithMessage = Extract<
+            Awaited<ReturnType<typeof maybeGenerateContextCheckpoint>>,
+            { message: UIMessage }
+          >;
+
+          /**
+           * 压缩 epoch 统一提交（所有主线程入口共用：回合末、Goal、/compact 的重建
+           * 策略等价物）。顺序：重读账本渲染 epoch Bootstrap → prime 缓存 + 写回
+           * runtime config → 基座校验插 checkpoint → 就地重建 agent → **await** 单事务
+           * commit（ADR-005，失败在 commitCheckpointOrdered 内回滚）。
+           * Goal 循环（inFlightTurn=true）跳过「另一回合在飞」守卫：迭代间隙本循环
+           * 就是唯一在飞回合，重建后把新句柄写回外层 agent 变量继续跑。
+           */
+          const applyEpochCompaction = async (params: {
+            checkpoint: CheckpointWithMessage;
+            baseMessages: UIMessage[];
+            trigger: 'manual' | 'token-limit';
+            inFlightTurn: boolean;
+            sessionId: string;
+          }): Promise<boolean> => {
+            const { checkpoint, baseMessages, trigger, inFlightTurn, sessionId: sid } = params;
+            const prevAgent = get()._agent;
+            const prevAgentOwner = get()._agentSessionId;
+            // 压缩 = epoch 变化：Bootstrap 随 epoch 刷新。重读账本重渲染，写回
+            // 缓存并更新 config——就地重建与之后任何 crash/换模型重建都拿到刷新
+            // 版，而不是回合首冻结的旧快照。刷新失败非致命：沿用旧 Bootstrap
+            // （绝不产出无记忆前缀的新 epoch）。
+            let epochBootstrap = runtimeSessionBootstrapPrompt;
+            try {
+              const epochMemorySection = await loadMemoryBootstrapSectionStrict(workspacePath);
+              epochBootstrap = buildAgentSessionBootstrapPrompt(
+                normalizedSettings,
+                workspacePath,
+                skillDefinitions,
+                epochMemorySection,
+                pluginsSection,
+                mode,
+              );
+            } catch {
+              // keep frozen turn-start bootstrap
+            }
+            if (epochBootstrap !== runtimeSessionBootstrapPrompt) {
+              primeSessionBootstrap(sid, bootstrapSignature, epochBootstrap);
+              runtimeAgentConfig.sessionBootstrapPrompt = epochBootstrap;
+            }
+            const epochPromptKey = [runtimeSystemPrompt, epochBootstrap]
+              .filter(Boolean)
+              .join('\n\n--- session-bootstrap ---\n\n');
+            let checkpointApplied = false;
+            let turnNextMessages: UIMessage[] | null = null;
+            let rebuiltAgent: ReturnType<typeof createAgent> | null = null;
+            set((s) => {
+              const currentSessionMessages = s.sessionMessages[sid] ?? [];
+              // 校验插入基座：reset/清空后旧 insertIndex 会把已删除内容以
+              // 摘要形式插回末尾（复活）——整个 checkpoint 丢弃。
+              if (!isSafeCheckpointInsert(baseMessages, currentSessionMessages, checkpoint.insertIndex)) {
+                return {};
+              }
+              checkpointApplied = true;
+              const nextSessionMessages = insertCheckpointAtRetainedBoundary(
+                currentSessionMessages,
+                checkpoint.message,
+                checkpoint.insertIndex
+              );
+              turnNextMessages = nextSessionMessages;
+              const isCurrentSession = s.activeSessionId === sid;
+              rebuiltAgent = isCurrentSession
+                ? createAgent(
+                    normalizedSettings,
+                    sid,
+                    s.workspacePath,
+                    nextSessionMessages,
+                    {
+                      model: route.model,
+                      thinkingEnabled: route.thinkingEnabled,
+                      temperature: route.temperature,
+                      maxTokens: route.maxTokens,
+                      systemPrompt: runtimeSystemPrompt,
+                    },
+                    runtimeAgentConfig,
+                    buildPruneOptions(normalizedSettings),
+                  )
+                : null;
+
+              return {
+                messages: isCurrentSession ? nextSessionMessages : s.messages,
+                sessionMessages: {
+                  ...s.sessionMessages,
+                  [sid]: nextSessionMessages,
+                },
+                // 检查点压缩了上下文：旧 agent 的 logStore 已失效。用户仍在查看
+                // 则就地重建；否则置空（下次发送按 sessionMessages 重建），
+                // 绝不保留带旧上下文的 agent。
+                _agent: rebuiltAgent,
+                _agentModel: isCurrentSession ? route.model : null,
+                _agentPromptKey: isCurrentSession ? epochPromptKey : null,
+                _agentSessionId: isCurrentSession ? sid : null,
+                conversationStats:
+                  checkpoint.cacheStats && isCurrentSession
+                    ? addConversationStats(
+                        s.conversationStats,
+                        checkpoint.modelTier === 'primary' ? 'primary' : 'fast',
+                        checkpoint.cacheStats
+                      )
+                    : s.conversationStats,
+                sessionConversationStats: checkpoint.cacheStats
+                  ? {
+                      ...s.sessionConversationStats,
+                      [sid]: addConversationStats(
+                        getSessionConversationStats(s.sessionConversationStats, sid),
+                        checkpoint.modelTier === 'primary' ? 'primary' : 'fast',
+                        checkpoint.cacheStats
+                      ),
+                    }
+                  : s.sessionConversationStats,
+              };
+            });
+            if (!checkpointApplied || !turnNextMessages) {
+              return false;
+            }
+            // Goal 循环继续在同一变量上跑：句柄必须换到新实例。
+            if (inFlightTurn && rebuiltAgent) {
+              agent = rebuiltAgent;
+            }
+            // 被替换/失效的旧 agent 已空闲（回合结束/迭代间隙），销毁以回收
+            // worker；仅当它仍属于本会话时才销毁，避免误伤竞态下新建的 agent。
+            // app-agent（papr.agent.run）不占 isLoading：detach 等其结算完自毁。
+            if (prevAgent && prevAgentOwner === sid && get()._agent !== prevAgent) {
+              try {
+                if (prevAgent.hasActiveAppAgentRequests?.()) {
+                  prevAgent.detachAndCleanupWhenIdle?.();
+                } else {
+                  prevAgent.destroy();
+                }
+              } catch {
+                // already torn down
+              }
+            }
+            // ADR-005 单事务提交。必须 await：失败回滚不得与下一回合的
+            // surface 读取竞态（旧 void commit 的「UI 有 checkpoint、surface
+            // 未提交」窗口就在这里消失）。
+            return await commitCheckpointOrdered({
+              sessionId: sid,
+              workspace: workspacePath,
+              messages: turnNextMessages,
+              trigger,
+              payload: checkpoint.message.contextCheckpoint ?? null,
+              checkpointMessageId: checkpoint.message.id,
+            });
+          };
+
           let resp: IAgentResponse;
           if (isGoalMode && goalCondition) {
             // ── Goal 自主循环（Worker + Evaluator 双模型） ──
@@ -2324,9 +2473,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 onStateChange: (state) =>
                   useGoalStore.getState().setGoalState(state),
                 onCompaction: async () => {
+                  // PR1/v4：Goal 循环压缩走与回合末完全相同的 epoch 提交——
+                  // 插 checkpoint、刷 Bootstrap、就地重建 agent、await commit。
+                  // 旧实现只插消息 + void commit，压缩对 Goal 的运行时上下文
+                  // 几乎无效（同一个 agent log 继续增长）。
                   const compactionBaseMessages =
                     get().sessionMessages[activeSessionId!] ?? [];
-                  // PR1：goal 循环压缩走主线程路径，读取最新 surface 确定 generation。
                   const goalSurface = await getContextSurfaceCached(
                     workspacePath,
                     activeSessionId!
@@ -2344,48 +2496,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     },
                     activeSessionId ?? undefined
                   );
-                  if (cp && 'message' in cp) {
-                    if (cp.cacheStats) {
-                      const cpTier: 'primary' | 'fast' = cp.modelTier === 'primary' ? 'primary' : 'fast';
-                      if (cpTier === 'fast') {
-                        accumulatedSubagentFast = accumulateCacheStats(accumulatedSubagentFast, cp.cacheStats);
-                      } else {
-                        accumulatedSubagentPrimary = accumulateCacheStats(accumulatedSubagentPrimary, cp.cacheStats);
-                      }
-                    }
-                    let goalNextMessages: UIMessage[] | null = null;
-                    set((s) => {
-                      // #15：压缩模型调用期间消息可能已被 reset/清空——校验
-                      // 插入基座，已删除内容不得以摘要形式复活。
-                      if (!isSafeCheckpointInsert(compactionBaseMessages, s.sessionMessages[activeSessionId!] ?? [], cp.insertIndex)) {
-                        return {};
-                      }
-                      const next = insertCheckpointAtRetainedBoundary(
-                        s.sessionMessages[activeSessionId!] ?? [],
-                        cp.message,
-                        cp.insertIndex
-                      );
-                      goalNextMessages = next;
-                      return {
-                        messages: s.activeSessionId === activeSessionId ? next : s.messages,
-                        sessionMessages: {
-                          ...s.sessionMessages,
-                          [activeSessionId!]: next,
-                        },
-                      };
+                  if (cp && 'message' in cp && activeSessionId) {
+                    await applyEpochCompaction({
+                      checkpoint: cp,
+                      baseMessages: compactionBaseMessages,
+                      trigger: 'manual',
+                      inFlightTurn: true,
+                      sessionId: activeSessionId,
                     });
-                    // PR1：压缩提交（ADR-005）。checkpoint 消息先落 archive 再
-                    // 提交 surface；失败回滚移除 checkpoint（不变式 5）。
-                    if (goalNextMessages) {
-                      void commitCheckpointOrdered({
-                        sessionId: activeSessionId!,
-                        workspace: workspacePath,
-                        messages: goalNextMessages,
-                        trigger: 'manual',
-                        payload: cp.message.contextCheckpoint ?? null,
-                        checkpointMessageId: cp.message.id,
-                      });
-                    }
                   }
                 },
                 writeGoalState: async (state) => {
@@ -2693,177 +2811,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             },
             activeSessionId
           );
-          if (checkpointResult && 'pruneOnly' in checkpointResult && checkpointResult.pruneOnly) {
-            // PR3 预算分层：soft~hard 区间 → prune-first（不生成 checkpoint）。
-            // 更新 surface 冻结参数（同一 generation，节点不变），使下一次
-            // agent 重建按新参数裁剪旧工具结果；当前 agent 失效留给重建。
-            const turnPruneOptions = buildPruneOptions(normalizedSettings);
-            await updateSurfaceRenderParams(
-              workspacePath,
-              activeSessionId,
-              serializeRenderParams(turnPruneOptions)
-            ).catch(() => undefined);
-            const pruneAgent = get()._agent;
-            const pruneOwner = get()._agentSessionId;
-            if (
-              pruneAgent &&
-              pruneOwner === activeSessionId &&
-              !(get().isLoading && get().loadingSessionId === activeSessionId)
-            ) {
-              try {
-                if (pruneAgent.hasActiveAppAgentRequests?.()) {
-                  pruneAgent.detachAndCleanupWhenIdle?.();
-                } else {
-                  pruneAgent.destroy();
-                }
-              } catch {
-                // already torn down
-              }
-              set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
-            }
-          } else if (
-            checkpointResult &&
-            'message' in checkpointResult &&
-            (get().isLoading || get().loadingSessionId !== null)
-          ) {
+          if (checkpointResult && 'message' in checkpointResult) {
             // 检查点模型调用 await 期间 isLoading 已置 false，用户可能已发出新
             // 回合（T2），T2 正运行在同一个 agent 上。此时应用检查点会换掉并
             // destroy T2 正在使用的 agent（destroy 会让 T2 的 chat() 被拒）。
             // 整个检查点直接丢弃（T2 回合结束时会重新评估），绝不触碰运行中
             // 的 agent。
-          } else if (checkpointResult && 'message' in checkpointResult) {
-            const prevAgent = get()._agent;
-            const prevAgentOwner = get()._agentSessionId;
-            // 压缩 = epoch 变化：Bootstrap 随 epoch 刷新（文档承诺「压缩 epoch
-            // 刷新」，此前只有 mid-loop 路径兑现）。重读账本（本回合抽取已在前
-            // 面 await 落库）重渲染，写回缓存并更新 config——就地重建与之后
-            // 任何 crash/换模型重建都拿到刷新版，而不是回合首冻结的旧快照。
-            let epochBootstrap = runtimeSessionBootstrapPrompt;
-            try {
-              const epochMemorySection = await loadMemoryBootstrapSection(workspacePath);
-              epochBootstrap = buildAgentSessionBootstrapPrompt(
-                normalizedSettings,
-                workspacePath,
-                skillDefinitions,
-                epochMemorySection,
-                pluginsSection,
-                mode,
-              );
-            } catch {
-              // 刷新失败非致命：本 epoch 沿用回合首冻结版。
-            }
-            if (epochBootstrap !== runtimeSessionBootstrapPrompt) {
-              primeSessionBootstrap(activeSessionId, bootstrapSignature, epochBootstrap);
-              runtimeAgentConfig.sessionBootstrapPrompt = epochBootstrap;
-            }
-            const epochPromptKey = [runtimeSystemPrompt, epochBootstrap]
-              .filter(Boolean)
-              .join('\n\n--- session-bootstrap ---\n\n');
-            let checkpointApplied = false;
-            let turnNextMessages: UIMessage[] | null = null;
-            set((s) => {
-              const currentSessionMessages = s.sessionMessages[activeSessionId!] ?? [];
-              // 校验插入基座：reset/清空后旧 insertIndex 会把已删除内容以
-              // 摘要形式插回末尾（复活）——整个 checkpoint 丢弃。
-              if (!isSafeCheckpointInsert(checkpointBaseMessages, currentSessionMessages, checkpointResult.insertIndex)) {
-                return {};
-              }
-              checkpointApplied = true;
-              const nextSessionMessages = insertCheckpointAtRetainedBoundary(
-                currentSessionMessages,
-                checkpointResult.message,
-                checkpointResult.insertIndex
-              );
-              turnNextMessages = nextSessionMessages;
-              const isCurrentSession = s.activeSessionId === activeSessionId;
-
-              return {
-                messages: isCurrentSession ? nextSessionMessages : s.messages,
-                sessionMessages: {
-                  ...s.sessionMessages,
-                  [activeSessionId!]: nextSessionMessages,
-                },
-                // 检查点压缩了上下文：旧 agent 的 logStore 已失效。用户仍在查看
-                // 则就地重建；否则置空（下次发送按 sessionMessages 重建），
-                // 绝不保留带旧上下文的 agent。
-                _agent:
-                  isCurrentSession
-                    ? createAgent(
-                        normalizedSettings,
-                        activeSessionId!,
-                        s.workspacePath,
-                        nextSessionMessages,
-                        {
-                          model: route.model,
-                          thinkingEnabled: route.thinkingEnabled,
-                          temperature: route.temperature,
-                          maxTokens: route.maxTokens,
-                          systemPrompt: runtimeSystemPrompt,
-                        },
-                        runtimeAgentConfig,
-                        // 新 epoch 由 compactionHandler 用当前 settings 的 prune
-                        // 参数构建；就地重建必须用同一参数（surface 冻结参数
-                        // 的提交是异步的，不能依赖它已落库）。
-                        buildPruneOptions(normalizedSettings),
-                      )
-                    : null,
-                _agentModel: isCurrentSession ? route.model : null,
-                _agentPromptKey: isCurrentSession ? epochPromptKey : null,
-                _agentSessionId: isCurrentSession ? activeSessionId : null,
-                conversationStats:
-                  checkpointResult.cacheStats && isCurrentSession
-                    ? addConversationStats(
-                        s.conversationStats,
-                        checkpointResult.modelTier === 'primary' ? 'primary' : 'fast',
-                        checkpointResult.cacheStats
-                      )
-                    : s.conversationStats,
-                sessionConversationStats: checkpointResult.cacheStats
-                  ? {
-                      ...s.sessionConversationStats,
-                      [activeSessionId!]: addConversationStats(
-                        getSessionConversationStats(s.sessionConversationStats, activeSessionId!),
-                        checkpointResult.modelTier === 'primary' ? 'primary' : 'fast',
-                        checkpointResult.cacheStats
-                      ),
-                    }
-                  : s.sessionConversationStats,
-              };
-            });
-            // 被替换/失效的旧 agent 已空闲（回合结束），销毁以回收 worker；
-            // 仅当它仍属于本回合会话时才销毁，避免误伤竞态下新建的 agent。
-            // 但回合结束 ≠ 无在飞执行：papr.agent.run（app-agent）不占 isLoading，
-            // 立即 destroy 会经由 cancel() → cancelAllAppAgents() 杀掉正在运行的
-            // app 执行（/compact 与回合前重建分支均用 hasActiveAppAgentRequests
-            // → detachAndCleanupWhenIdle 规避，此分支必须同样处理）。
-            if (
-              checkpointApplied &&
-              prevAgent &&
-              prevAgentOwner === activeSessionId &&
-              get()._agent !== prevAgent
-            ) {
-              try {
-                if (prevAgent.hasActiveAppAgentRequests?.()) {
-                  prevAgent.detachAndCleanupWhenIdle?.();
-                } else {
-                  prevAgent.destroy();
-                }
-              } catch {
-                // already torn down
-              }
-            }
-
-            // PR1：压缩提交（ADR-005）——trigger 以 payload 为准（plan 判定）。
-            // commitCheckpointOrdered：checkpoint 消息先落 archive 再提交 surface；
-            // 失败回滚移除 checkpoint（不变式 5）。
-            if (checkpointApplied && turnNextMessages) {
-              void commitCheckpointOrdered({
-                sessionId: activeSessionId!,
-                workspace: workspacePath,
-                messages: turnNextMessages,
+            const anotherTurnRunning = get().isLoading || get().loadingSessionId !== null;
+            if (!anotherTurnRunning) {
+              await applyEpochCompaction({
+                checkpoint: checkpointResult,
+                baseMessages: checkpointBaseMessages,
                 trigger: 'token-limit',
-                payload: checkpointResult.message.contextCheckpoint ?? null,
-                checkpointMessageId: checkpointResult.message.id,
+                inFlightTurn: false,
+                sessionId: activeSessionId!,
               });
             }
           }

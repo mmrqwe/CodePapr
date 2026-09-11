@@ -54,6 +54,24 @@ export async function loadMemoryBootstrapSection(
   }
 }
 
+/**
+ * 严格变体：账本读取失败向上抛（而不是静默返回 undefined）。
+ * epoch Bootstrap 刷新专用——「读不到账本」绝不能被当成「没有记忆」把
+ * 记忆段从新 epoch 里悄悄抹掉（v4：失败方必须能选择沿用旧 Bootstrap）。
+ */
+export async function loadMemoryBootstrapSectionStrict(
+  workspacePath: string
+): Promise<string | undefined> {
+  try {
+    await ingestLegacyMemoryMd(workspacePath);
+  } catch {
+    // 迁移失败不致命：账本仍可直读
+  }
+  const entries = await loadMemoryEntries(workspacePath, true);
+  const rendered = buildMemoryProjection(entries.map(toProjectionEntry)).trim();
+  return rendered || undefined;
+}
+
 export async function refreshMemoryLedgerProjection(
   workspacePath: string,
   sessionId: string,

@@ -4654,6 +4654,77 @@ describe('sendMessage /goal', () => {
     expect(errorMessages).toHaveLength(0);
     // Agent should have been called (goal loop started)
     expect(chat).toHaveBeenCalled();
+  });  it('v4 回合末 epoch：checkpoint 提交后保留、agent 就地重建（Goal 循环共用此提交流程）', async () => {
+    const chat = vi.fn(async (_prompt: string) => ({
+      role: 'assistant' as const,
+      content: '完成了。',
+      cacheStats: { cacheCreationTokens: 0, cacheReadTokens: 0, newInputTokens: 1, outputTokens: 1, calls: 1 },
+    }));
+    maybeGenerateContextCheckpointMock.mockImplementation(async (...args: unknown[]) => {
+      if (args[2] === true) return null;
+      return {
+        message: {
+          id: 'turn-cp',
+          role: 'assistant',
+          content: '',
+          synthetic: true,
+          hidden: true,
+          timestamp: Date.now(),
+          contextCheckpoint: {
+            version: 4,
+            summary: '骨架',
+            renderedContent: '骨架内容',
+            sourceMessageCount: 2,
+            sourceChars: 200,
+            generatedAt: Date.now(),
+            modelName: 'local-checkpoint',
+            modelTier: 'local',
+            compactionId: 'turn-cp-cid',
+            trigger: 'token-limit',
+            skeleton: [{ userId: 'u1', assistantId: null, q: '问题', a: '结论', droppedToolCalls: 1 }],
+            tokenStats: { estimatedTokensBefore: 500, estimatedTokensAfter: 100, sourceTokens: 400, checkpointTokens: 60 },
+          },
+        },
+        modelTier: 'local' as const,
+        insertIndex: 1,
+      };
+    });
+    const rebuiltAgent = createMockAgent({ chat, logMessages: [] });
+    createAgentMock.mockImplementation(() => rebuiltAgent as never);
+
+    useAgentStore.setState((state) => ({
+      ...state,
+      settings: normalizeSettings({ apiKey: 'sk-test' }),
+      workspacePath: '/tmp/codepapr-test',
+      sessions: [
+        { id: 'session-1', name: 'A', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+      ],
+      activeSessionId: 'session-1',
+      messages: [{ id: 'u1', role: 'user', content: '跑一下测试', timestamp: 1 }],
+      sessionMessages: { 'session-1': [{ id: 'u1', role: 'user', content: '跑一下测试', timestamp: 1 }] },
+      isLoading: false,
+      _agent: createMockAgent({ chat, logMessages: [] }),
+      _agentModel: 'deepseek-v4-pro',
+      _agentPromptKey: null,
+      _agentSessionId: 'session-1',
+      _gitReady: false,
+    }));
+
+    await useAgentStore.getState().sendMessage('跑一下测试', '跑一下测试', 'agent');
+
+    const state = useAgentStore.getState();
+    // checkpoint 已提交且未被回滚（await 单事务；旧 void 提交失败会被异步移除，与下一回合竞态）
+    expect((state.sessionMessages['session-1'] ?? []).some((m) => m.id === 'turn-cp')).toBe(true);
+    // epoch 后 agent 是新实例（不带着旧上下文继续跑）
+    expect(state._agent).toBe(rebuiltAgent);
+    expect(state._agentSessionId).toBe('session-1');
+    expect(maybeGenerateContextCheckpointMock).toHaveBeenCalled();
+    // 本 describe 没有 afterEach：手动恢复/清空 createAgent 间谍，避免污染
+    // 后续按调用计数断言的用例（ensureAgentForApp）。
+    createAgentMock.mockImplementation((...args: never[]) =>
+      actualCreateAgentRef.current!.createAgent(...args)
+    );
+    createAgentMock.mockClear();
   });
 });
 

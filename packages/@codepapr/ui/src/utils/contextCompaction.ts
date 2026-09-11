@@ -1,5 +1,6 @@
 import type { CompactionTrigger, IImageContent, IMessage } from '@codepapr/types';
-import { estimateTokens, sortedStringify } from '@codepapr/common';
+import type { SkeletonEntry } from '@codepapr/core';
+import { sortedStringify } from '@codepapr/common';
 import {
   stripInternalFields,
   redactTranscriptOutputString,
@@ -16,14 +17,9 @@ import type { UIToolInvocation } from '../store/internals/types';
 export const TOOL_RESULT_MISSING_PLACEHOLDER = '[tool result missing: interrupted before completion]';
 export const TOOL_RESULT_MISSING_ERROR = '工具执行中断，结果缺失';
 
-export const CONTEXT_COMPACTION_VERSION = 2;
-export const CONTEXT_COMPACTION_DEFAULT_MAX_ROUNDS = 24;
-export const CONTEXT_COMPACTION_DEFAULT_MAX_TOKENS = 200_000;
-/** PR3：软预算占硬预算的比例（用户 maxContextTokens 为硬预算）。 */
+/** 软预算比例：v4 压缩触发线改用 core 的 COMPACT_TRIGGER_RATIO；该比例目前
+ *  仅剩每回合 Recall 预算（sendMessage）使用。 */
 export const CONTEXT_COMPACTION_SOFT_BUDGET_RATIO = 0.7;
-export const CONTEXT_COMPACTION_MIN_RETAIN_MESSAGES = 6;
-export const CONTEXT_COMPACTION_MAX_RETAIN_MESSAGES = 12;
-export const CONTEXT_COMPACTION_TARGET_RETAIN_TOKENS = 8_000;
 
 export interface ContextCheckpointSections {
   userGoal: string[];
@@ -75,6 +71,13 @@ export interface ContextCheckpointPayload {
     /** F：kind 为 local-fallback 时的降级原因（写入 failure_code）。 */
     failureCode?: string;
   };
+  /** v4（骨架引擎）：被骨架化回合的结构化条目（审计/识别用，模型可见文本在
+   *  renderedContent/summary）。 */
+  skeleton?: SkeletonEntry[];
+  /** v4：needsSummary 时的二级摘要块（= summary 主体）。 */
+  summaryBlock?: string;
+  /** v4：轮内折叠的活动行文本。 */
+  activityText?: string;
 }
 
 export interface ContextMessageLike {
@@ -93,29 +96,6 @@ export interface ContextMessageLike {
   contextCheckpoint?: ContextCheckpointPayload;
   /** Worker log 注入的 session-bootstrap（不属于 archive / surface）。 */
   sessionBootstrap?: boolean;
-}
-
-export interface ContextCompactionPlan {
-  shouldCompact: boolean;
-  priorCheckpoint: ContextCheckpointPayload | null;
-  sourceMessages: IMessage[];
-  sourceChars: number;
-  sourceTokens: number;
-  retainedMessages: IMessage[];
-  effectiveTokens: number;
-  /**
-   * Absolute index (into the UI message list passed to `planContextCompaction`)
-   * where the newly generated checkpoint must be inserted so the retained tail
-   * follows it. `buildEffectiveContextMessages` treats messages AFTER the
-   * checkpoint as the retained tail, so inserting here (instead of appending at
-   * the end) keeps the recent tool-call tail verbatim in the rebuilt context.
-   */
-  insertIndex: number;
-  /** PR1：本次压缩的触发来源（shouldCompact 为 true 时有效）。 */
-  trigger?: CompactionTrigger;
-  /** PR3：预算动作。prune-tool-results 时 shouldCompact=false、shouldPrune=true。 */
-  budgetAction?: 'none' | 'prune-tool-results' | 'compact' | 'emergency-compact';
-  shouldPrune?: boolean;
 }
 
 export interface CheckpointMatch {
@@ -230,7 +210,7 @@ export function getLatestCheckpoint(messages: readonly ContextMessageLike[]): Ch
   return null;
 }
 
-function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[] {
+export function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[] {
   return messages
     .filter(
       (message) =>
@@ -326,10 +306,6 @@ function toCoreTailMessages(messages: readonly ContextMessageLike[]): IMessage[]
     });
 }
 
-function getMessageChars(messages: readonly IMessage[]): number {
-  return messages.reduce((sum, message) => sum + (message.content?.length ?? 0), 0);
-}
-
 /** 一组消息实际随请求上线的 token 估算（wire 口径，含图片 vision 权重）。
  *  必须整组计量：是否仍「在线」取决于其后有没有 assistant 回复 / 是不是最新
  *  一批工具结果，逐条计量会失真。
@@ -342,22 +318,6 @@ export function measureWireTokens(
     messages.map((m) => describeLogWireMeta(m as IMessage))
   );
   return Math.ceil(footprint.wireBytes / 4) + footprint.imageTokens;
-}
-
-function getMessagesTokenCount(messages: readonly IMessage[]): number {
-  // 上线口径（与 Agent / RequestBuilder 同一实现）：已消费的图片 base64 与会被
-  // 冻结摘要替换的旧工具全文都不随请求发送，图片按 vision 权重计费。用
-  // role+content 估算会让「压缩后仍然超限」不可见 → 纸面缩容通过、下一轮继续
-  // 触发压缩（压缩风暴）。
-  return measureWireTokens(messages);
-}
-
-function getCheckpointTokenCount(checkpoint: ContextCheckpointPayload | null): number {
-  if (!checkpoint) {
-    return 0;
-  }
-
-  return estimateTokens(checkpoint.renderedContent || checkpoint.summary || '');
 }
 
 function truncateLine(content: string, maxLength: number): string {
@@ -450,59 +410,6 @@ function collectPatternHighlights(
     maxItems,
     maxLength
   );
-}
-
-/**
- * Choose the retained tail in UI-message space and return its start index
- * (relative to `tailUI`), so the checkpoint can be inserted at a UI boundary.
- * Each UI assistant message expands atomically to an assistant+tools group via
- * `toCoreTailMessages`, so splitting at a UI index never orphans a tool message
- * in either the source or the retained partition. Token accounting reuses the
- * core conversion so it stays consistent with the live/rebuild path.
- */
-function pickRetainedTailUIStart(tailUI: readonly ContextMessageLike[]): number {
-  let retainedTokens = 0;
-  let retainedCount = 0;
-  let startIndex = tailUI.length;
-
-  for (let index = tailUI.length - 1; index >= 0; index -= 1) {
-    const message = tailUI[index]!;
-    const coreMessages = toCoreTailMessages([message]);
-    const messageTokens = getMessagesTokenCount(coreMessages);
-    const keepByMinimum = retainedCount < CONTEXT_COMPACTION_MIN_RETAIN_MESSAGES;
-    const keepByBudget =
-      retainedCount < CONTEXT_COMPACTION_MAX_RETAIN_MESSAGES &&
-      retainedTokens + messageTokens <= CONTEXT_COMPACTION_TARGET_RETAIN_TOKENS;
-
-    if (!keepByMinimum && !keepByBudget) {
-      break;
-    }
-
-    startIndex = index;
-    // Synthetic/hidden messages contribute no core messages; keep them in the
-    // tail span (they are filtered out downstream) but do not let them consume
-    // the retention budget.
-    if (coreMessages.length > 0) {
-      retainedCount += 1;
-      retainedTokens += messageTokens;
-    }
-  }
-
-  return startIndex;
-}
-
-/**
- * Smallest boundary such that `toCoreTailMessages(tailUI.slice(0, boundary))`
- * is non-empty. Used when there is no prior checkpoint and retention would keep
- * everything, to guarantee at least one message is compacted into a checkpoint.
- */
-function firstNonEmptyCoreBoundary(tailUI: readonly ContextMessageLike[]): number {
-  for (let boundary = 1; boundary <= tailUI.length; boundary += 1) {
-    if (toCoreTailMessages(tailUI.slice(0, boundary)).length > 0) {
-      return boundary;
-    }
-  }
-  return tailUI.length;
 }
 
 function renderSection(heading: string, items: readonly string[]): string[] {
@@ -639,105 +546,6 @@ export function repairOrphanedToolCalls(messages: IMessage[]): IMessage[] {
   }
 
   return repaired;
-}
-
-export function planContextCompaction(
-  messages: readonly ContextMessageLike[],
-  options?: {
-    maxRounds?: number;
-    maxTokens?: number;
-    /** PR3：软预算（tokens）。缺省 = maxTokens（保持旧行为：软硬不分）。 */
-    softMaxTokens?: number;
-    force?: boolean;
-  }
-): ContextCompactionPlan {
-  const maxRounds = options?.maxRounds ?? CONTEXT_COMPACTION_DEFAULT_MAX_ROUNDS;
-  const maxTokens = options?.maxTokens ?? CONTEXT_COMPACTION_DEFAULT_MAX_TOKENS;
-  const softMaxTokens = options?.softMaxTokens ?? maxTokens;
-  const force = options?.force ?? false;
-  const checkpoint = getLatestCheckpoint(messages);
-  const tailStart = checkpoint ? checkpoint.index + 1 : 0;
-  const tailUI = messages.slice(tailStart);
-  const tailMessages = toCoreTailMessages(tailUI);
-  const priorCheckpoint = checkpoint?.payload ?? null;
-  const effectiveTokens =
-    getCheckpointTokenCount(priorCheckpoint) + getMessagesTokenCount(tailMessages);
-  const effectiveRoundCount =
-    tailMessages.filter((m) => m.role === 'user').length + (priorCheckpoint ? 1 : 0);
-
-  const noCompact: ContextCompactionPlan = {
-    shouldCompact: false,
-    priorCheckpoint,
-    sourceMessages: [],
-    sourceChars: 0,
-    sourceTokens: 0,
-    retainedMessages: tailMessages,
-    effectiveTokens,
-    insertIndex: messages.length,
-    budgetAction: 'none',
-  };
-
-  // PR3 预算分层（用户 maxContextTokens 是硬预算权威，provider 窗口不钳制）：
-  // - 低于 soft：不压缩；
-  // - soft ~ hard 且回合数未超限：prune-first（重建裁剪旧工具结果，不生成 checkpoint）；
-  // - 超过 hard 或回合数超限：compact（checkpoint + retained tail）。
-  if (
-    !force &&
-    effectiveRoundCount <= maxRounds &&
-    effectiveTokens <= softMaxTokens
-  ) {
-    return noCompact;
-  }
-
-  if (
-    !force &&
-    effectiveRoundCount <= maxRounds &&
-    effectiveTokens <= maxTokens
-  ) {
-    return {
-      ...noCompact,
-      budgetAction: 'prune-tool-results',
-      shouldPrune: true,
-    };
-  }
-
-  const roundsExceeded = effectiveRoundCount > maxRounds;
-
-  // Split in UI-message space so the new checkpoint can be inserted at a UI
-  // boundary (assistant+tools groups stay atomic), and the retained tail keeps
-  // its tool calls verbatim after the checkpoint.
-  let retainedUIStart = pickRetainedTailUIStart(tailUI);
-
-  if (!priorCheckpoint && retainedUIStart === 0 && tailUI.length > 0) {
-    retainedUIStart = firstNonEmptyCoreBoundary(tailUI);
-  }
-
-  const sourceMessages = toCoreTailMessages(tailUI.slice(0, retainedUIStart));
-  const finalRetainedMessages = toCoreTailMessages(tailUI.slice(retainedUIStart));
-
-  // 源为空就没有可压缩内容：旧实现仅在「无既有 checkpoint」时拦截，有 checkpoint
-  // 且保留尾覆盖全部时会拿空转录跑模型，把既有 checkpoint 换成退化版本。
-  if (sourceMessages.length === 0) {
-    return noCompact;
-  }
-
-  return {
-    shouldCompact: true,
-    priorCheckpoint,
-    sourceMessages,
-    sourceChars: getMessageChars(sourceMessages),
-    sourceTokens: getMessagesTokenCount(sourceMessages),
-    retainedMessages: finalRetainedMessages,
-    effectiveTokens,
-    insertIndex: tailStart + retainedUIStart,
-    // force 表示用户/流程显式触发；否则按实际越限维度归因。
-    trigger: force
-      ? 'manual'
-      : roundsExceeded
-        ? 'round-limit'
-        : 'token-limit',
-    budgetAction: force || effectiveTokens > maxTokens ? 'emergency-compact' : 'compact',
-  };
 }
 
 /**

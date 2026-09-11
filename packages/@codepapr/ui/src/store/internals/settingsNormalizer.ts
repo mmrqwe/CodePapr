@@ -507,10 +507,6 @@ export function normalizeSettings(
     rawMaxContextTokens === 500_000 || rawMaxContextTokens === 220_000
       ? DEFAULT_MAX_CONTEXT_TOKENS
       : rawMaxContextTokens;
-  const maxConversationRounds =
-    typeof input.maxConversationRounds === 'number' && Number.isFinite(input.maxConversationRounds)
-      ? Math.max(2, Math.floor(input.maxConversationRounds))
-      : DEFAULT_SETTINGS.maxConversationRounds;
   const chatRenderBatchRounds =
     typeof input.chatRenderBatchRounds === 'number' && Number.isFinite(input.chatRenderBatchRounds)
       ? Math.max(1, Math.min(50, Math.floor(input.chatRenderBatchRounds)))
@@ -545,18 +541,6 @@ export function normalizeSettings(
     typeof input.toolOutputMiddleKeepChars === 'number' && Number.isFinite(input.toolOutputMiddleKeepChars)
       ? Math.max(1000, Math.min(toolOutputInterceptChars, Math.floor(input.toolOutputMiddleKeepChars)))
       : Math.min(toolOutputInterceptChars, DEFAULT_SETTINGS.toolOutputMiddleKeepChars);
-  const pruneOldToolResults =
-    typeof input.pruneOldToolResults === 'boolean'
-      ? input.pruneOldToolResults
-      : DEFAULT_SETTINGS.pruneOldToolResults;
-  const pruneProtectRounds =
-    typeof input.pruneProtectRounds === 'number' && Number.isFinite(input.pruneProtectRounds)
-      ? Math.max(1, Math.floor(input.pruneProtectRounds))
-      : DEFAULT_SETTINGS.pruneProtectRounds;
-  const pruneMinChars =
-    typeof input.pruneMinChars === 'number' && Number.isFinite(input.pruneMinChars)
-      ? Math.max(0, Math.floor(input.pruneMinChars))
-      : DEFAULT_SETTINGS.pruneMinChars;
   const toolContextDefaultMode: 'full' | 'summary' | 'auto' =
     input.toolContextDefaultMode === 'full' ||
     input.toolContextDefaultMode === 'summary' ||
@@ -1081,7 +1065,6 @@ export function normalizeSettings(
     maxTokens,
     maxToolRounds,
     maxContextTokens: effectiveMaxContextTokens,
-    maxConversationRounds,
     chatRenderBatchRounds,
     compactionModel,
     compactionMaxTokens,
@@ -1091,9 +1074,6 @@ export function normalizeSettings(
     toolOutputCeilingChars,
     toolOutputPreviewChars,
     toolOutputMiddleKeepChars,
-    pruneOldToolResults,
-    pruneProtectRounds,
-    pruneMinChars,
     toolContextDefaultMode,
     toolContextOverrides,
     toolContextSummaryMaxChars,

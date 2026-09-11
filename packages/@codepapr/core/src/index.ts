@@ -278,6 +278,38 @@ export type {
 export { parseAgentMarkdown, filterToolsForAgent, filterToolsForMode, filterToolsForProfile, MINIMAL_AGENT_TOOLS, isMinimalAgentToolName, applyMinimalToolProfile, isPromptToolVisible, isReadOnlyMode, MUTATING_TOOL_NAMES, PARALLEL_SAFE_TOOL_NAMES, APP_ONLY_TOOL_NAMES, PLAN_ONLY_TOOL_NAMES, GIT_READ_ONLY_ACTIONS, allowToolForReadOnlyMode, readOnlyModeBlockMessage, buildTaskToolDefinition, listDelegableAgents, isExecutionHeavyTask, sanitizeAgentPrompt, resolveAgentPrompt, resolveAgentDescription, mergeAgentDefinitions, BUILTIN_AGENTS, VERIFIER_PROMPT_OBJECTIVE, VERIFIER_PROMPT_SUBJECTIVE, SUBAGENT_DEFAULT_MAX_TOOL_ROUNDS, SUBAGENT_MAX_DEPTH, MAX_CUSTOM_PROMPT_LENGTH, EXECUTION_HEAVY_PATTERNS } from './agent/agentConfig';
 export type { AgentDefinition, AgentMode, AgentToolProfile, MinimalAgentToolName } from './agent/agentConfig';
 export {
+  CONTEXT_COMPACTION_VERSION_V4,
+  COMPACT_TRIGGER_RATIO,
+  TAIL_ROUNDS_VERBATIM,
+  TAIL_ROUNDS_FLOOR,
+  TAIL_TURNS_VERBATIM,
+  SKELETON_Q_MAX_CHARS,
+  SKELETON_A_HEAD_CHARS,
+  SKELETON_A_TAIL_CHARS,
+  SUMMARY_INPUT_RATIO,
+  SKELETON_SUMMARY_SYSTEM_PROMPTS,
+  roundsFromCoreMessages,
+  skeletonEntryFromRound,
+  renderSkeletonEntries,
+  renderRoundQuestionLine,
+  renderCompactedBlock,
+  foldRoundActivity,
+  preSizeSummaryInput,
+  deterministicSummary,
+  planSkeletonCompaction,
+} from './agent/compactionEngine';
+export type {
+  CompactionEngineLang,
+  EngineRound,
+  EngineTurn,
+  SkeletonEntry,
+  SkeletonPlan,
+  SkeletonPlanParams,
+  InRoundFold,
+} from './agent/compactionEngine';
+export { createHeadlessCompaction } from './agent/headlessCompaction';
+export type { HeadlessCompactionParams } from './agent/headlessCompaction';
+export {
   TODO_TOOL_NAME,
   TODO_CREATE_REJECTED_NOTICE,
   buildTodoToolDefinition,

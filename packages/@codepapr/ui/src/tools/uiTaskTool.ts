@@ -78,6 +78,13 @@ export interface UiTaskToolContext {
   toolOutputTruncation?: ToolOutputTruncationOptions;
   /** 主会话工作模式：app 模式下子代理同样需要能搜索 .CodePapr/apps 应用源码。 */
   mode?: PromptMode;
+  /** v4：子代理 headless 压缩（与主会话同一引擎：90% 触发、骨架、轮内折叠、
+   *  一次二级摘要）。internal 代理（compactor/verifier）自动跳过，压缩链
+   *  深度结构上封顶为 1；嵌套子代理通过 context 继承同一配置。 */
+  subagentCompaction?: {
+    windowTokens: number;
+    summarize?: (input: string) => Promise<string | null>;
+  };
 }
 
 /**
@@ -196,6 +203,12 @@ export async function runSubagent(
       maxWallClockMs,
       abortSignal,
       toolOutputTruncation: context.toolOutputTruncation,
+      compaction: context.subagentCompaction
+        ? {
+            windowTokens: context.subagentCompaction.windowTokens,
+            summarize: context.subagentCompaction.summarize,
+          }
+        : undefined,
       onToolCallEnd: (event) => {
         pushSubagentStep(runId, {
           name: event.toolName,

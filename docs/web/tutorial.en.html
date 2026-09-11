@@ -555,8 +555,7 @@ https://api.deepseek.com/v1</code></pre>
                 <li>fast model switch — Whether to enable the fast model</li>
                 <li>fast model name — Fast model name (default <code>deepseek-v4-flash</code>)</li>
                 <li>max tool rounds — Maximum tool rounds (default 500)</li>
-                <li>max context tokens — Maximum context tokens (default 500k; applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers — no per-provider clamping)</li>
-                <li>max conversation rounds — Maximum conversation rounds (default 24)</li>
+                <li>max context tokens — Model input context window (default 200K; applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers — no per-provider clamping; usage reaching <strong>90%</strong> of it triggers auto-compaction)</li>
               </ul>
             </div>
           </div>
@@ -1146,11 +1145,11 @@ TTS Data Flow:
         </ul>
 
         <h3>/compact — Force Context Compression</h3>
-        <p>Manually trigger conversation compression, merging earlier messages into structured checkpoints to free token space:</p>
+        <p>Manually trigger v4 skeleton compaction, folding older rounds into a checkpoint to free token space:</p>
         <ul>
-          <li><strong>Force mode:</strong> Not limited by <code>maxConversationRounds</code> and <code>maxContextTokens</code> thresholds</li>
-          <li><strong>Internal Compactor agent:</strong> Calls the compression pipeline; the zero-tool Compactor sub-agent generates the checkpoint (model tier follows <code>compactionModel</code>; rule-based fallback on LLM failure)</li>
-          <li><strong>Refreshes session bootstrap:</strong> On compaction, project memory is re-rendered from the ledger into the stable prefix</li>
+          <li><strong>Force mode:</strong> bypasses the 90% trigger line (an ineffective shrink is still rejected — no no-op checkpoints)</li>
+          <li><strong>Deterministic skeleton:</strong> each folded round keeps its user question + final summary as two lines; tool calls/results collapse into count notes — <strong>zero LLM</strong>. The most recent 5 rounds stay verbatim; the zero-tool Compactor runs once only if the skeleton still overflows (deterministic line-truncation fallback otherwise)</li>
+          <li><strong>Refreshes session bootstrap:</strong> compaction is a memory epoch — project memory is re-rendered from the ledger into the stable prefix</li>
           <li><strong>Use case:</strong> When approaching context limits or responses slow down, compress to restore smooth conversation</li>
         </ul>
 
@@ -1282,10 +1281,10 @@ When a task requires public information, current facts, third-party API usage, o
           <thead><tr><th>Agent</th><th>Purpose</th><th>Model</th><th>Tools</th></tr></thead>
           <tbody>
             <tr><td><strong>verifier</strong></td><td>Goal acceptance: read-only audit of whether the Worker truly achieved the goal — anti-completion-bias, anti-forgery (<code>/goal</code>)</td><td><code>verifierModelTier</code> (fast/primary/mentor)</td><td>read, grep, glob, list</td></tr>
-            <tr><td><strong>compactor</strong></td><td>Context compaction: compresses a long conversation into a recoverable checkpoint (shared by between-turn and mid-loop compaction)</td><td><code>compactionModel</code> (fast/primary)</td><td>None (pure reasoning)</td></tr>
+            <tr><td><strong>compactor</strong></td><td>Second-level summary for compaction: merges the skeleton into one summary only when it still exceeds the budget (shared by between-turn / mid-loop / Goal / task sub-agents)</td><td><code>compactionModel</code> (fast/primary)</td><td>None (pure reasoning)</td></tr>
           </tbody>
         </table>
-        <p><small>Both internal agents are <code>internal: true</code>, invoked directly by the runtime: Verifier by the GoalRunner acceptance loop (dedicated budget: 6 tool rounds / 3-minute wall clock); Compactor by the compaction pipeline — zero tools (the transcript already contains all facts), no skills/memory/project-graph injection (bootstrap isolation), and the sub-agent default 20-minute wall clock. Compactor skips the LLM in favor of rule-based fallback when the fast tier is selected but the fast model is disabled.</small></p>
+        <p><small>Both internal agents are <code>internal: true</code>, invoked directly by the runtime: Verifier by the GoalRunner acceptance loop (dedicated budget: 6 tool rounds / 3-minute wall clock); Compactor by the compaction pipeline — zero tools (the transcript already contains all facts), no skills/memory/project-graph injection (bootstrap isolation), and the sub-agent default 20-minute wall clock. In v4 the main compaction path is the deterministic skeleton (zero LLM); the Compactor runs only as a single second-level summary, falling back to deterministic line truncation when the fast tier is selected but the fast model is disabled — never recursion.</small></p>
 
         <h3>Custom Sub-agents</h3>
         <p>Declare a sub-agent in <code>.CodePapr/agents/&lt;name&gt;.md</code> with YAML frontmatter + body. The main agent can delegate subtasks to it. An agent with the same name will override the built-in definition.</p>
@@ -1716,7 +1715,7 @@ window.papr.events.<span class="hl-func">on</span>(<span class="hl-string">'card
           <li><strong>Objective condition evaluation</strong>: the system automatically runs the verification command and gets exit code + output</li>
            <li><strong>Verifier anti-forgery check</strong>: the read-only Verifier sub-agent (read/grep/glob/list) reads the Worker's execution transcript and independently verifies key claims with its tools, detecting completion bias like "claiming tests pass without actually running them"</li>
           <li><strong>Judgment</strong>: condition met AND Verifier confirms → <strong>SATISFIED</strong>, loop ends; otherwise detailed feedback is injected into the next round</li>
-          <li><strong>Context rot mitigation</strong>: auto-compaction every 5 iterations; state persisted to <code>.CodePapr/goal-state.md</code></li>
+          <li><strong>Context rot mitigation</strong>: auto-compaction every 5 iterations through the same epoch commit as between-turn compaction (insert checkpoint, re-render and prime the bootstrap, rebuild the agent in place, await the single-transaction commit) — the Goal runtime context actually shrinks; state persisted to <code>.CodePapr/goal-state.md</code></li>
         </ol>
 
         <h3>Safety Guardrails</h3>
@@ -1996,27 +1995,19 @@ After compaction:
         <ul>
           <li><strong>Round-start check only</strong>: tool results are appended at the end of a round; the overflow they cause is caught at the <strong>next round's start</strong> — no LLM request is ever sent with an over-limit context; the task continues after compaction from "summary + recent tail".</li>
           <li><strong>No mid-tool-execution compaction</strong>: a round's multiple tool calls are executed atomically before compacting at the round boundary, preserving tool-call↔result pairing.</li>
-          <li><strong>Anti-loop</strong>: at least 2 rounds between compactions.</li>
+          <li><strong>Anti-loop</strong>: repeated ineffective/failed compactions trip a circuit breaker for the turn; after a successful compaction the log is below the threshold, so retries do not oscillate.</li>
           <li><strong>Defense in depth</strong>: each tool result is first truncated to ~50KB (or spilled to disk with a preview), so per-round growth is bounded.</li>
         </ul>
 
-        <h3>Pruning Is a Compaction Sub-Step (Not a Separate Mechanism)</h3>
-        <p>Old tool-result pruning (<code>pruneOldToolResults</code>, replacing large old results beyond the protection window with a placeholder) has <strong>no independent trigger</strong>; it runs only at compaction/rebuild as an internal slimming sub-step of compaction (mirroring OpenCode's <code>SessionCompaction.prune</code>). The only trigger is the context threshold. Note this differs from <code>compactionMaxTokens</code> (the compaction summary's output limit).</p>
+        <h3>Pruning Is Retired (v4)</h3>
+        <p>The old protection-window pruning layer was removed with v4: tool results now only exist inside the ≤5 most recent verbatim rounds — anything older is already folded by the skeleton, so separate pruning is meaningless. A single oversized tool output is bounded by the <strong>entry guardrails</strong> (tool-output truncation and artifact spillover, readable back via <code>history_read_artifact</code>). The trigger remains a single line: 90% of the context window.</p>
 
-        <h3>Effective Context Threshold (provider-aware)</h3>
-        <p><code>maxContextTokens</code> defaults to <strong>200K</strong> and applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers (no per-provider clamping; compatible endpoints are often gateways forwarding large-context models). Higher threshold → fewer compactions → higher hit rate (cache reads are cheap).</p>
-        <table>
-          <thead><tr><th>Provider</th><th>Hard context limit</th><th>Default effective threshold</th></tr></thead>
-          <tbody>
-            <tr><td>DeepSeek</td><td>~1M</td><td>500K</td></tr>
-            <tr><td>Claude</td><td>200K</td><td>≈ 200K − maxTokens</td></tr>
-            <tr><td>OpenAI</td><td>128K</td><td>≈ 128K − maxTokens</td></tr>
-          </tbody>
-        </table>
+        <h3>Effective Context Threshold (single rule)</h3>
+        <p><code>maxContextTokens</code> declares the model input window (default <strong>200K</strong>) and applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers (no per-provider clamping). <strong>The compaction trigger line = window × 90%</strong> (constant <code>COMPACT_TRIGGER_RATIO</code>) — the same source for the main session, mid-loop, Goal, and task sub-agents; provider-measured usage and the estimate take the larger value, and genuinely over-limit requests still fall back to emergency compaction. A higher window → fewer compactions → higher hit rate (cache reads are cheap).</p>
 
         <h3>Prefix-Stability Guarantees</h3>
         <ul>
-          <li><strong>No per-request prefix mutation</strong>: pruning runs only at compaction/rebuild, not as a sliding window on every request build</li>
+          <li><strong>No per-request prefix mutation</strong>: v4 has no sliding pruning; history is only ever rewritten at epoch boundaries</li>
           <li><strong>Byte-identical rebuild serialization</strong>: object tool results use <code>sortedStringify</code> (matching the live path); empty assistant content is <code>''</code></li>
           <li><strong>Stable reasoning round-trip</strong>: <code>reasoning_content</code> is round-tripped based on "presence + model capability", decoupled from the per-request thinking toggle</li>
           <li><strong>Frozen TodoList digest</strong>: the current digest is frozen into the checkpoint at generation and reused on rebuild instead of re-rendered live</li>

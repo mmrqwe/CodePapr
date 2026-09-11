@@ -49,6 +49,8 @@ import {
 } from './agentWorkerProtocol';
 import { parseMcpToolName, sanitizeMcpToolPart } from '../utils/mcpTypes';
 import { buildPruneOptions, createContextCompactionHandler } from './compactionHandler';
+import { effectiveMaxContextTokens } from '../utils/contextLimits';
+import { createSubagentSummarizer } from '../utils/compactorRunner';
 import { setTodoListContext } from '../tools/todoListRegistry';
 import {
   CONTEXT_SURFACE_RENDER_VERSION,
@@ -970,6 +972,18 @@ async function runSubagent(
       abortSignal,
       toolOutputTruncation: buildToolOutputTruncation(payload.settings),
       toolContextConfig: buildToolContextConfig(payload.settings),
+      // v4：worker 内 task 子代理与主线程同一 headless 压缩引擎（触发线/
+      // 骨架/一次二级摘要都相同；摘要器用 worker 侧 compactor 会话）。
+      compaction: {
+        // provider 参数在 effectiveMaxContextTokens 中已不再参与钳制。
+        windowTokens: effectiveMaxContextTokens({
+          maxContextTokens: payload.settings.maxContextTokens,
+        }),
+        summarize: createSubagentSummarizer(
+          payload.settings as unknown as CompactionSettings,
+          (payload.runtime.lang ?? 'zh-CN') as 'zh-CN' | 'zh-TW' | 'en'
+        ),
+      },
       onToolCallEnd: (event) => {
         postMessageToMain({
           type: 'subagent-progress',

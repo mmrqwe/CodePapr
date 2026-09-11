@@ -91,7 +91,6 @@ export interface Settings {
   maxTokens: number;
   maxToolRounds: number;
   maxContextTokens: number;
-  maxConversationRounds: number;
   chatRenderBatchRounds: number;
   compactionModel: 'fast' | 'primary';
   compactionMaxTokens: number;
@@ -101,9 +100,6 @@ export interface Settings {
   toolOutputCeilingChars: number;
   toolOutputPreviewChars: number;
   toolOutputMiddleKeepChars: number;
-  pruneOldToolResults: boolean;
-  pruneProtectRounds: number;
-  pruneMinChars: number;
   toolContextDefaultMode: 'full' | 'summary' | 'auto';
   toolContextOverrides: Record<string, 'full' | 'summary' | 'auto'>;
   toolContextSummaryMaxChars: number;
@@ -194,7 +190,6 @@ export interface CompactionSettings {
   baseURL: string;
   streamIdleTimeoutMs: number;
   maxContextTokens: number;
-  maxConversationRounds: number;
   lang?: Lang;
   model: string;
   fastModelEnabled: boolean;
@@ -203,9 +198,6 @@ export interface CompactionSettings {
   compactionModel: 'fast' | 'primary';
   compactionMaxTokens: number;
   compactionTemperature: number;
-  pruneOldToolResults: boolean;
-  pruneProtectRounds: number;
-  pruneMinChars: number;
 }
 
 export interface WorkspaceEntry {

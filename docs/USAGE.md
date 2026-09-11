@@ -201,7 +201,7 @@ LLM 可通过 4 个工具管理 app（仅 App 模式）：
 - **LLM**：模型、采样、思考模式
 - **搜索**：SearXNG；失败则回落到内置聚合
 - **子Agent**：Explore / Scout / Mentor
-- **高级**：压缩、Goal、ProjectGraph、工具上下文
+- **高级**：压缩、Goal、ProjectGraph（工具结果外置护栏与压缩参数已内置化，不再暴露）
 - **App**：未声明 app 的默认权限
 
 **Agent 工具面**（设置 → 通用）：「默认」= 现有桌面全量工具（仍按 Ask/Plan/Agent/App 模式过滤）；「极简」= 仅暴露 7 个工具 `read / edit / write / grep / bash / websearch / webfetch`——更少工具、更接近极简 coding harness（注意：bash 仍可执行任意命令，极简≠沙箱）。组合按 mode ∩ profile 取交集（极简+Ask 会再砍掉写/bash；极简下 App 专属工具不可用，App 模式需默认工具面）。网络能力规则：**默认档**开启 MCP 搜索时 `websearch`/`webfetch` 由 MCP 搜索工具替代；**极简档不加载任何 MCP**，原生 `websearch`/`webfetch` 始终保留（不会出现搜索全无）。保存后于下一条消息生效，不打断当前流式回合。CLI 侧对应 `codepapr run --tools-preset minimal`，与 UI 极简共用同一 allowlist（`MINIMAL_AGENT_TOOLS`）。
@@ -222,7 +222,7 @@ LLM 可通过 4 个工具管理 app（仅 App 模式）：
 
 > Goal 自主循环的验收器（Verifier）是一个内置的只读子代理（工具白名单 read/grep/glob/list，可亲自核实 Worker 的改动），在高级设置中配置（`verifierModelTier` 可选快速/主模型/导师模型）。它是内部代理（`internal: true`），不经 `task` 工具暴露给主 Agent，仅供 GoalRunner 内部调用。主观目标（无 `exec:` 条件）默认使用导师模型验收，未配置导师模型时静默降级为主模型。
 
-> 上下文压缩（Compactor）同样是内置内部代理（`internal: true`），零工具纯推理——压缩输入（transcript）已含全部事实。它由运行时压缩管线（轮间压缩与 mid-loop 压缩）直接调用，不经 `task` 工具暴露；模型档位与参数复用压缩配置（`compactionModel` / `compactionTemperature` / `compactionMaxTokens`，fast 档未启用快速模型时跳过 LLM 走规则降级）。墙钟预算沿用子代理默认 20 分钟。
+> 上下文压缩（Compactor）同样是内置内部代理（`internal: true`），零工具纯推理。v4 骨架引擎下它**只在二级摘要时被调用**：确定性骨架装不进预算后，对骨架文本做一次合并摘要（输入预瘦身，失败/未启用快速模型时降级为按行截断，绝不递归）。模型档位与参数复用压缩配置（`compactionModel` / `compactionTemperature` / `compactionMaxTokens`）。墙钟预算沿用子代理默认 20 分钟。
 
 子代理有 **5 分钟整体 wall-clock 超时**（超时自动取消），单次工具调用有 **90 秒超时保护**，Worker IPC 通信有 **120 秒超时保护**。超时返回错误给 LLM 自主决策，而非永久等待。
 
@@ -328,6 +328,25 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 - 搜索结果最多 50 条，超出时提示细化关键词
 - 搜索面板**视口居中**弹出，300ms 防抖，仅在该 Tab 激活时才执行搜索
 
+## 上下文压缩（v4 骨架引擎）
+
+对话历史只保留「压缩检查点 + 最近回合」，更早的内容折叠为骨架。设计目标：任何入口的压缩行为一致、主压缩零 LLM 成本、长会话记忆新鲜度不再依赖手工刷新。
+
+**触发**：唯一一条线——当前用量达到 `maxContextTokens`（模型输入窗口）× **90%**。没有轮数上限、没有软硬分层。压缩发生在：回合末自动评估、`/compact` 手动、mid-loop（模型轮首估算超限）、**Goal 循环每 5 个迭代**、以及 task 子代理（headless，见下）。
+
+**压缩产物**（自旧到新）：
+1. prior 摘要文本（上一次压缩的产物，原样带入块首）；
+2. **骨架**：每个被压缩的回合两行——`问：`用户问题（截断 300 字）+ `答：`该回合最后一条可见结论（头 300 + 尾 100 字），附丢弃的工具调用次数注记；
+3. 轮内折叠行（当最后一个超长回合也被折叠时，早期工具轮显示为 `[步骤 n] 工具名 —— 文本`）；
+4. 最近 **5 个回合逐字**（含工具调用/结果；预算吃紧时按 4→3→2→1 降级，再吃紧则最后回合内部折叠，保最后 3 个工具轮组）；
+5. pinned：**TodoList 权威清单**整块注入检查点正文尾部，跨压缩必存，永不参与摘要。
+
+**二级摘要**：仅当以上确定性装配仍装不下时，调用一次 Compactor 把骨架合并成摘要（输入预瘦身，最老的行先丢）。Compactor 不可用或失败时按行截断降级。**不存在递归压缩**。
+
+**压缩即记忆 epoch**：每次压缩都会重读记忆账本重渲染 Session Bootstrap（写回前缀缓存），因此「新记住的 confirmed 条目 / 被遗忘的条目」最迟在下一次压缩（任意入口，含 Goal 循环与 mid-loop）或新会话生效；写入/遗忘本身不拆当前前缀缓存。回合末与 Goal 的压缩提交为单事务并 await（失败回滚，不留半提交状态）；mid-loop 在 Worker 内换 epoch，主线程校验通过后原子提交，刷新失败时沿用旧 Bootstrap——不存在「无前缀记忆」的 epoch。
+
+**子代理同引擎（headless）**：task 子代理的长执行同样在窗口 90% 触发同一骨架压缩，但只在内存里替换 log——不写 surface / archive、无 UI 检查点；internal 代理（compactor/verifier）不接入，因此压缩链深度封顶为 1。子代理嵌套受 `SUBAGENT_MAX_DEPTH = 2` 限制，超限的 `task` 调用直接报错。
+
 ## 项目记忆（零审核自动写入）
 
 分层与时间线（给人看的版本）见 [`docs/web/context-architecture.html`](../web/context-architecture.html)。
@@ -352,7 +371,7 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 
 **没有冷启动摘要**：项目结构 / 技术栈这类可即时探测的信息不进账本（子代理需要时用 ProjectGraph 现取）。记忆只记「一条一个事实」；`reported`（Agent 自报）超过 400 字直接丢弃。
 
-**去重**：同内容哈希的旧条被 supersede；同 category 的近义改述合并（短文本 bigram Jaccard ≥ 0.8，长文本 containment ≥ 0.85 且长度比 ≥ 0.6）；`cold-start-*` 这类同源派生条目只保留最新一条。老项目首次打开时自动收敛历史重复（一次收敛，不反复改写）。面板另有「清理重复」与多选批量遗忘。召回侧再兜一层：与已选条目近义的候选、以及超过 3 条的同一 category 都会被过滤掉。
+**写即更新**：同内容哈希幂等（沿用既有 entry id）；同 category 的近义改述（短文本 bigram Jaccard ≥ 0.8，长文本 containment ≥ 0.85 且长度比 ≥ 0.6）**新者胜**——写入新表述会替换旧条目（旧的归档为 superseded，面板可查看/恢复），更正事实不需要先 forget；`memory_write` 还可传 `supersedesEntryId` 跨类别指名替换。护栏：`reported`（Agent 自报）不得覆盖 `confirmed`（用户原话/工具实证）条目，此类冲突保留原文并明确提示，只能由用户在面板编辑。`cold-start-*` 同源派生条目只保留最新一条；面板另有「清理重复」与多选批量遗忘。召回侧再兜一层：与已选条目近义的候选、以及超过 3 条的同一 category 都会被过滤掉。
 
 ## 代码智能（lsp / list）
 

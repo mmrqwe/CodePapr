@@ -22,15 +22,18 @@
 | `systemPrompt` | 字符串 | `''` | — | 自定义系统提示词。留空则使用内置默认 |
 | `agentToolProfile` | 枚举 | `default` | `default` / `minimal` | Agent 工具面档位。`default`= 全量工具（仍按模式过滤）；`minimal`= 仅暴露 7 项核心工具 `read/edit/write/grep/bash/websearch/webfetch`（mode ∩ profile；极简≠沙箱，bash 仍可任意执行；App 模式需 `default`）。单源常量 `MINIMAL_AGENT_TOOLS`，CLI `--tools-preset` 可覆盖 |
 
-## 上下文压缩设置
+## 上下文压缩设置（v4：骨架引擎）
+
+压缩触发只有一条线：**usage ≥ `maxContextTokens` × 90%**（常量 `COMPACT_TRIGGER_RATIO`，不可配置）。旧版的「对话轮数上限」与「软预算 prune 分层」已移除。
+
+主压缩**不经过 LLM**：更早的回合被折叠为确定性骨架（每回合保留「用户问题（截断 300 字）+ 最终结论（头 300 + 尾 100 字）+ 丢弃工具调用计数」），最近 5 个回合逐字保留（含工具调用/结果）；预算仍不足时逐字轮数按 4→3→2→1 降级，再不足则对当前回合做轮内折叠（保留最后 3/2/1 个工具轮组，更早的折成活动行）。只有当以上全部装不下时，才调用一次 Compactor 对骨架做**二级摘要**（输入经确定性预瘦身，失败/不可用时降级为按行截断——绝不递归压缩）。TodoList 权威清单作为 pinned 信息独立注入检查点正文，不参与折叠。所有入口（回合末自动压缩、`/compact`、Goal 循环、mid-loop、task 子代理 headless）共用同一引擎与同一提交路径。
 
 | 参数 | 类型 | 默认值 | 范围 | 说明 |
 |---|---|---|---|---|
-| `compactionModel` | 枚举 | `fast` | `fast` / `primary` | 执行上下文压缩的模型档位（Compactor 内部子代理；fast 档未启用快速模型时跳过 LLM 压缩，走规则降级） |
-| `compactionMaxTokens` | 数字 | `8000` | `100` - `100000` | Compactor 子代理的最大输出 token（摘要写多长，非触发阈值） |
+| `compactionModel` | 枚举 | `fast` | `fast` / `primary` | 二级摘要的模型档位（Compactor 内部子代理；fast 档未启用快速模型时跳过 LLM，走确定性截断降级） |
+| `compactionMaxTokens` | 数字 | `8000` | `100` - `100000` | Compactor 子代理的最大输出 token（二级摘要写多长，非触发阈值） |
 | `compactionTemperature` | 数字 | `0.1` | `0` - `2` | Compactor 子代理的温度，越低越确定 |
-| `maxContextTokens` | 数字 | `200000` | `1000` - `1000000` | 上下文窗口 token 上限，超出时触发压缩。对 DeepSeek / OpenAI 兼容 / Claude 等统一生效（`max(1000, 设定值)`）。 |
-| `maxConversationRounds` | 数字 | `24` | `2` - `500` | 触发上下文压缩前保留的最大对话轮数 |
+| `maxContextTokens` | 数字 | `200000` | `1000` - `1000000` | 模型输入上下文窗口（token）。达到其 90% 触发压缩；`max(1000, 设定值)`，对 DeepSeek / OpenAI 兼容 / Claude 等统一生效 |
 
 ## ProjectGraph 设置
 
