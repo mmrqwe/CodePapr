@@ -21,7 +21,7 @@ import {
 } from '@codepapr/core';
 import type { PromptMode } from '@codepapr/core';
 import { CacheValidator, RequestBuilder } from '@codepapr/api';
-import type { ICacheStatistics, IAgentResponse, IImageContent, IMessage, IToolDefinition, RequestContextInsertion } from '@codepapr/types';
+import type { ICacheStatistics, IAgentResponse, IImageContent, IMessage, IToolDefinition } from '@codepapr/types';
 import {
   WorkerBackedAgent,
   type AgentRuntimeHandle,
@@ -36,7 +36,6 @@ import { registerWorkspaceTools } from '../../tools/workspaceTools';
 import { registerUiTaskTool, type UiTaskToolContext } from '../../tools/uiTaskTool';
 
 import { registerMcpTools } from '../../tools/mcpTools';
-import { registerMemoryTools } from '../../tools/memoryTools';
 import { registerTodoListTools } from '../../tools/todoListTool';
 import { mcpSearchHidesNativeWeb } from '../../utils/mcpTypes';
 import {
@@ -49,7 +48,6 @@ import { resolveProviderName } from './settingsNormalizer';
 import { modelSupportsVision, shouldExposeReadImage } from '../../utils/visionRouting';
 import { replaceImagesInToolResult } from '../../utils/visionOffload';
 import { loadMemorySectionForPrompt } from '../../utils/memoryFile';
-import { primeSessionBootstrap } from './sessionBootstrapCache';
 import {
   buildAgentSessionBootstrapPrompt,
   createLogFromMessages,
@@ -111,13 +109,12 @@ function buildToolContextConfig(settings: Settings): ToolContextConfig {
 function buildBootstrapRefresher(
   settings: Settings,
   workspacePath: string,
-  runtime: AgentRuntimeConfig,
-  sessionId: string | null
+  runtime: AgentRuntimeConfig
 ): () => Promise<string | null> {
   return async () => {
     let bootstrap: string;
     try {
-      const memorySection = (await loadMemorySectionForPrompt(workspacePath, settings.lang)) ?? undefined;
+      const memorySection = (await loadMemorySectionForPrompt(workspacePath)) ?? undefined;
       bootstrap = buildAgentSessionBootstrapPrompt(
         settings,
         workspacePath,
@@ -133,9 +130,6 @@ function buildBootstrapRefresher(
       return runtime.sessionBootstrapPrompt?.trim() || null;
     }
     if (!bootstrap) return runtime.sessionBootstrapPrompt?.trim() || null;
-    if (runtime.sessionBootstrapSignature) {
-      primeSessionBootstrap(sessionId, runtime.sessionBootstrapSignature, bootstrap);
-    }
     return bootstrap;
   };
 }
@@ -151,7 +145,6 @@ export interface AgentRuntimeConfig {
    *  优先用它注入 log[0]，兑现账本记忆每次会话自动加载；缺省时回退到仅 skills+custom。 */
   sessionBootstrapPrompt?: string;
   /** 本回合 Bootstrap 缓存签名；mid-loop 刷新后据此把新 Bootstrap 写回缓存。 */
-  sessionBootstrapSignature?: string;
   lang?: Lang;
   /** 当前工作模式：ask/plan 会在注册层屏蔽变更类工具。缺省 agent。 */
   mode?: PromptMode;
@@ -181,8 +174,7 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
     userInput: string,
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
     images?: IImageContent[],
-    userMessageId?: string,
-    contextInsertions?: RequestContextInsertion[]
+    userMessageId?: string
   ): Promise<IAgentResponse> {
     this.abortController = new AbortController();
     try {
@@ -191,8 +183,7 @@ class _MainThreadAgentHandle implements AgentRuntimeHandle {
         onStreamEvent,
         images,
         this.abortController.signal,
-        userMessageId,
-        contextInsertions
+        userMessageId
       );
       if (this.subagentCacheStatsRef) {
         const subStats = this.subagentCacheStatsRef();
@@ -457,9 +448,6 @@ export function buildAgentSessionParts(
   if (!minimalSurface) {
     registerTodoListTools(toolRegistry, sessionId);
 
-    // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
-    registerMemoryTools(toolRegistry, workspacePath, sessionId);
-
     registerMcpTools(toolRegistry, settings.mcp, runtime.mcpToolDefinitions ?? [], runtime.mcpToolMappings, workspacePath);
   }
 
@@ -553,7 +541,7 @@ function _createLocalAgent(
       settings,
       parts.providerName,
       sessionId,
-      buildBootstrapRefresher(settings, workspacePath, runtime, sessionId),
+      buildBootstrapRefresher(settings, workspacePath, runtime),
       undefined,
       runtime.onMidLoopCompactionCommit
     ),
@@ -645,7 +633,7 @@ export function createAgent(
           onWorkspaceMutated,
         },
         onStreamSnapshot: runtime.onStreamSnapshot,
-        onRefreshBootstrap: buildBootstrapRefresher(settings, workspacePath, runtime, sessionId),
+        onRefreshBootstrap: buildBootstrapRefresher(settings, workspacePath, runtime),
         onMidLoopCompactionCommit: runtime.onMidLoopCompactionCommit,
         ...(shouldUseSidecarAgentRuntime()
           ? { transport: new SidecarTransport({ onWorkspaceMutated }) }

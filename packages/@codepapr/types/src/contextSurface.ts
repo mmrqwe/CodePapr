@@ -128,17 +128,6 @@ export interface ContextCompactionIntent {
  * 只作用于 RequestBuilder 编译产物的 log 段，锚定在 anchorMessageId 之前；
  * 不进入 AppendOnlyLog / Archive / Surface / hash 基线。
  */
-export interface RequestContextInsertion {
-  id: string;
-  /** 锚定目标：当前回合 canonical user 消息的 ID（主线程生成，贯穿 log）。 */
-  anchorMessageId: string;
-  placement: 'before';
-  role: 'user';
-  content: string;
-  source: 'memory-recall';
-  /** 同一 anchor 的多个插入按 order 升序排列（re-recall 时递增）。 */
-  order: number;
-}
 
 /* ------------------------------------------------------------------------ *
  * Memory Recall（PR5 使用的最小形状；PR5 允许扩展字段）

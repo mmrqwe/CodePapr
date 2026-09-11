@@ -1136,12 +1136,12 @@ TTS Data Flow:
         </div>
 
         <h3>Memory panel — cross-session project memory</h3>
-        <p>The ledger lives in SQLite; the memory panel is the only human surface. Short instructions go in every-session Bootstrap, procedures in per-turn recall, web citations in search only. Layers and timing: <a href="context-architecture.en.html">Context layering</a>.</p>
+        <p>Cross-session memory is a single file in your workspace, <code>.CodePapr/MEMORY.md</code> (three sections: user preferences &amp; constraints / tech stack &amp; environment / architecture &amp; known facts) — readable, diffable, git-friendly. The built-in memory curator (internal subagent) maintains it in the background, and the memory panel is its editor. Layers and timing: <a href="context-architecture.en.html">Context layering</a>.</p>
         <ul>
-          <li><strong>Auto-write:</strong> You said remember / must / don’t, a test passed, cold start, Agent <code>memory_write</code>, or a panel note — kept or dropped immediately. No admit button.</li>
-          <li><strong>Three panel groups:</strong> every session (notes / preferences / facts, 24 items / 1500 tokens), on-demand (procedures), search only (web citations).</li>
-          <li><strong>When it reaches the model:</strong> this turn updates the ledger only; the current prefix stays; compact or a new session brings short instructions into the prefix; procedures wait for the next user turn to be recalled.</li>
-          <li><strong>How it is read:</strong> the ledger is not dumped. Short instructions already sit in session bootstrap; every user turn (Ask included, capped at 3 items there) retrieves relevant memories from your message (~5 hits); if that is not enough the Agent calls <code>memory_search</code>. The catalog listing tool is <code>memory_list</code> (at most 40 previews). Web citations are search-only — never auto-recalled.</li>
+          <li><strong>Two checkpoints:</strong> delivery (end of turn; runs only when your message carries a memory cue — remember / must / never / always — or the turn has a verified test/build command) and pre-compaction (runs unconditionally before any compaction commit, 20s timeout).</li>
+          <li><strong>Write boundary:</strong> the curator only sees the turn's user text plus the assistant's final text (skeleton when pre-compaction) — never raw tool output; secrets are redacted and injection / dangerous commands / oversized content / “drop-more-than-half” edits are rejected.</li>
+          <li><strong>The Agent does not write memory:</strong> <code>memory_write / memory_search / memory_list / memory_forget</code> are retired; direct writes to MEMORY.md are intercepted and rejected — the Agent states durable facts in its answer instead.</li>
+          <li><strong>When it reaches the model:</strong> every turn reads the file into session bootstrap — a saved change takes effect next turn (a one-time prefix miss), panel edits included.</li>
         </ul>
 
         <h3>/compact — Force Context Compression</h3>
@@ -1149,7 +1149,7 @@ TTS Data Flow:
         <ul>
           <li><strong>Force mode:</strong> bypasses the 90% trigger line (an ineffective shrink is still rejected — no no-op checkpoints)</li>
           <li><strong>Deterministic skeleton:</strong> each folded round keeps its user question + final summary as two lines; tool calls/results collapse into count notes — <strong>zero LLM</strong>. The most recent 5 rounds stay verbatim; the zero-tool Compactor runs once only if the skeleton still overflows (deterministic line-truncation fallback otherwise)</li>
-          <li><strong>Refreshes session bootstrap:</strong> compaction is a memory epoch — project memory is re-rendered from the ledger into the stable prefix</li>
+          <li><strong>Refreshes session bootstrap:</strong> the memory curator runs before compaction (folding what is about to be folded), then the bootstrap is re-rendered — new memory takes effect with the epoch</li>
           <li><strong>Use case:</strong> When approaching context limits or responses slow down, compress to restore smooth conversation</li>
         </ul>
 
@@ -1168,7 +1168,7 @@ TTS Data Flow:
             <tr><td><code>~/.codepapr/codepapr.sqlite</code></td><td>App-level settings, sessions, and cache statistics</td></tr>
             <tr><td><code>~/.codepapr/lsp-tools/</code></td><td>Managed LSP tool download cache (downloaded on first need, reused afterwards)</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>Project-level state, chat history, cache statistics</td></tr>
-            <tr><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code> <code>memory_entries</code></td><td>Cross-session project memory (panel is the only human surface; Bootstrap is rendered from the ledger)</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/MEMORY.md</code></td><td>Cross-session project memory (maintained by the memory curator; editable in the panel; injected into session bootstrap every turn)</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/skills</code></td><td>Project-level skill files</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/agents</code></td><td>Project-level sub-agent definitions</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/commands</code></td><td>Project-level custom commands</td></tr>
@@ -1284,7 +1284,7 @@ When a task requires public information, current facts, third-party API usage, o
             <tr><td><strong>compactor</strong></td><td>Second-level summary for compaction: merges the skeleton into one summary only when it still exceeds the budget (shared by between-turn / mid-loop / Goal / task sub-agents)</td><td><code>compactionModel</code> (fast/primary)</td><td>None (pure reasoning)</td></tr>
           </tbody>
         </table>
-        <p><small>Both internal agents are <code>internal: true</code>, invoked directly by the runtime: Verifier by the GoalRunner acceptance loop (dedicated budget: 6 tool rounds / 3-minute wall clock); Compactor by the compaction pipeline — zero tools (the transcript already contains all facts), no skills/memory/project-graph injection (bootstrap isolation), and the sub-agent default 20-minute wall clock. In v4 the main compaction path is the deterministic skeleton (zero LLM); the Compactor runs only as a single second-level summary, falling back to deterministic line truncation when the fast tier is selected but the fast model is disabled — never recursion.</small></p>
+        <p><small>All three internal agents are <code>internal: true</code>, invoked directly by the runtime: Verifier by the GoalRunner acceptance loop (dedicated budget: 6 tool rounds / 3-minute wall clock); Compactor by the compaction pipeline when the skeleton still overflows; Memory-curator by the memory pipeline at the delivery / pre-compaction checkpoints (its material never contains raw tool output). All three are zero-tool and get no skills/memory/project-graph injection (bootstrap isolation), with the sub-agent default 20-minute wall clock. In v4 the main compaction path is the deterministic skeleton (zero LLM); the Compactor runs only as a single second-level summary, falling back to deterministic line truncation when the fast tier is selected but the fast model is disabled — never recursion.</small></p>
 
         <h3>Custom Sub-agents</h3>
         <p>Declare a sub-agent in <code>.CodePapr/agents/&lt;name&gt;.md</code> with YAML frontmatter + body. The main agent can delegate subtasks to it. An agent with the same name will override the built-in definition.</p>
@@ -1953,24 +1953,23 @@ X-API-Key: your-api-key</code></pre>
           <thead><tr><th></th><th>Holds</th><th>Changes when</th><th>Cache</th></tr></thead>
           <tbody>
             <tr><td>01 System core</td><td>System prompt, tools, params, <code>AGENTS.md</code></td><td>Frozen for the session</td><td>Hit</td></tr>
-            <tr><td>02 Session bootstrap</td><td>Skills catalog, memory slice, long-term guidance</td><td>Memory: compact or new session</td><td>Hit</td></tr>
+            <tr><td>02 Session bootstrap</td><td>Skills catalog, memory section, long-term guidance</td><td>Next turn after MEMORY.md is saved</td><td>Usually a hit</td></tr>
             <tr><td>03 Session state</td><td>Checkpoint + retained recent turns</td><td>Rewritten on compaction</td><td>Hit within an epoch</td></tr>
-            <tr><td>04 Turn recall</td><td>Old experience retrieved this turn</td><td>New every user turn</td><td>Miss from here</td></tr>
-            <tr><td>05 This turn</td><td>Current user message + tool results</td><td>Append-only</td><td>Tail increment</td></tr>
+            <tr><td>04 This turn</td><td>Current user message + tool results</td><td>Append-only</td><td>Tail increment</td></tr>
           </tbody>
         </table>
 
         <h3>Cache Hit Patterns</h3>
         <div class="diagram">Multiple tool calls in the same user turn:
-  [01][02][03][04 this-turn recall][05 user + tools...]
-  → bytes before 04 stay still (hit); from 04 onward is this turn’s increment
+  [01][02][03][04 user + tools...]
+  → bytes 01–03 stay still (hit); 04 onward is this turn’s increment
 
 Next user turn:
-  [01][02][03][04 new recall][05 new user...]
-  → 01–03 still hit; 04 is replaced
+  [01][02][03][04 new user...]
+  → 01–03 still hit (while MEMORY.md is unchanged)
 
-After compaction:
-  03 is rewritten, and 02’s memory slice refreshes; one miss, then hits accumulate again
+After MEMORY.md is saved (or after compaction):
+  02 (with the memory section) / 03 are rewritten; one miss, then hits accumulate again
 </div>
 
         <h3>Key Invariants</h3>
@@ -1979,7 +1978,7 @@ After compaction:
           <li>Skills go into bootstrap, not the system prefix</li>
           <li>The workspace path only appears in the system prompt, not duplicated in bootstrap</li>
           <li>Custom guidance appears only once in bootstrap</li>
-          <li>Session bootstrap is cached per "session × stable signature"; new ledger writes / project graph do not trigger rebuilds</li>
+          <li>Session bootstrap follows the per-turn promptKey: MEMORY.md / skills / file changes rebuild once on the next turn (save now, effective next turn), otherwise it keeps hitting</li>
           <li>Per-turn dynamic content (date / diagnostics) is placed at the tail, not in the existing prefix</li>
         </ul>
 

@@ -217,6 +217,7 @@ Voice lives on the character panel. Full parameter list: `packages/@codepapr/cor
 | **mentor** | Architecture/algorithm guidance | Configurable independent model | None |
 | **verifier** *(internal)* | Goal acceptance — read-only audit of the Worker's work | `verifierModelTier` tier | read, grep, glob, list |
 | **compactor** *(internal)* | Context compaction — recoverable checkpoint generation | `compactionModel` tier | None (pure reasoning) |
+| **memory-curator** *(internal)* | Maintains `.CodePapr/MEMORY.md` at turn delivery / pre-compaction | `compactionModel` tier | None (pure reasoning) |
 
 The main Agent dispatches sub-agents via the `task` tool. Each sub-agent has an independent Session and only receives the delegated task description, free from history pollution. The main Agent's TodoList instructions encourage it to proactively delegate code analysis to Explore and web search to Scout.
 
@@ -289,31 +290,28 @@ The toolbar search box supports **conversation search** and **file search**, swi
 - Search results capped at 50; refine your query if truncated
 - Panel is **horizontally centered** in the viewport, 300ms debounced, only runs when the Files tab is active
 
-## Project Memory (zero-review auto-write)
+## Project Memory (MEMORY.md + memory curator)
 
-Layering and timing (the human-readable version): [`docs/web/context-architecture.en.html`](../web/context-architecture.en.html).
+Cross-session project memory is a single file in your workspace: **`.CodePapr/MEMORY.md`** (three sections: user preferences & constraints / tech stack & environment / architecture & known facts). It is readable, diffable, and can live in git; the memory panel is its editor.
 
-Project memory is not “dumped into the model as one blob”. The ledger in SQLite `memory_entries` is authoritative; the memory panel is the only human surface. Different kinds of memory enter **different context layers** and change on different clocks.
+**Who writes it**: the built-in memory curator (internal subagent, zero tools, fast tier) maintains it in the background at two checkpoints:
 
-| Kind | Stored in | Request layer | When it reaches this session’s model | How it changes |
-|---|---|---|---|---|
-| Hand-written notes | Ledger; panel “every session” | Session Bootstrap (stable prefix) | Rendered from the ledger at session start; refreshed on a compaction epoch | A panel edit hits the ledger immediately; **the current prefix is not rebuilt** until the next session or compaction |
-| Preferences / constraints / project facts | Ledger; panel “every session” | Same, Bootstrap | Same: written to the ledger this turn, enters the prefix on the **next Bootstrap refresh** | You said remember / must / don't (auto-extracted after the turn); workspace-grounded facts; successful tests → persist immediately as `[verified]`, no admit click |
-| Agent notes (`memory_write`) | Ledger; panel “on-demand” | Turn-scoped Recall / `memory_search` | **Next user turn** after save, if retrieval hits | Persisted immediately, no review, but always `[reported]` (unattested) and **never enters the fixed prefix**; the Agent must not claim it makes a fact visible every session |
-| Procedures (`procedure`) | Ledger; panel “on-demand” | Turn-scoped Recall / `memory_search` | **Next user turn** after save, if retrieval hits | Same error twice, etc.; never in the every-session prefix |
-| Web / MCP citations (`citation`) | Ledger; panel “search only” | `memory_search` only | Only if the model searches | web / MCP / `https` evidence; **never Bootstrap; auto-Recall skips them** |
-| Current-task goal / todos | Session Checkpoint | Session State | After compaction, as the checkpoint | Evolves with the epoch; **not** cross-session project memory |
-| Large tool output | `.CodePapr/tool-output/` | Not auto-injected | `read_artifact` on demand | Frozen at write time |
+| Checkpoint | When | Trigger |
+| --- | --- | --- |
+| Delivery | End of turn | Dual signal: the user's message contains a memory cue (“remember / must / never / always / convention…”) or the turn contains a verified test/build command |
+| Pre-compaction | Before any compaction commit (turn-end epoch, `/compact`, Goal, mid-loop) | Always runs, 20s timeout |
 
-**Writes (zero review)**: `planMemoryWrite` either persists or drops. The panel is a full catalog (every-session / on-demand / search-only, forget) — no admit queue. The Agent must not ask you to confirm memories. Injection, secrets, and dangerous commands are dropped. If the Agent still `write`s/`patch`es `.CodePapr/memory.md`, it is intercepted onto the same policy and never written to disk.
+The curator only sees the turn's user text and the assistant's final text (for compaction it sees the skeleton being folded) — **never raw tool output**. It returns the full file content or `NO_CHANGE`, and writes immediately.
 
-**Reads**: the ledger is not dumped into a request. Short instructions already sit in session bootstrap; every user turn (Ask included, capped at 3 items there) token-matches your message (~5 items / 1200 tokens, citations skipped); if that is not enough the Agent calls `memory_search` (includes citations; available in Ask). The catalog listing tool is `memory_list` (at most 40 previews). `memory_search` is not run on every message.
+**Mechanical guardrails**: secrets are redacted; injection instructions / dangerous commands / policy bypasses are rejected; files over 60 lines or ~2000 tokens are rejected; “no additions while dropping more than half the items” is treated as memory-washing and rejected; a concurrent edit causes a conflict, reload and retry from the panel.
 
-**Load and cache**: At session start, the ledger is rendered into Session Bootstrap (`log[0]`, `isPrefixSystem`), frozen per (session × stable signature). The rendered section is outside the signature, so newly saved memories **do not bust the current prefix cache**. Compaction epochs refresh via `refreshBootstrap`; a new session always re-reads the ledger. Each user turn also runs Recall (citations excluded from automatic Recall).
+**The Agent does not write memory**: `memory_write / memory_search / memory_list / memory_forget` are retired, and direct writes to `.CodePapr/MEMORY.md` by the Agent are intercepted and rejected. When the Agent finds a durable fact, it should state it in the answer for you to confirm; the curator folds it in on a later turn.
 
-**No cold-start summary**: directory structure and tech-stack overviews are not memorized — they are re-derivable on demand (subagents read the ProjectGraph cache directly). Memory stores one fact per entry; `reported` (agent self-reported) content over 400 characters is dropped.
+**Injection**: every turn reads the file and renders Session Bootstrap (no frozen ledger snapshot). A saved change takes effect **on the next turn** — if the file changed, the session prefix is rebuilt once (a one-time cache miss) in exchange for “save now, effective next turn”.
 
-**Dedup**: Same-hash rows are superseded; same-category paraphrases merge (char-bigram Jaccard ≥ 0.8 for short text, containment ≥ 0.85 with a length-ratio floor for long text); `cold-start-*` derived entries keep only the newest active row. Projects opened before this release collapse their legacy duplicates once, on first open. The panel also has “Clean duplicates” and multi-select forget. Recall applies the same paraphrase filter plus a 3-per-category cap.
+**Migration**: on first open, the legacy ledger is exported into a MEMORY.md seed (`confirmed + active` entries, deduped by content; skipped if the file already exists), then all memory tables are dropped. No manual work required.
+
+**Panel**: Context inspector → Memory tab. Editor with line/token budget bar, save button, and curator status line (idle / updated / rejected / failed / timed out).
 
 ## Code Intelligence (lsp / list)
 
@@ -574,7 +572,7 @@ If the Agent goes off track, hover the previous correct user message and click "
 | --- | --- |
 | `~/.codepapr/codepapr.sqlite` | Application-level settings |
 | `<workspace>/.CodePapr/project.sqlite` | Project-level state, chat history, cache stats |
-| `<workspace>/.CodePapr/project.sqlite` `memory_entries` | Cross-session project memory (panel is the only human surface; Bootstrap is rendered from the ledger) |
+| `<workspace>/.CodePapr/MEMORY.md` | Cross-session project memory (maintained by the memory curator; editable in the panel; injected into Session Bootstrap every turn) |
 | `<workspace>/.CodePapr/store` | Project-level text records |
 | `<workspace>/.CodePapr/skills` | Project-level skill files |
 | `<workspace>/.CodePapr/agents` | Project-level custom sub-agents |
@@ -678,7 +676,7 @@ One JSON object per line with common fields `{"v":1,"ts":<epoch ms>,"sessionId":
 
 These UI-bound capabilities are **explicitly unavailable** in the harness (fail fast +
 `tool.unsupported` event, never left to hang on the IPC timeout; also absent from the
-tool surface so the model cannot see them): the memory admission panel, app
+tool surface so the model cannot see them): app
 lifecycle/overlay (`app_render/app_publish/...`), project graph, and the WebView
 browser. `todo` (in-memory) and `question` (policy-driven) are the only locally
 answered interactive tools.

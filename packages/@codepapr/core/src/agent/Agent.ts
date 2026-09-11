@@ -36,7 +36,6 @@ import {
   IContextMessageView,
   ContextStage,
   CompactionTrigger,
-  RequestContextInsertion,
 } from '@codepapr/types';
 import { Logger, estimateTokens } from '@codepapr/common';
 import { PARALLEL_SAFE_TOOL_NAMES } from './agentConfig';
@@ -443,8 +442,6 @@ export interface IRequestBuilder {
     tools?: IToolDefinition[];
     /** 仅影响本次请求的临时尾部消息（不落日志）：用于 max_tokens 截断后的自动续写。 */
     suffixMessages?: IMessage[];
-    /** PR5（ADR-009 B3）：request-only 锚定插入（Recall Block），不落日志。 */
-    contextInsertions?: RequestContextInsertion[];
   }): IChatRequest;
   syncAfterPop?(appendLog: IAppendOnlyLog): void;
   resetLogTracking?(): void;
@@ -550,11 +547,6 @@ export class Agent {
   private compactionsThisChat = 0;
   private ineffectiveCompactions = 0;
   private compactionBlockedReported = false;
-  /** PR5（ADR-009 B3）：本回合 request-only 锚定插入（Recall Block）。 */
-  private contextInsertions: RequestContextInsertion[] = [];
-  /** 主线程 fallback 路径：memory_search 的 re-recall 每 chat 至多 push 一次
-   *  （与 worker 侧 `reRecallPushedThisChat` 对齐）。 */
-  private reRecallPushedThisChat = false;
   /** PR2：provider 实测的**入站总量**（usage.input_tokens + cache read +
    *  cache creation——各家 provider 的 input_tokens 都只报未命中缓存的新输入，
    *  直接当总量会低估一个数量级）与测量时的 log 长度。log 只在其后追加时用于
@@ -584,18 +576,7 @@ export class Agent {
   }
 
   /**
-   * PR5（ADR-009 第11条）：re-recall 追加插入——memory_search 触发的受控
-   * 例外，新 block 追加在旧 insertion 之后、user 消息之前（order 递增由
-   * 调用方控制，每 turn 至多一次由 worker 侧守卫）。request-only，不落日志。
-   */
-  pushContextInsertions(insertions: RequestContextInsertion[]): void {
-    this.contextInsertions.push(...insertions);
-  }
-
-  /**
-   * 剥离工具结果里的 request-only / UI 侧信道，避免进入 log。
-   * 主线程 fallback 在此注入 re-recall（worker 路径由 tool-response 注入，
-   * 到达此处时 reRecallInsertion 已被剥离，本方法是 no-op）。
+   * 剥离工具结果里的 UI 侧信道（子代理调用记录等），避免进入 log。
    */
   private consumeToolResultSideChannels(result: unknown): {
     contextResult: unknown;
@@ -605,12 +586,6 @@ export class Agent {
       return { contextResult: result };
     }
     const record = { ...(result as Record<string, unknown>) };
-    const insertion = record.reRecallInsertion as RequestContextInsertion | undefined;
-    if (insertion && !this.reRecallPushedThisChat) {
-      this.reRecallPushedThisChat = true;
-      this.pushContextInsertions([insertion]);
-    }
-    delete record.reRecallInsertion;
 
     let subagentToolInvocations: ISubagentToolInvocation[] | undefined;
     if ('__subagentToolInvocations' in record) {
@@ -639,8 +614,6 @@ export class Agent {
    * 换成摘要的旧工具全文。按全量字节估算会系统性高估一个数量级，导致每轮都判定
    * 超硬预算 → 压缩风暴（而压缩计划本身看不见图片，纸面缩容通过后立刻再触发）。
    *
-   * ADR-009 第15条：request-only 插入（Recall Block）不进 log 但随每次请求
-   * 发送，必须计入估算，否则预算决策会系统性低估。
    */
   private estimateContextTokens(): number {
     if (this.cachedPrefixTokens === undefined) {
@@ -648,7 +621,7 @@ export class Agent {
         Serializer.stringify(this.session.prefix.toJSON())
       );
     }
-    return this.cachedPrefixTokens + this.logWireTokens() + this.estimateInsertionTokens();
+    return this.cachedPrefixTokens + this.logWireTokens();
   }
 
   /** log 的上线口径 token（无 wire 计量能力时回落全量字节）。 */
@@ -702,15 +675,6 @@ export class Agent {
     }
   }
 
-  /** ADR-009 第15条：request-only 插入（Recall Block）的 token 估算。 */
-  private estimateInsertionTokens(): number {
-    if (this.contextInsertions.length === 0) return 0;
-    return this.contextInsertions.reduce(
-      (sum, insertion) => sum + estimateTokens(insertion.content),
-      0
-    );
-  }
-
   /**
    * PR2：请求形态的 7 阶段 token 分解（heuristic，供 decideContextBudgetAction）。
    *
@@ -759,8 +723,6 @@ export class Agent {
         retainedTailTokens,
         currentUserInputTokens,
         suffixTokens,
-        // ADR-009 第15条：request-only 插入（Recall Block）计入预算分解。
-        insertionTokens: this.estimateInsertionTokens(),
       },
       // 输出侧预留：请求的 max_tokens 是真实会占用的窗口额度，恒传 0 会让
       // 「输入刚好、输出撑爆」的形态一路放行到 provider 侧才溢出。
@@ -860,11 +822,7 @@ export class Agent {
     images?: IImageContent[],
     signal?: AbortSignal,
     /** PR1：主线程生成的 canonical user 消息 ID（ADR-009 前置）。 */
-    userMessageId?: string,
-    /** PR5（ADR-009 B3）：本回合 request-only 锚定插入（Recall Block），
-     *  tool loop 内字节稳定；mid-loop replaceLog 后仍存活（存 Agent 字段，
-     *  不进 log）。 */
-    contextInsertions?: RequestContextInsertion[]
+    userMessageId?: string
   ): Promise<IAgentResponse> {
     const controller = new AbortController();
     this.abortController = controller;
@@ -880,10 +838,6 @@ export class Agent {
     }
     const effectiveSignal = controller.signal;
     const userMsg = MessageFactory.user(userInput, images, userMessageId);
-    // PR5（ADR-009 B3）：turn-scoped 插入挂在 Agent 字段上（不进 log），
-    // 本回合所有 request build 复用；replaceLog（mid-loop 压缩）不清除。
-    this.contextInsertions = contextInsertions ?? [];
-    this.reRecallPushedThisChat = false;
 
     let finalContent = '';
     let finalReasoningContent: string | undefined;
@@ -1090,7 +1044,6 @@ export class Agent {
           maxTokens: params.maxTokens,
           tools: [...this.session.prefix.getToolDefinitions()],
           suffixMessages,
-          contextInsertions: this.contextInsertions,
         });
 
         onStreamEvent?.({

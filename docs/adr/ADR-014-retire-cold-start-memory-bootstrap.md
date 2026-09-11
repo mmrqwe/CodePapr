@@ -1,6 +1,6 @@
 # ADR-014: 冷启动记忆摘要退役与重复记忆收敛
 
-- 状态: Accepted
+- 状态: Superseded by [ADR-016](./ADR-016-memory-v5-memory-md.md)（账本整体退役；v9 迁移以一次性种子恢复冷启动式迁移）
 - 日期: 2026-09-11
 - 关联: [ADR-008](./ADR-008-memory-dual-zone.md)（双区）、[ADR-009](./ADR-009-memory-recall-b3.md)（Recall）、[ADR-010](./ADR-010-memory-zero-inbox.md)（零审核写入）
 

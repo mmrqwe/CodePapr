@@ -133,7 +133,7 @@ src-tauri/src/host.rs (RPC client)  shell/lsp/server/chat
 <tr><td><code>shell/*</code></td><td>17</td><td>execute · startBackground · openSession · sendCommand</td></tr>
 <tr><td><code>lsp/*</code></td><td>12</td><td>startServer · request · diagnostics · batchSymbols</td></tr>
 <tr><td><code>symbols/*</code></td><td>8</td><td>definition · references · hover · checkSyntax</td></tr>
-<tr><td><code>db/*</code></td><td>59</td><td>loadSettings · saveMessageBatch · memory* · paprStorage*</td></tr>
+<tr><td><code>db/*</code></td><td>45</td><td>loadSettings · saveMessageBatch · paprStorage*</td></tr>
 <tr><td><code>snapshot/*</code></td><td>11</td><td>ensure · create · diff · restorePlan · restoreExecute</td></tr>
 <tr><td><code>mcp/*</code></td><td>10</td><td>listTools · callTool · updateSettings · disconnectAll</td></tr>
 <tr><td><code>agent/*</code></td><td>5</td><td>start · send · stop · respondPermission</td></tr>
@@ -159,7 +159,7 @@ src-tauri/src/host.rs (RPC client)  shell/lsp/server/chat
 </div>
 <div class="tbl-wrap"><table><tr><th>Database</th><th>Path</th><th>Contents</th></tr>
 <tr><td>App DB</td><td><code>~/.codepapr/codepapr.sqlite</code></td><td>Global settings, provider/model, recent workspaces</td></tr>
-<tr><td>Project DB</td><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>Sessions, checkpoints, <code>memory_entries</code>, ProjectGraph cache</td></tr>
+<tr><td>Project DB</td><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>Sessions, checkpoints, ProjectGraph cache</td></tr>
 <tr><td>Papr App DB</td><td><code>&lt;appDir&gt;/db.sqlite</code></td><td>Key-value storage and inbox for one .papr app</td></tr>
 </table></div>
 <p class="note">All three are opened by <code>codepapr-core::db</code>, i.e. <strong>the host process writes them</strong> (app storage is the one in-process exception). Legacy <code>state.json</code>/<code>project.json</code> import into SQLite on first open or save.</p>
@@ -175,15 +175,15 @@ src-tauri/src/host.rs (RPC client)  shell/lsp/server/chat
 </section>
 <section class="sec" id="context">
 <h2>Context layering (TypeScript side)</h2>
-<p class="lead">Side effects are delegated to the host; prompt assembly and cache partitioning stay in <code>@codepapr/core</code> (TS side). Full detail: <code>docs/adr/ADR-001…011</code>.</p>
+<p class="lead">Side effects are delegated to the host; prompt assembly and cache partitioning stay in <code>@codepapr/core</code> (TS side). Full detail: <code>docs/adr/ADR-001…016</code>.</p>
 <div class="tbl-wrap"><table><tr><th>Layer</th><th>Holds</th><th>Changes when</th></tr>
 <tr><td>01 System core</td><td>System prompt, tool schemas, <code>AGENTS.md</code></td><td>Frozen for the session</td></tr>
-<tr><td>02 Session bootstrap</td><td>Skills catalog, plugin inbox summaries, project-memory slice</td><td>Compaction or new session</td></tr>
+<tr><td>02 Session bootstrap</td><td>Skills catalog, plugin inbox summaries, project memory (MEMORY.md)</td><td>Next turn after MEMORY.md is saved or compaction</td></tr>
 <tr><td>03 Session state</td><td>Checkpoint (task progress) + recent turns</td><td>Rewritten on compaction</td></tr>
 <tr><td>04 Turn recall</td><td>Retrieved procedures for this turn</td><td>New every user turn</td></tr>
 <tr><td>05 Active tail</td><td>Current user message, tool results</td><td>Append-only at the tail</td></tr>
 </table></div>
-<p class="note">Project memory is authoritative in the SQLite ledger (<code>memory_entries</code>); the panel is the only human surface. Short instructions enter 02; procedures enter 04 on demand; web/MCP citations surface only through <code>memory_search</code>, never auto-injected into the prefix.</p>
+<p class="note">Project memory is authoritative in the workspace file <code>.CodePapr/MEMORY.md</code>: the built-in memory curator maintains it at the delivery / pre-compaction checkpoints, and it is injected into 02 in full every turn (effective the next turn after saving); the Agent has no memory tools and direct writes are rejected. The panel is that file's editor.</p>
 </section>
 </div>
 <footer><div class="container">CodePapr · System architecture · <a href="index.en.html">Home</a> · <a href="tutorial.en.html">Tutorial</a> · <a href="tool-inventory.en.html">Tool inventory</a></div></footer>

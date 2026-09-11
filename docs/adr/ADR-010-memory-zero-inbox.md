@@ -1,6 +1,6 @@
 # ADR-010: 项目记忆零审核自动写入
 
-- 状态: Accepted
+- 状态: Superseded by [ADR-016](./ADR-016-memory-v5-memory-md.md)（账本写入门退役）
 - 日期: 2026-08-17
 - 关联: ADR-008（双区投影，已被 ADR-011 取代）、ADR-009（Recall）、[ADR-011](./ADR-011-retire-memory-md.md)（退役 memory.md）、[ADR-014](./ADR-014-retire-cold-start-memory-bootstrap.md)（退役冷启动摘要）
 

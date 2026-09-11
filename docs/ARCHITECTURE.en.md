@@ -1,7 +1,7 @@
 # CodePapr System Design
 
 > This revision is rewritten around the **host / client split**. Every claim below was checked against the tree at `c4597827c403e59d6ff0ae52f897a70f9feca685`.
-> TypeScript-side topics — context layering, memory, cache partitions, TodoList, sub-agents — live in `docs/adr/ADR-001` … `ADR-011`, `docs/web/context-architecture.en.html`, and `docs/USAGE.en.md`.
+> TypeScript-side topics — context layering, memory, cache partitions, TodoList, sub-agents — live in `docs/adr/ADR-001` … `ADR-016`, `docs/web/context-architecture.en.html`, and `docs/USAGE.en.md`.
 
 ## 1. Positioning
 
@@ -179,7 +179,7 @@ Two deliberate exceptions (the desktop crate has a direct path dependency on `co
 | `shell/*` | 17 | `shell` | `execute` `executeShell` `startBackground` `stopAllBackground` `openSession` `sendCommand` `readOutput` `listSessions` |
 | `lsp/*` | 12 | `lsp` / `lsp_managed_tools` | `startServer` `request` `openDocument` `diagnostics` `batchSymbols` `queryAvailability` `stopAll` |
 | `symbols/*` | 8 | `symbol_provider` / `lsp_fallback` | `definition` `references` `hover` `resolve` `extractFileSymbols` `checkSyntax` |
-| `db/*` | 59 | `db` | `loadSettings` `saveSettings` `settingsSaveState` `saveMessageBatch` `loadSessions` `saveProjectState` `saveProjectgraphCache` `memory*` `paprStorage*` |
+| `db/*` | 45 | `db` | `loadSettings` `saveSettings` `settingsSaveState` `saveMessageBatch` `loadSessions` `saveProjectState` `saveProjectgraphCache` `paprStorage*` |
 | `snapshot/*` | 11 | `snapshot` | `ensure` `create` `list` `diff` `changedFiles` `restorePlan` `restoreExecute` `restoreUndo` |
 | `mcp/*` | 10 | `mcp_host` / `mcp_sse` | `listTools` `callTool` `listStatus` `updateSettings` `confirmResponse` `disconnectAll` |
 | `agent/*` | 5 | `agent_runtime` | `start` `send` `stop` `stopAll` `respondPermission` |
@@ -233,12 +233,13 @@ Every SQLite database is opened by `codepapr-core::db`, i.e. **written by the ho
 | Database | Path | Contents |
 |---|---|---|
 | App DB | `~/.codepapr/codepapr.sqlite` | Global UI settings, provider / model / sampling parameters, characters, recent workspaces |
-| Project DB | `<workspace>/.CodePapr/project.sqlite` | Sessions and messages, project state, checkpoints, context surfaces, `memory_entries`, ProjectGraph cache |
+| Project DB | `<workspace>/.CodePapr/project.sqlite` | Sessions and messages, project state, checkpoints, context surfaces, ProjectGraph cache |
+| Project Memory | `<workspace>/.CodePapr/MEMORY.md` | Cross-session project memory (maintained by the memory curator; injected into Session Bootstrap every turn) |
 | Papr App DB | `<appDir>/db.sqlite` | Key-value storage and inbox for a single .papr app |
 
 Directory constants (`crates/codepapr-core/src/db/mod.rs`): `APP_DATA_DIR = ".codepapr"`, `APP_DB_FILE = "codepapr.sqlite"`, `PROJECT_STORAGE_DIR = ".CodePapr"`, `PROJECT_DB_FILE = "project.sqlite"`, `PAPR_APP_DB_FILE = "db.sqlite"`.
 
-Legacy `state.json` / `project.json` are imported into SQLite on first open or save; legacy `.CodePapr/memory.md` is folded into the ledger by `db/ingestLegacyMemoryMd` and then deleted ([ADR-011](./adr/ADR-011-retire-memory-md.md)).
+Legacy `state.json` / `project.json` are imported into SQLite on first open or save; the legacy memory ledger is exported into a `.CodePapr/MEMORY.md` seed (`confirmed + active` entries, skipped if the file exists) and retired by the v9 migration ([ADR-016](./adr/ADR-016-memory-v5-memory-md.md)).
 
 Settings flushing at exit is not a blind sleep — it polls the request / epoch counters returned by `db/settingsSaveState` (see §4.5).
 
@@ -360,7 +361,7 @@ A manifest may declare `command` / `args` / `port`. `app_runtime_pt2.rs` probes 
 | Host / client split decision | `docs/adr/ADR-012-host-client-split.md` |
 | App dual-scope decision | `docs/adr/ADR-013-app-install-scope.md` |
 | Context layering / Surface / compaction transaction / render freeze / checkpoint v3 | `docs/adr/ADR-001` … `ADR-007`, `docs/web/context-architecture.en.html` |
-| Project memory (dual zone → zero review → ledger as the only surface) | `docs/adr/ADR-008` … `ADR-011` |
+| Project memory (dual zone → zero review → ledger → v5 MEMORY.md file + curator) | `docs/adr/ADR-008` … `ADR-011`, `ADR-014`, `ADR-016` |
 | Installation, verification, release, troubleshooting | `docs/SETUP.en.md` |
 | Day-to-day usage and tool inventory | `docs/USAGE.en.md`, `docs/web/tool-inventory.en.html` |
 | Parameter reference | `packages/@codepapr/core/docs/CONFIGURATION.md` |

@@ -1365,13 +1365,13 @@ function buildToolConstraints(
         : '- [read_image] 读取图片文件（PNG/JPEG/WebP/GIF/SVG/ICO/AVIF）为 base64 编码，供多模态模型识别分析。使用 maxBytes 限制大小（默认 5MB）。若需查看网页/Canvas/游戏渲染画面，请先用 `browser(action: "open")` 打开并用 `browser(action: "screenshot")` 截图。'
     );
   }
-  if ((hasTool(toolNames, 'memory_write') || hasTool(toolNames, 'write')) && mode === 'agent') {
+  if (hasTool(toolNames, 'write') && mode === 'agent') {
     common.push(
       lang === 'en'
-        ? '- [Project Memory] Use `memory_write`. Saves to the memory ledger immediately — there is no memory.md file. The user browses and edits notes in the memory panel. Write when: ① project structure / tech stack / build-lint-test commands; ② the same error twice (`category: procedure`); ③ project-specific conventions; ④ the user asked you to remember (`preference` / `constraint`). Updating is a write: writing a near-paraphrase of an active entry replaces it (newest wins); pass `supersedesEntryId` to replace a specific entry (any category). Never forget-then-rewrite to correct a fact — forgotten entries cannot be revived by similar text, and confirmed entries (user-stated/tool-verified) cannot be overwritten by your writes; ask the user to fix those in the memory panel. Your own writes are recorded as unverified: they do NOT enter the fixed prefix of future sessions — only user-stated or tool-verified content does. Web/MCP excerpts must use `category: citation` and must never be stored as project rules. Do not record secrets or ephemeral task state.'
+        ? '- [Project Memory] Long-term project memory lives in `.CodePapr/MEMORY.md`, maintained automatically by the memory curator (at turn delivery and pre-compaction) and editable by the user in the memory panel. Do not try to write it yourself — direct writes are rejected. If you discover a durable fact (a user preference, a verified environment fact, a project convention), state it clearly in your final answer so the user can confirm it; the curator will fold it in.'
         : lang === 'zh-TW'
-        ? '- [項目記憶] 用 `memory_write` 寫入記憶帳本，沒有 memory.md。用戶在記憶面板瀏覽和手寫筆記。寫入場景：① 項目結構 / 技術棧 / 建置-lint-test 命令；② 同一錯誤踩兩次（`category: procedure`）；③ 項目約定；④ 用戶要求記住（`preference` / `constraint`）。寫即更新：寫入與既有 active 條目近義的新表述會替換舊條目（新者勝），傳 `supersedesEntryId` 可指名替換指定條目（跨類別允許）。更正事實不要「先 forget 再重寫」——已遺忘條目的近義表述不可復活，confirmed 條目（用戶原話/工具實證）你也改不動，只能請用戶在面板更正。你自報的內容按「未證實」入賬，不會進下次會話的固定前綴，只有用戶陳述或工具驗證的內容才會。網頁/MCP 摘錄必須用 `category: citation`，不得當成項目規定。不要記錄密鑰或臨時任務狀態。'
-        : '- [项目记忆] 用 `memory_write` 写入记忆账本，没有 memory.md。用户在记忆面板浏览和手写笔记。写入场景：① 项目结构 / 技术栈 / 构建-lint-test 命令；② 同一错误踩两次（`category: procedure`）；③ 项目约定；④ 用户要求记住（`preference` / `constraint`）。写即更新：写入与既有 active 条目近义的新表述会替换旧条目（新者胜），传 `supersedesEntryId` 可指名替换指定条目（跨类别允许）。更正事实不要「先 forget 再重写」——已遗忘条目的近义表述不可复活，confirmed 条目（用户原话/工具实证）你也改不动，只能请用户在面板更正。你自报的内容按「未证实」入账，不会进入下次会话的固定前缀，只有用户陈述或工具验证过的内容才会。网页/MCP 摘录必须用 `category: citation`，不得当成项目规定。不要记录密钥或临时任务状态。'
+        ? '- [項目記憶] 長期專案記憶位於 `.CodePapr/MEMORY.md`，由記憶管家在後台自動維護（回合交付 / 壓縮前兩個卡點），用戶也可在記憶面板直接編輯。不要嘗試自己寫入——直接寫入會被拒絕。若你發現了值得長期記住的事實（用戶偏好、驗證過的環境事實、專案約定），請在最終答覆中明確說明，讓用戶確認；管家會把它歸整進去。'
+        : '- [项目记忆] 长期项目记忆位于 `.CodePapr/MEMORY.md`，由记忆管家在后台自动维护（回合交付 / 压缩前两个卡点），用户也可在记忆面板直接编辑。不要尝试自己写入——直接写入会被拒绝。若你发现了值得长期记住的事实（用户偏好、验证过的环境事实、项目约定），请在最终答复中明确说明，让用户确认；管家会把它归整进去。'
     );
   }
   if (common.length > 0) {
@@ -1509,10 +1509,6 @@ export const DEFAULT_PROMPT_TOOL_NAMES = [...UI_TOOL_DEFAULTS];
 const PROMPT_KNOWN_TOOL_IDS: ReadonlySet<string> = new Set<string>([
   ...UI_TOOL_DEFAULTS,
   'graph',
-  'memory_write',
-  'memory_search',
-  'memory_forget',
-  'memory_list',
 ]);
 
 /**

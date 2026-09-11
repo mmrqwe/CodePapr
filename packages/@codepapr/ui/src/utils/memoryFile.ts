@@ -4,20 +4,18 @@
  * `.CodePapr/MEMORY.md` 是纯文本 Markdown 长期记忆，由后台 curator 子代理
  * 整存整取维护、用户在面板直接编辑。本模块负责全部文件侧契约：
  * - 读：注入文本 = 文件全文（写入端已封顶，注入侧永远全量，不再投影/检索）；
- * - 写：单飞队列串行化 + 「读时内容 hash 守卫」（并发会话防互相覆盖）+
- *   机械门（密钥 redact、注入风险、token/行数上限、未超限丢行检查）；
+ * - 写：单飞队列串行化 + 「读时内容守卫」（并发会话防互相覆盖）+
+ *   机械门（密钥 redact、注入风险、token/行数上限、无新增 mass-drop 检查）；
  *   校验不过 = 拒写并返回原因（curator 与面板保存共用同一道门）。
- * - 迁移：文件不存在且 SQLite 账本有 confirmed 条目时，确定性地生成种子
- *   文件（零 LLM、幂等），替代 ADR-011 时代被退役的 memory.md。
  *
  * 尺寸限制：MEMORY_MD_MAX_TOKENS 是唯一硬闸（约 8KB ≈ 60 行），curator 输出
- * 与手工保存共用；因此注入端不需要二次裁剪。
+ * 与手工保存共用；因此注入端不需要二次裁剪。旧账本 → 文件的 seed 迁移由
+ * Rust DB v9 迁移在打开项目时完成，TS 侧不再读账本。
  */
 
-import { estimateTokens, sha256 } from '@codepapr/common';
+import { estimateTokens } from '@codepapr/common';
 import { envelopeContent, redactSecrets } from '@codepapr/core';
 import { invoke } from '@tauri-apps/api/core';
-import { loadMemoryEntries, type PersistedMemoryEntry } from './projectStorage';
 
 export const MEMORY_MD_PATH = '.CodePapr/MEMORY.md';
 /** 写盘硬顶（估算口径）：注入预算与文件预算同源，注入端不再截断。 */
@@ -193,98 +191,35 @@ export async function requestMemoryMdWrite(
   return await queued;
 }
 
-// ── 迁移：SQLite 账本 → MEMORY.md 种子 ────────────────────────────────
+// ── 旧账本 → MEMORY.md 的种子迁移：由 Rust DB v9 迁移完成（打开项目时执行）。
+// TS 侧只读文件，不再承担迁移。
 
-const CATEGORY_GROUPS: Record<'preferences' | 'stack' | 'facts', ReadonlySet<string>> = {
-  preferences: new Set(['preference', 'constraint']),
-  stack: new Set(['verification', 'convention', 'decision', 'api']),
-  facts: new Set(['fact', 'procedure', 'general', 'citation', 'user-note']),
-};
-
-/** 账本条目 → 分组 Markdown。仅收 confirmed & active（与旧 Bootstrap 投影同口径）。 */
-export function buildSeedFromLedgerEntries(entries: readonly PersistedMemoryEntry[], lang: MemoryMdLang): string {
-  const c = copy(lang);
-  const groups: Record<'preferences' | 'stack' | 'facts', string[]> = { preferences: [], stack: [], facts: [] };
-  for (const entry of entries) {
-    if (entry.status !== 'active' || entry.confidence !== 'confirmed') continue;
-    const content = redactSecrets(entry.content).replace(/\s+/g, ' ').trim();
-    if (!content) continue;
-    const group = CATEGORY_GROUPS.preferences.has(entry.category)
-      ? 'preferences'
-      : CATEGORY_GROUPS.stack.has(entry.category)
-        ? 'stack'
-        : 'facts';
-    if (!groups[group].includes(content)) groups[group].push(content);
-  }
-  const render = (heading: string, items: string[]) =>
-    items.length > 0 ? [heading, ...items.map((item) => `- ${item}`)] : [];
-  const lines = [
-    c.title,
-    ...render(c.preferences, groups.preferences),
-    ...render(c.stack, groups.stack),
-    ...render(c.facts, groups.facts),
-  ];
-  return `${lines.join('\n')}\n`;
-}
-
-let migrationInFlight: Map<string, Promise<void>> | null = null;
-
-/**
- * 注入内容源：读 MEMORY.md；文件缺失且账本有 confirmed 条目 → 生成种子
- * （幂等：skipIfExists 防并发重复迁移）。返回 null = 无记忆可注入。
- */
 export function toMemoryMdLang(lang?: string): MemoryMdLang {
   return lang === 'en' ? 'en' : lang === 'zh-TW' ? 'zh-TW' : 'zh-CN';
 }
 
-export async function loadMemorySectionForPrompt(
-  workspacePath: string,
-  lang?: string
-): Promise<string | null> {
-  const workspace = workspacePath.trim();
-  const mdLang = toMemoryMdLang(lang);
-  const content = await readMemoryMd(workspace);
-  if (content !== null) {
-    const trimmed = content.trim();
-    return trimmed || null;
-  }
-  // 迁移：账本 → 种子。失败/空账本 → 无记忆。
-  if (!migrationInFlight) migrationInFlight = new Map();
-  const pending = migrationInFlight.get(workspace);
-  if (pending) {
-    await pending;
-    const after = await readMemoryMd(workspace);
-    return after?.trim() || null;
-  }
-  const task = (async () => {
-    try {
-      const entries = await loadMemoryEntries(workspace, true);
-      const confirmed = entries.filter((entry) => entry.confidence === 'confirmed');
-      if (confirmed.length === 0) return;
-      const seed = buildSeedFromLedgerEntries(confirmed, mdLang);
-      if (estimateTokens(seed) > MEMORY_MD_MAX_TOKENS) {
-        // 超顶种子不写（宁可无记忆也不截断丢约束）；留给面板/curator 处理。
-        return;
-      }
-      await requestMemoryMdWrite(workspace, seed, {
-        expectedContent: null,
-        origin: 'migration',
-        skipIfExists: true,
-      });
-    } catch (err) {
-      console.warn('[memory-md] 账本迁移失败:', err instanceof Error ? err.message : err);
-    } finally {
-      migrationInFlight?.delete(workspace);
-    }
-  })();
-  migrationInFlight.set(workspace, task);
-  await task;
-  const after = await readMemoryMd(workspace);
-  return after?.trim() || null;
+/** 注入内容源：读 MEMORY.md。返回 null = 无记忆可注入。 */
+export async function loadMemorySectionForPrompt(workspacePath: string): Promise<string | null> {
+  const content = await readMemoryMd(workspacePath.trim());
+  return content?.trim() || null;
 }
 
-/** 内容 hash（审计/测试用；写守卫用原文比对，不依赖此函数）。 */
-export async function memoryMdHash(workspacePath: string): Promise<string | null> {
-  const content = await readMemoryMd(workspacePath);
-  return content === null ? null : await sha256(content.trim());
+// ── 写入拦截（workspace write/patch/diff 共用） ──────────────────────
+
+/**
+ * 归一化路径后与记忆文件比对：账本时代的 `.CodePapr/memory.md` 与 v5 的
+ * `.CodePapr/MEMORY.md` —— lowercase 后同串，一个比较覆盖两个名字
+ * （APFS 大小写不敏感，二者本就互斥共存于同一文件名槽位）。
+ */
+export function isMemoryFilePath(relativePath: string): boolean {
+  const normalized = relativePath
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .replace(/\/{2,}/g, '/')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+  return normalized === '.codepapr/memory.md';
 }
+
+export const MEMORY_WRITE_INTERCEPT_NOTE =
+  '项目记忆文件（.CodePapr/MEMORY.md）由记忆管家与用户在面板维护，Agent 直接写入已被拒绝。若你刚发现值得长期记住的事实，请在最终答复中明确说明，让用户在「上下文检查器 → 项目记忆」里确认。';

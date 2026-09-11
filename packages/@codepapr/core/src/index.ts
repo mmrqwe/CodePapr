@@ -501,21 +501,5 @@ export type {
   ContentRiskFlag,
   ContentEnvelope,
   EnvelopeInput,
-  MemoryAdmissionResult,
-  MemoryKind,
-  MemoryWriteDecision,
 } from "./context/ContentEnvelope";
-export {
-  envelopeContent,
-  redactSecrets,
-  planMemoryAdmission,
-  planMemoryWrite,
-  normalizeMemoryKind,
-  memoryProjectsToBootstrap,
-  memoryEntryProjectsToBootstrap,
-  MEMORY_CONTENT_MAX_CHARS,
-  MEMORY_CONTENT_MIN_CHARS,
-  MEMORY_REPORTED_MAX_CHARS,
-  MEMORY_KINDS,
-  BOOTSTRAP_EXCLUDED_MEMORY_KINDS,
-} from "./context/ContentEnvelope";
+export { envelopeContent, redactSecrets } from "./context/ContentEnvelope";

@@ -1,6 +1,6 @@
 # ADR-011: 退役 memory.md，账本 + 面板为唯一记忆面
 
-- 状态: Accepted
+- 状态: Superseded by [ADR-016](./ADR-016-memory-v5-memory-md.md)（记忆回到单一 MEMORY.md 文件 + 管家；账本退役）
 - 日期: 2026-08-18
 - 关联: 取代 [ADR-008](./ADR-008-memory-dual-zone.md) 的双区文件投影；保留 [ADR-010](./ADR-010-memory-zero-inbox.md) 的零审核写入与 [ADR-009](./ADR-009-memory-recall-b3.md) 的 Recall
 

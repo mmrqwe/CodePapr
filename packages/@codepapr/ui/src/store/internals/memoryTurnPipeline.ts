@@ -56,7 +56,7 @@ function record(
     trigger,
   });
   if (outcome.kind === 'rejected' || outcome.kind === 'failed') {
-    console.info(
+    console.warn(
       '[memory-curator] %s 卡点 %s: %s%s',
       workspacePath.trim(),
       trigger,

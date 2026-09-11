@@ -987,118 +987,40 @@ describe('useAgentStore.sendMessage', () => {
     ).toHaveLength(0);
   });
 
-  it('PR5：回合级 Recall 集成——检索 → 锚定插入 → 审计归档', async () => {
-    const invokeCalls: string[] = [];
+  it('v5：MEMORY.md 每回合读入并注入会话 Bootstrap（废账本与 Recall）', async () => {
+    const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
-      invokeCalls.push(command);
+      invokeCalls.push({ command, args });
       if (command === 'list_workspace_files') {
         return { root: '', entries: [], truncated: false };
       }
       if (command === 'read_text_file') {
+        if (args?.relativePath === '.CodePapr/MEMORY.md') {
+          return { path: '.CodePapr/MEMORY.md', content: '- 用户偏好中文回复', bytes: 24 };
+        }
         return { path: String(args?.relativePath), content: '', bytes: 0 };
-      }
-      if (command === 'search_memory_for_recall') {
-        return [
-          {
-            id: 'e1',
-            source: 'stable-memory',
-            title: 'verification',
-            content: 'pnpm test auth 通过',
-            confidence: 'confirmed',
-            trust: 'workspace',
-            score: 40,
-            sessionId: null,
-            messageIds: null,
-            verifiedAt: 1,
-          },
-        ];
       }
       return undefined;
     });
+    const chat = vi.fn(async () => createAgentResponse('回复'));
+    createAgentMock.mockImplementation(() => createMockAgent({ chat }));
 
-    const chatCalls: unknown[][] = [];
-    const chat = vi.fn(async (...args: unknown[]) => {
-      chatCalls.push(args);
-      return createAgentResponse('回复');
-    });
-    useAgentStore.setState((state) => ({
-      ...state,
-      _agent: createMockAgent({ chat: chat as never }),
-      _agentModel: 'deepseek-v4-pro',
-      _agentSessionId: 'session-1',
-    }));
+    await useAgentStore.getState().openWorkspace('/tmp/memory-md-workspace');
+    await useAgentStore.getState().sendMessage('你好', '你好', 'agent');
 
-    await useAgentStore.getState().sendMessage('pnpm test auth 情况', 'pnpm test auth 情况', 'agent');
+    // 每回合直读文件（无冻结缓存、无 recall 检索 IPC）。
+    expect(
+      invokeCalls.some(
+        (c) => c.command === 'read_text_file' && c.args?.relativePath === '.CodePapr/MEMORY.md'
+      )
+    ).toBe(true);
+    expect(invokeCalls.some((c) => c.command === 'search_memory_for_recall')).toBe(false);
 
-    // Bootstrap 从账本渲染，不再 sync memory.md；Recall 仍先检索再插入。
-    expect(invokeCalls).toContain('search_memory_for_recall');
-
-    // Recall Block 作为 anchored insertion 传给 agent.chat（第 5 参）。
-    const insertions = chatCalls[0]?.[4] as
-      | Array<{ anchorMessageId?: string; placement?: string; source?: string }>
+    // 文件内容进入会话 Bootstrap（createAgent 第 6 参 runtime.sessionBootstrapPrompt）。
+    const runtimeArg = createAgentMock.mock.calls.at(-1)?.[5] as
+      | { sessionBootstrapPrompt?: string }
       | undefined;
-    expect(insertions).toBeDefined();
-    expect(insertions![0]?.source).toBe('memory-recall');
-    expect(insertions![0]?.placement).toBe('before');
-    expect(typeof insertions![0]?.anchorMessageId).toBe('string');
-
-    // 审计：检索落库，回合结束归档（fire-and-forget，等待完成）。
-    expect(invokeCalls).toContain('save_memory_recall');
-    await vi.waitFor(() => expect(invokeCalls).toContain('archive_memory_recall'));
-  });
-
-  it('M5：ask 模式同样跑只读 Recall（锚定插入 + 审计归档）', async () => {
-    const invokeCalls: string[] = [];
-    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
-      invokeCalls.push(command);
-      if (command === 'list_workspace_files') {
-        return { root: '', entries: [], truncated: false };
-      }
-      if (command === 'read_text_file') {
-        return { path: String(args?.relativePath), content: '', bytes: 0 };
-      }
-      if (command === 'search_memory_for_recall') {
-        return [
-          {
-            id: 'e1',
-            source: 'stable-memory',
-            title: 'fact',
-            category: 'fact',
-            content: '测试框架是 vitest',
-            confidence: 'confirmed',
-            trust: 'workspace',
-            score: 40,
-            sessionId: null,
-            messageIds: null,
-            verifiedAt: 1,
-          },
-        ];
-      }
-      return undefined;
-    });
-
-    const chatCalls: unknown[][] = [];
-    const chat = vi.fn(async (...args: unknown[]) => {
-      chatCalls.push(args);
-      return createAgentResponse('回复');
-    });
-    useAgentStore.setState((state) => ({
-      ...state,
-      _agent: createMockAgent({ chat: chat as never }),
-      _agentModel: 'deepseek-v4-pro',
-      _agentSessionId: 'session-1',
-    }));
-
-    await useAgentStore.getState().sendMessage('测试框架是啥', '测试框架是啥', 'ask');
-
-    expect(invokeCalls).toContain('search_memory_for_recall');
-    const insertions = chatCalls[0]?.[4] as
-      | Array<{ source?: string; content?: string }>
-      | undefined;
-    expect(insertions?.[0]?.source).toBe('memory-recall');
-    expect(insertions?.[0]?.content).toContain('vitest');
-    expect(invokeCalls).toContain('save_memory_recall');
-    await vi.waitFor(() => expect(invokeCalls).toContain('archive_memory_recall'));
+    expect(runtimeArg?.sessionBootstrapPrompt).toContain('用户偏好中文回复');
   });
 
   it('persists the recent workspace path after opening a workspace', async () => {

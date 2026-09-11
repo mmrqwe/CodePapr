@@ -12,12 +12,7 @@
  */
 
 import { BUILTIN_AGENTS, type AgentDefinition } from '@codepapr/core';
-import {
-  buildCompactorDefinition,
-  resolveEffectiveCompactorTier,
-  runCompactorSession,
-  type CompactorModelTier,
-} from './compactorRunner';
+import { resolveEffectiveCompactorTier, runCompactorSession } from './compactorRunner';
 import {
   requestMemoryMdWrite,
   validateMemoryMdContent,

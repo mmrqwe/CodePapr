@@ -1,4 +1,4 @@
-import { errorMessage, estimateTokens } from '@codepapr/common';
+import { errorMessage } from '@codepapr/common';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../toastStore';
 import {
@@ -20,7 +20,6 @@ import {
   serializeGoalState,
   GoalConditionParseError,
   renderTodoListDigest,
-  buildSkillCatalogSignature,
 } from '@codepapr/core';
 import type {
   IAgentResponse,
@@ -51,7 +50,6 @@ import {
   type ExecutedToolSummary,
 } from '../../utils/agentExecution';
 import { getTodoListContext, convergeSessionTodoListAtTurnEnd, openTodoCreationWindow } from '../../tools/todoListRegistry';
-import { getActiveCharacterPrompt } from '../charactersStore';
 import { loadMcpToolDefinitions } from '../../tools/mcpTools';
 import { isReasoningPlaceholderEcho } from '@codepapr/api';
 import {
@@ -77,30 +75,9 @@ import {
   markCompactionInFlight,
   verifyCompactionLanded,
 } from './contextSurfaceStore';
-import { refreshMemoryLedgerProjection } from './memoryLedgerStore';
 import { runPreCompactCurator, scheduleDeliveryCuratorForTurn } from './memoryTurnPipeline';
 import { loadMemorySectionForPrompt } from '../../utils/memoryFile';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
-import {
-  buildRecallInsertion,
-  buildRecallQuery,
-  filterAutoRecallItems,
-  renderRecallBlock,
-  resolveRecallBudget,
-  selectDiverseRecallItems,
-  RETRIEVAL_STRATEGY,
-  RETRIEVAL_VERSION,
-} from '../../utils/memoryRecall';
-import { CONTEXT_COMPACTION_SOFT_BUDGET_RATIO } from '../../utils/contextCompaction';
-import { effectiveMaxContextTokens } from '../../utils/contextLimits';
-import { isModelVisibleUiMessage } from '../../utils/contextSurface';
-import {
-  archiveMemoryRecall,
-  saveMemoryRecall,
-  searchMemoryForRecall,
-} from '../../utils/projectStorage';
-import { drainReRecallAuditIds } from '../../tools/memoryTools';
-import type { RequestContextInsertion } from '@codepapr/types';
 import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
 import { runVerifierSubagent } from '../../utils/verifierRunner';
 import { useGoalStore } from '../goalStore';
@@ -116,7 +93,7 @@ interface CommandResult {
   timedOut: boolean;
 }
 
-import { normalizeSettings, getSettingsError, resolveProviderName } from './settingsNormalizer';
+import { normalizeSettings, getSettingsError } from './settingsNormalizer';
 import { addConversationRuntime, addConversationStats, addTierRuntimeMs, getSessionConversationStats } from './stats';
 import { maybeApplySessionTitle, touchSession } from './persistence';
 import { saveCurrentProjectState } from './projectSnapshot';
@@ -144,7 +121,6 @@ import { useAppRuntimeStore } from '../appRuntimeStore';
 import {
   buildPublishCatalogSection,
   collectPublishCatalogTargets,
-  publishCatalogSignature,
 } from '../../papr/pluginPublishCatalog';
 import {
   AgentRuntimeConfig,
@@ -153,11 +129,6 @@ import {
   createMainThreadAgent,
   getAgentMessagesSince,
 } from './agentFactory';
-import {
-  invalidateSessionBootstrap,
-  primeSessionBootstrap,
-  resolveSessionBootstrap,
-} from './sessionBootstrapCache';
 import { shouldUseSidecarAgentRuntime } from './providerFactory';
 import { maybeGenerateContextCheckpoint } from './contextCheckpoint';
 import { handleWorkspaceMutation } from './backgroundDiagnostics';
@@ -225,9 +196,6 @@ function currentTodoDigest(sessionId: string | null): string | undefined {
   if (!ctx || ctx.tasks.length === 0) return undefined;
   return renderTodoListDigest(ctx);
 }
-
-// Session-bootstrap cache lives in sessionBootstrapCache.ts（sendMessage 与
-// agentFactory 的 mid-loop 刷新共享同一份状态，刷新点见该模块头注释）。
 
 /** 切工作区：放下在飞守卫。旧回合的 finally 也会再清一次，幂等。 */
 export function resetSendMessageWorkspaceGuards(): void {
@@ -353,26 +321,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         // （agent 创建前）无法取消任何在飞请求，只能递增该序号；本回合在
         // 每个前置 await 之后检查序号变化即终止。
         const stopSeqAtStart = get()._stopRequestedSeq;
-        // 本回合的 Recall 审计行 id（try 内赋值）：catch 路径也要归档，
-        // 声明提升到 try 外（ADR-009 生命周期：turn 结束 → archived）。
-        let recallRecordId: string | undefined;
-        /** ADR-009 生命周期收尾：归档回合 Recall 与 re-recall 审计行。
-         *  成功/取消/出错路径都必须执行，否则审计行永久停留 active。
-         *  幂等：归档后置空，重复调用无副作用。 */
-        const archiveTurnRecalls = (sessionId: string | null): void => {
-          const ws = turnWorkspacePath || get().workspacePath;
-          if (!ws) return;
-          if (recallRecordId) {
-            void archiveMemoryRecall(ws, recallRecordId).catch(() => undefined);
-            recallRecordId = undefined;
-          }
-          if (sessionId) {
-            for (const id of drainReRecallAuditIds(sessionId)) {
-              void archiveMemoryRecall(ws, id).catch(() => undefined);
-            }
-          }
-        };
-
         let effectiveInput = input;
         let effectiveDisplay = displayContent;
         let slashCommandModelHint: 'primary' | 'fast' | undefined;
@@ -741,10 +689,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   const compactAgentOwner = get()._agentSessionId;
                   const compactTurnInFlight =
                     get().isLoading && get().loadingSessionId === compactSessionId;
-                  // 压缩即 epoch 变化：丢掉回合首冻结的 bootstrap 缓存条目，
-                  // 下一发送重算并带上当时账本里已确认的记忆（文档承诺
-                  // 「压缩 epoch 刷新」）。
-                  invalidateSessionBootstrap(compactSessionId);
                   if (compactAgent && compactAgentOwner === compactSessionId && !compactTurnInFlight) {
                     try {
                       // 可能在跑 app-agent（papr.agent.run，不占 isLoading）：
@@ -1226,7 +1170,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // Cache not available - proceed without
           }
           const memorySection = workspacePath
-            ? (await loadMemorySectionForPrompt(workspacePath, normalizedSettings.lang)) ?? undefined
+            ? (await loadMemorySectionForPrompt(workspacePath)) ?? undefined
             : undefined;
           ensureNotStopped();
           let mcpToolDefinitions: IToolDefinition[] = [];
@@ -1388,10 +1332,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               model: route.model,
             }
           );
-          // Signature of the STABLE bootstrap inputs. Volatile ledger memory is
-          // deliberately excluded so memory writes/forgets don't rebuild the
-          // agent and break the prefix cache; compaction epochs re-render and
-          // prime the cache instead (sessionBootstrapCache.ts).
+          // v5：每回合直读 MEMORY.md 重算 Bootstrap（无冻结缓存）。文件没变
+          // → promptKey 相同 → 复用 agent；文件变了 → promptKey 变化 → 下回合
+          // 重建（一次性前缀 miss，换取「保存即下回合生效」）。
           // Enabled-plugin inbox catalog is included (like skills): toggling a
           // publish target must refresh the session prefix on the next send.
           const publishTargets = collectPublishCatalogTargets(useAppRuntimeStore.getState());
@@ -1399,25 +1342,13 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             publishTargets,
             normalizedSettings.lang ?? 'zh-CN',
           );
-          const bootstrapSignature = [
-            runtimeSystemPrompt,
-            buildSkillCatalogSignature(skillDefinitions),
-            normalizedSettings.systemPrompt ?? '',
-            normalizedSettings.experimentalCharacters ? (getActiveCharacterPrompt(mode) ?? '') : '',
-            publishCatalogSignature(publishTargets),
-          ].join('\u0000');
-          const runtimeSessionBootstrapPrompt = resolveSessionBootstrap(
-            turnSessionId,
-            bootstrapSignature,
-            () =>
-              buildAgentSessionBootstrapPrompt(
-                normalizedSettings,
-                workspacePath,
-                skillDefinitions,
-                memorySection,
-                pluginsSection,
-                mode,
-              )
+          const runtimeSessionBootstrapPrompt = buildAgentSessionBootstrapPrompt(
+            normalizedSettings,
+            workspacePath,
+            skillDefinitions,
+            memorySection,
+            pluginsSection,
+            mode,
           );
           // Inject the frozen, memory-containing bootstrap so the main agent's
           // log[0] actually carries ledger-rendered memory. The factory prefers
@@ -1425,9 +1356,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // (agentFactory.ts); without this the computed bootstrap above is used
           // only as a cache key and memory never reaches the primary agent.
           runtimeAgentConfig.sessionBootstrapPrompt = runtimeSessionBootstrapPrompt;
-          // mid-loop 压缩刷新 bootstrap 后按同一 signature 写回缓存
-          //（agentFactory.buildBootstrapRefresher），后续重建拿到的才是刷新版。
-          runtimeAgentConfig.sessionBootstrapSignature = bootstrapSignature;
           const runtimePromptKey = [
             runtimeSystemPrompt,
             runtimeSessionBootstrapPrompt,
@@ -1696,105 +1624,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           );
           await yieldToMainThread();
 
-          // PR5（ADR-009 B3）：turn-scoped Recall —— 每用户回合检索一次，
-          // 同一 tool loop 复用同一 Recall Block（request-only 锚定插入，
-          // 不进 log/surface/archive messages；审计记录存 memory_recalls）。
-          // 检索失败静默：本回合不带 Recall，不阻塞发送。
-          // M5：Ask 模式同样只读 Recall（预算减半），写入门径由工具门控。
-          let recallInsertions: RequestContextInsertion[] | undefined;
-          if (userMsg?.id && workspacePath) {
-            try {
-              const queryTokens = buildRecallQuery(effectiveDisplay ?? effectiveInput ?? '');
-              // ADR-009 第10条：软预算紧张时 recallBudget = min(configured,
-              // remainingSoftBudget * 0.20)；预算过低则跳过本轮 Recall。
-              const softBudgetTokens = Math.floor(
-                effectiveMaxContextTokens(normalizedSettings, resolveProviderName(normalizedSettings)) *
-                  CONTEXT_COMPACTION_SOFT_BUDGET_RATIO
-              );
-              // 真实上下文占用 = 文本 + 工具结果 + checkpoint 渲染文本 +
-              // reasoning。只按 content 估算会系统性低估（工具回合里
-              // content 往往为空），软预算紧张时仍会硬塞 Recall。
-              const currentContextTokens = get()
-                .sessionMessages[activeSessionId]
-                ?.filter(isModelVisibleUiMessage)
-                .reduce(
-                  (sum, message) => {
-                    let tokens = estimateTokens(message.content ?? '');
-                    if (message.reasoningContent) {
-                      tokens += estimateTokens(message.reasoningContent);
-                    }
-                    for (const invocation of message.toolInvocations ?? []) {
-                      tokens += estimateTokens(
-                        invocation.contextContent ?? invocation.output ?? invocation.error ?? ''
-                      );
-                    }
-                    const checkpoint = message.contextCheckpoint;
-                    if (checkpoint && 'renderedContent' in checkpoint) {
-                      tokens += estimateTokens(checkpoint.renderedContent ?? '');
-                    }
-                    return sum + tokens;
-                  },
-                  0
-                ) ?? 0;
-              const recallBudget = resolveRecallBudget({
-                remainingSoftBudgetTokens: softBudgetTokens - currentContextTokens,
-              });
-              if (!recallBudget) {
-                console.warn(
-                  `[recall] 软预算紧张（剩余 ${Math.max(0, softBudgetTokens - currentContextTokens)} token），跳过本轮 Recall`
-                );
-              } else {
-                // 多取一些候选再选多样性：同源改述被过滤后不至于凑不满槽位。
-                const items = selectDiverseRecallItems(
-                  filterAutoRecallItems(
-                    await searchMemoryForRecall(workspacePath, {
-                      tokens: queryTokens,
-                      limit: 16,
-                    })
-                  )
-                );
-                if (items.length > 0) {
-                  const block = renderRecallBlock(items, {
-                    lang: normalizedSettings.lang,
-                    maxTokens: recallBudget.maxTokens,
-                    // Ask 只读模式预算收紧：条数减半，够回答「项目背景」类问题即可。
-                    maxItems: mode === 'ask' ? Math.min(recallBudget.maxItems, 3) : recallBudget.maxItems,
-                  });
-                  if (block) {
-                    const recallId = createId();
-                    recallInsertions = [
-                      buildRecallInsertion({
-                        recallId,
-                        anchorMessageId: userMsg.id,
-                        renderedBlock: block,
-                      }),
-                    ];
-                    recallRecordId = recallId;
-                    await saveMemoryRecall(workspacePath, {
-                      id: recallId,
-                      workspaceId: workspacePath,
-                      sessionId: activeSessionId!,
-                      anchorMessageId: userMsg.id,
-                      queryText: queryTokens.join(' '),
-                      renderedContent: block,
-                      itemsJson: JSON.stringify(items),
-                      estimatedTokens: estimateTokens(block),
-                      retrievalStrategy: RETRIEVAL_STRATEGY,
-                      retrievalVersion: RETRIEVAL_VERSION,
-                      createdAt: Date.now(),
-                    }).catch(() => undefined);
-                  }
-                }
-              }
-            } catch (err) {
-              // Recall 检索失败静默降级（不带 Recall 发送），但留痕便于诊断。
-              console.warn(
-                '[recall] 检索失败，本轮不带 Recall:',
-                err instanceof Error ? err.message : err
-              );
-            }
-          }
-
           const runAgentPass = async (
             passInput: string,
             passImages?: import('@codepapr/types').IImageContent[],
@@ -1970,7 +1799,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               if (event.type === 'tool-call-end' && typeof event.durationMs === 'number') {
                 passToolRuntimeMs += event.durationMs;
               }
-            }, passImages, passUserMessageId ?? userMsg?.id, recallInsertions);
+            }, passImages, passUserMessageId ?? userMsg?.id);
 
             accumulatedStats = accumulateCacheStats(accumulatedStats, response.cacheStats);
             turnModelRuntimeMs += passModelRuntimeMs;
@@ -2145,7 +1974,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // （绝不产出无记忆前缀的新 epoch）。
             let epochBootstrap = runtimeSessionBootstrapPrompt;
             try {
-              const epochMemorySection = (await loadMemorySectionForPrompt(workspacePath, normalizedSettings.lang)) ?? undefined;
+              const epochMemorySection = (await loadMemorySectionForPrompt(workspacePath)) ?? undefined;
               epochBootstrap = buildAgentSessionBootstrapPrompt(
                 normalizedSettings,
                 workspacePath,
@@ -2158,7 +1987,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               // keep frozen turn-start bootstrap
             }
             if (epochBootstrap !== runtimeSessionBootstrapPrompt) {
-              primeSessionBootstrap(sid, bootstrapSignature, epochBootstrap);
               runtimeAgentConfig.sessionBootstrapPrompt = epochBootstrap;
             }
             const epochPromptKey = [runtimeSystemPrompt, epochBootstrap]
@@ -2794,25 +2622,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // Worker 运行时回到常态（若随后产生检查点，下面会以 Worker 重建）。
             set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
           }
-          // 回合结束：已验证命令 / 用户原话 → persist。必须在压缩评估之前
-          // await 完成：本回合新确认的记忆要能赶上压缩 epoch 的 Bootstrap
-          // 冻结（纯账本写入，无 LLM 调用，不显著延长回合）。
-          if (activeSessionId && get().workspacePath === workspacePath) {
-            try {
-              await refreshMemoryLedgerProjection(
-                workspacePath,
-                activeSessionId,
-                get().sessionMessages[activeSessionId] ?? []
-              );
-            } catch {
-              // Silent fail - don't disrupt the session
-            }
-          }
           // v5 卡点 1（交付）：双信号门 curator，fire-and-forget。只切「本回合」
           // 消息——历史里的旧「必须…」线索不该每回合重复触发。
           if (activeSessionId && get().workspacePath === workspacePath) {
             const turnHistory = get().sessionMessages[activeSessionId] ?? [];
-            const turnAnchorIndex = userMsg ? turnHistory.findIndex((m) => m.id === userMsg.id) : -1;
+            const anchorId = userMsg?.id;
+            const turnAnchorIndex = anchorId
+              ? turnHistory.findIndex((m) => m.id === anchorId)
+              : -1;
             scheduleDeliveryCuratorForTurn({
               workspacePath,
               turnMessages:
@@ -2858,7 +2675,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           }
           // PR5（ADR-009 B3/第11条）：回合结束归档 Recall 与 re-recall 审计行
           // （request-only，不再随后续回合注入；审计记录保留在 memory_recalls）。
-          archiveTurnRecalls(activeSessionId);
           // TodoList 兜底收敛：守卫提醒后模型仍未同步时，把无在飞回合的 running
           // 退回 pending（不伪造 completed），随下面的 saveCurrentProjectState 落盘。
           if (activeSessionId && get()._turnSeq === turnSeq) {
@@ -2869,9 +2685,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           console.error('[sendMessage] outer catch:', err);
           // 以本回合捕获的会话为准收尾（用户可能已切换到别的会话）。
           const sid = turnSessionId ?? get().activeSessionId;
-          // 取消/出错同样要归档 Recall 审计行（ADR-009 生命周期），
-          // 否则 memory_recalls 永久停留 active、reRecallAuditIds 泄漏。
-          archiveTurnRecalls(sid);
           // 销毁（AgentDestroyedError）与取消等价：用户切会话/新建/改设置导致
           // agent 被销毁时，回合必须安静停止——既不重跑（旧实现把销毁误当
           // WorkerCrashError 重建重跑，bash/git commit 等副作用重复执行），

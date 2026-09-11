@@ -18,35 +18,13 @@ import {
   MEMORY_MD_MAX_LINES,
   MEMORY_MD_MAX_TOKENS,
   MEMORY_MD_PATH,
-  buildSeedFromLedgerEntries,
   loadMemorySectionForPrompt,
-  readMemoryMd,
   requestMemoryMdWrite,
   validateMemoryMdContent,
 } from './memoryFile';
-import type { PersistedMemoryEntry } from './projectStorage';
 
 function fileContent(content: string | null): { content: string | null } {
   return { content };
-}
-
-function entry(over: Partial<PersistedMemoryEntry>): PersistedMemoryEntry {
-  return {
-    id: 'e1',
-    category: 'fact',
-    content: '事实内容',
-    contentHash: 'h',
-    confidence: 'confirmed',
-    trust: 'trusted',
-    status: 'active',
-    sourceSessionId: null,
-    sourceMessageIds: null,
-    evidence: null,
-    createdAt: 1,
-    verifiedAt: 1,
-    supersededBy: null,
-    ...over,
-  };
 }
 
 beforeEach(() => {
@@ -177,51 +155,16 @@ describe('requestMemoryMdWrite', () => {
   });
 });
 
-describe('buildSeedFromLedgerEntries', () => {
-  it('只收 confirmed+active，按 category 分三节，去重', () => {
-    const md = buildSeedFromLedgerEntries(
-      [
-        entry({ category: 'constraint', content: '以后都使用 pnpm' }),
-        entry({ category: 'verification', content: '[bash] ✓ pnpm test' }),
-        entry({ category: 'fact', content: '鉴权在 src/auth/' }),
-        entry({ category: 'reported', content: '重复', confidence: 'reported' as PersistedMemoryEntry['confidence'] }),
-        entry({ category: 'fact', content: '已遗忘', status: 'forgotten' }),
-        entry({ category: 'fact', content: '鉴权在 src/auth/' }),
-      ],
-      'zh-CN'
-    );
-    expect(md).toContain('## 用户偏好与约束\n- 以后都使用 pnpm');
-    expect(md).toContain('## 技术栈与环境约束\n- [bash] ✓ pnpm test');
-    expect(md).toContain('## 架构与业务已知事实\n- 鉴权在 src/auth/');
-    expect(md.match(/鉴权在 src\/auth\//g)).toHaveLength(1);
-    expect(md).not.toContain('已遗忘');
-    expect(md).not.toContain('重复');
-  });
-});
-
-describe('loadMemorySectionForPrompt', () => {
+describe('loadMemorySectionForPrompt（纯文件；账本 seed 已由 Rust v9 迁移承担）', () => {
   it('文件存在 → 直接返回全文（trim）', async () => {
     invokeMock.mockImplementation(async (cmd) => (cmd === 'read_text_file' ? fileContent('# 记忆\n- a\n') : {}));
-    expect(await loadMemorySectionForPrompt('/ws', 'zh-CN')).toBe('# 记忆\n- a');
-    expect(loadMemoryEntriesMock).not.toHaveBeenCalled();
+    expect(await loadMemorySectionForPrompt('/ws')).toBe('# 记忆\n- a');
   });
 
-  it('文件缺失 + 账本有条目 → 迁移写种子并返回', async () => {
-    let written = '';
-    loadMemoryEntriesMock.mockResolvedValue([entry({ category: 'preference', content: '别写客套话' })]);
-    invokeMock.mockImplementation(async (cmd, args) => {
-      if (cmd === 'read_text_file') return fileContent(written || null);
-      if (cmd === 'write_text_file') written = String(args?.content ?? '');
-      return {};
-    });
-    const section = await loadMemorySectionForPrompt('/ws-migrate-1', 'zh-CN');
-    expect(section).toContain('别写客套话');
-    expect(written).toContain('## 用户偏好与约束');
-  });
-
-  it('文件与账本皆空 → null，且不写盘', async () => {
+  it('文件缺失 → null，且不写盘（不读账本）', async () => {
     invokeMock.mockImplementation(async (cmd) => (cmd === 'read_text_file' ? fileContent(null) : {}));
-    expect(await loadMemorySectionForPrompt('/ws-migrate-2', 'zh-CN')).toBeNull();
+    expect(await loadMemorySectionForPrompt('/ws-empty')).toBeNull();
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'write_text_file')).toBe(false);
+    expect(loadMemoryEntriesMock).not.toHaveBeenCalled();
   });
 });

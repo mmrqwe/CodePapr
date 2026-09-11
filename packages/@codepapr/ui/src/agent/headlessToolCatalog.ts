@@ -35,10 +35,6 @@ export const HEADLESS_UI_BOUND_EXCLUDED: ReadonlySet<string> = new Set([
   'app_stop',
   'app_delete',
   'app_publish',
-  'memory_write',
-  'memory_search',
-  'memory_forget',
-  'memory_list',
 ]);
 
 export interface HeadlessToolCatalogOptions {

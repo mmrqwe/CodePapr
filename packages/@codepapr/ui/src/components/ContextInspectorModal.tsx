@@ -1,7 +1,7 @@
 import { useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import type { ContextStage, IContextMessageView, IContextSnapshot } from '@codepapr/types';
 import { getTranslation, type Lang } from '../utils/i18n';
-import { MemoryLedgerPanel } from './MemoryLedgerPanel';
+import { MemoryFilePanel } from './MemoryFilePanel';
 
 interface ContextInspectorModalProps {
   snapshot: IContextSnapshot;
@@ -500,7 +500,7 @@ export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose, 
                       : 'text-fg-muted hover:text-fg-soft'
                   }`}
                 >
-                  {t.memoryLedgerTab}
+                  {t.memoryFileTitle}
                 </button>
               </span>
             ) : null}
@@ -527,7 +527,7 @@ export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose, 
         </div>
 
         {activeTab === 'memory' && workspacePath ? (
-          <MemoryLedgerPanel workspacePath={workspacePath} lang={lang} />
+          <MemoryFilePanel workspacePath={workspacePath} lang={lang} />
         ) : (
           <></>
         )}
@@ -614,19 +614,6 @@ export function ContextInspectorModal({ snapshot, lang, workspacePath, onClose, 
             ) : (
               <span className="text-[11px] text-fg-dim">{t.contextSurfaceNoCompaction}</span>
             )}
-            {snapshot.memoryRecall ? (
-              <span className="text-[11px] text-fg-muted">
-                {t.contextMemoryRecall}{' '}
-                <span className="font-mono text-fg-soft">
-                  {snapshot.memoryRecall.items.length} 项 ·{' '}
-                  {formatTokens(snapshot.memoryRecall.estimatedTokens)} {t.tokensUnit}
-                </span>{' '}
-                <span className="font-mono text-fg-dim">
-                  ({snapshot.memoryRecall.status} · {snapshot.memoryRecall.query.slice(0, 40)}
-                  {snapshot.memoryRecall.query.length > 40 ? '…' : ''})
-                </span>
-              </span>
-            ) : null}
           </div>
         ) : null}
 

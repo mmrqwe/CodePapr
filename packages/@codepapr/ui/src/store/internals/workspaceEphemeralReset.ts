@@ -6,7 +6,6 @@
  */
 import { resetSubagentProgress } from '../../utils/subagentProgress';
 import { clearAllTodoListContexts } from '../../tools/todoListRegistry';
-import { clearAllReRecallAuditIds } from '../../tools/memoryTools';
 import { clearLanguageIntelligenceWorkspace } from '../../utils/languageIntelligence';
 import { clearAppPosters } from '../../papr/appChannelHub';
 import { useGoalStore } from '../goalStore';
@@ -26,7 +25,6 @@ export function resetWorkspaceEphemeralState(previousWorkspacePath: string): voi
   usePreviewStore.getState().closePreviewSession();
   useBrowserViewStore.getState().setPageSession(null);
   useBrowserViewStore.getState().closePanel();
-  clearAllReRecallAuditIds();
   cancelBackgroundWorkspaceWork();
   clearAppPosters();
   if (previousWorkspacePath) {

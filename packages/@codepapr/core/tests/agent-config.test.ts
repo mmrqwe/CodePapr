@@ -153,10 +153,6 @@ describe('agentConfig - filterToolsForMode', () => {
     tool('app_publish'),
     tool('question'),
     tool('task'),
-    tool('memory_write'),
-    tool('memory_search'),
-    tool('memory_forget'),
-    tool('memory_list'),
   ];
 
   it('ask 模式：移除变更类工具、写类 app 工具与 question，保留只读工具 + task + 只读 git + 只读 app_list', () => {
@@ -165,17 +161,7 @@ describe('agentConfig - filterToolsForMode', () => {
       'git',
       'app_list',
       'task',
-      'memory_search',
-      'memory_list',
     ]);
-  });
-
-  it('ask 模式：记忆变更工具被屏蔽，只读 memory_search/memory_list 保留（ADR-008）', () => {
-    const names = filterToolsForMode(all, 'ask').map((t) => t.name);
-    expect(names).not.toContain('memory_write');
-    expect(names).not.toContain('memory_forget');
-    expect(names).toContain('memory_search');
-    expect(names).toContain('memory_list');
   });
 
   it('ask 模式：app_publish（写 app db）被屏蔽', () => {
@@ -186,14 +172,6 @@ describe('agentConfig - filterToolsForMode', () => {
     for (const mode of ['agent', 'plan', 'app'] as const) {
       expect(filterToolsForMode(all, mode).map((t) => t.name)).toContain('app_publish');
     }
-  });
-
-  it('agent 模式：记忆工具全部可用', () => {
-    const names = filterToolsForMode(all, 'agent').map((t) => t.name);
-    expect(names).toContain('memory_write');
-    expect(names).toContain('memory_search');
-    expect(names).toContain('memory_forget');
-    expect(names).toContain('memory_list');
   });
 
   it('plan 模式：有变更工具 + question + 只读 app_list，无 app 渲染/生命周期工具', () => {

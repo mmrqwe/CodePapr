@@ -130,17 +130,23 @@ describe('promptSystem', () => {
     expect(prompt).toContain('webfetch');
   });
 
-  it('includes write constraint with project memory in agent mode', () => {
+  it('v5：记忆指导走 Bootstrap（MEMORY.md 由记忆管家维护），系统提示不再教 memory_write', () => {
     const prompt = buildRuntimeSystemPrompt({
       mode: 'agent',
       workspacePath: '/tmp/project',
       lang: 'zh-CN',
       toolNames: ['write'],
     });
-    expect(prompt).toContain('项目记忆');
-    expect(prompt).toContain('memory_write');
-    expect(prompt).toContain('记忆账本');
-    expect(prompt).not.toContain('常规发现');
+    expect(prompt).not.toContain('memory_write');
+    expect(prompt).not.toContain('记忆账本');
+
+    const bootstrap = buildSessionBootstrapPrompt({
+      workspacePath: '/tmp/project',
+      lang: 'zh-CN',
+      memorySection: '- 用户偏好中文回复',
+    });
+    expect(bootstrap).toContain('## 项目记忆');
+    expect(bootstrap).toContain('- 用户偏好中文回复');
   });
 
   it('does NOT include project memory in ask mode even with write tool', () => {

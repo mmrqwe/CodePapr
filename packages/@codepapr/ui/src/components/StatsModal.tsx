@@ -193,7 +193,7 @@ export function StatsModal({
               />
             ) : (
               <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10 text-sm text-fg-muted">
-                {contextLoading ? t.memoryLedgerLoading : t.contextInspectorEmpty}
+                {contextLoading ? t.contextLoading : t.contextInspectorEmpty}
               </div>
             )}
           </div>

@@ -49,24 +49,6 @@ describe('MessageFactory.tool', () => {
     expect(msg.toolResult!.result).toBe('plain text result');
   });
 
-  it('strips reRecallInsertion from tool result (ADR-009 rule 13)', () => {
-    const result = {
-      query: 'oauth',
-      results: '- [verified] oauth 回调需注册',
-      reRecallInsertion: {
-        anchorMessageId: 'user-1',
-        renderedMessages: [{ role: 'user', content: 'RECALL BLOCK SECRET' }],
-      },
-    };
-    const msg = MessageFactory.tool('call-1', result, true);
-
-    const stored = msg.toolResult!.result as Record<string, unknown>;
-    expect(stored.reRecallInsertion).toBeUndefined();
-    expect(stored.query).toBe('oauth');
-    expect(msg.content).not.toContain('RECALL BLOCK SECRET');
-    expect(msg.content).not.toContain('reRecallInsertion');
-  });
-
   it('handles nested __images in arrays', () => {
     const result = {
       items: [

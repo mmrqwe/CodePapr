@@ -180,7 +180,7 @@ CLI 侧（`crates/codepapr-cli/src/rpc_client.rs`）同构：`--server` → TCP�
 | `shell/*` | 17 | `shell` | `execute` `executeShell` `startBackground` `stopAllBackground` `openSession` `sendCommand` `readOutput` `listSessions` |
 | `lsp/*` | 12 | `lsp` / `lsp_managed_tools` | `startServer` `request` `openDocument` `diagnostics` `batchSymbols` `queryAvailability` `stopAll` |
 | `symbols/*` | 8 | `symbol_provider` / `lsp_fallback` | `definition` `references` `hover` `resolve` `extractFileSymbols` `checkSyntax` |
-| `db/*` | 59 | `db` | `loadSettings` `saveSettings` `settingsSaveState` `saveMessageBatch` `loadSessions` `saveProjectState` `saveProjectgraphCache` `memory*` `paprStorage*` |
+| `db/*` | 45 | `db` | `loadSettings` `saveSettings` `settingsSaveState` `saveMessageBatch` `loadSessions` `saveProjectState` `saveProjectgraphCache` `paprStorage*` |
 | `snapshot/*` | 11 | `snapshot` | `ensure` `create` `list` `diff` `changedFiles` `restorePlan` `restoreExecute` `restoreUndo` |
 | `mcp/*` | 10 | `mcp_host` / `mcp_sse` | `listTools` `callTool` `listStatus` `updateSettings` `confirmResponse` `disconnectAll` |
 | `agent/*` | 5 | `agent_runtime` | `start` `send` `stop` `stopAll` `respondPermission` |
@@ -234,12 +234,13 @@ Agent 流式输出走同一条通道：`agent/start` 拿到 `runtimeId`，之后
 | 库 | 路径 | 内容 |
 |---|---|---|
 | App DB | `~/.codepapr/codepapr.sqlite` | 全局 UI 设置、provider / model / 采样参数、角色、最近工作区 |
-| Project DB | `<workspace>/.CodePapr/project.sqlite` | 会话与消息、项目状态、checkpoint、context surface、`memory_entries`、ProjectGraph 缓存 |
+| Project DB | `<workspace>/.CodePapr/project.sqlite` | 会话与消息、项目状态、checkpoint、context surface、ProjectGraph 缓存 |
+| Project Memory | `<workspace>/.CodePapr/MEMORY.md` | 跨会话项目记忆（记忆管家维护；每回合注入 Session Bootstrap） |
 | Papr App DB | `<appDir>/db.sqlite` | 单个 .papr 应用的键值存储与 inbox |
 
 目录常量（`crates/codepapr-core/src/db/mod.rs`）：`APP_DATA_DIR = ".codepapr"`、`APP_DB_FILE = "codepapr.sqlite"`、`PROJECT_STORAGE_DIR = ".CodePapr"`、`PROJECT_DB_FILE = "project.sqlite"`、`PAPR_APP_DB_FILE = "db.sqlite"`。
 
-旧版 `state.json` / `project.json` 在首次打开或保存时导入 SQLite；旧版 `.CodePapr/memory.md` 由 `db/ingestLegacyMemoryMd` 收进账本后删除（[ADR-011](./adr/ADR-011-retire-memory-md.md)）。
+旧版 `state.json` / `project.json` 在首次打开或保存时导入 SQLite；旧版记忆账本在 v9 迁移时把 `confirmed + active` 条目导出为 `.CodePapr/MEMORY.md` 种子（文件已存在则跳过）后整表退役（[ADR-016](./adr/ADR-016-memory-v5-memory-md.md)）。
 
 退出时的设置落盘不靠“盲等”，而是轮询 `db/settingsSaveState` 返回的 requests / epoch 计数（见 §4.5）。
 
@@ -361,7 +362,7 @@ manifest 可声明 `command` / `args` / `port`。`app_runtime_pt2.rs` 先探测�
 | 宿主 / 客户端拆分决策 | `docs/adr/ADR-012-host-client-split.md` |
 | App 双作用域决策 | `docs/adr/ADR-013-app-install-scope.md` |
 | 上下文分层 / Surface / 压缩事务 / 渲染参数冻结 / checkpoint v3 | `docs/adr/ADR-001` … `ADR-007`、`docs/web/context-architecture.html` |
-| 项目记忆（双区 → 零审核 → 账本唯一面 → 摘要退役与重复收敛） | `docs/adr/ADR-008` … `ADR-011`、`ADR-014` |
+| 项目记忆（双区 → 零审核 → 账本 → v5 MEMORY.md 文件 + 管家） | `docs/adr/ADR-008` … `ADR-011`、`ADR-014`、`ADR-016` |
 | 安装、验证、发布与排错 | `docs/SETUP.md` |
 | 日常使用与工具清单 | `docs/USAGE.md`、`docs/web/tool-inventory.html` |
 | 参数参考 | `packages/@codepapr/core/docs/CONFIGURATION.md` |

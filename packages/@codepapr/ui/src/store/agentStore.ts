@@ -29,7 +29,6 @@ import {
   aggregateSessionRuntimeInDb,
   waitForPendingProjectStateSave,
   loadContextCompactions,
-  loadLatestMemoryRecall,
   archiveSessionById,
   restoreSessionById,
   loadArchivedSessions as loadArchivedSessionsFromDb,
@@ -100,7 +99,6 @@ import {
 import type { AgentRuntimeHandle } from '../agent/WorkerBackedAgent';
 import { handleWorkspaceMutation } from './internals/backgroundDiagnostics';
 import { createSendMessage, invalidateAgentHandle, isTurnInFlight, resetSendMessageWorkspaceGuards } from './internals/sendMessage';
-import { clearSessionBootstrapCache } from './internals/sessionBootstrapCache';
 import { resetWorkspaceEphemeralState } from './internals/workspaceEphemeralReset';
 import { loadMemorySectionForPrompt } from '../utils/memoryFile';
 import { finalizeCancelledToolInvocations } from './internals/messageMutators';
@@ -369,7 +367,7 @@ async function ensureAgentForAppInternal(
 
   let memorySection: string | undefined;
   try {
-    memorySection = (await loadMemorySectionForPrompt(workspacePath, normalizedSettings.lang)) ?? undefined;
+    memorySection = (await loadMemorySectionForPrompt(workspacePath)) ?? undefined;
   } catch {
     memorySection = undefined;
   }
@@ -622,7 +620,6 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         const previousPath = get().workspacePath;
         if (previousPath !== path) {
           resetWorkspaceEphemeralState(previousPath);
-          clearSessionBootstrapCache();
           resetSendMessageWorkspaceGuards();
         }
         set((s) => {
@@ -649,7 +646,6 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
         openWorkspaceSeq += 1;
         disposeWorkspaceAgents(get);
         resetWorkspaceEphemeralState(previousPath);
-        clearSessionBootstrapCache();
         resetSendMessageWorkspaceGuards();
         set(createWorkspaceResetPatch(''));
         syncActiveCharacterFromSession(null);
@@ -1128,7 +1124,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
 
         let memorySection: string | undefined;
         try {
-          memorySection = (await loadMemorySectionForPrompt(workspacePath, normalizedSettings.lang)) ?? undefined;
+          memorySection = (await loadMemorySectionForPrompt(workspacePath)) ?? undefined;
         } catch {
           memorySection = undefined;
         }
@@ -1246,50 +1242,6 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
           };
         } catch {
           // surface 观测失败不阻塞上下文快照
-        }
-
-        // PR5：最新一次 Recall 审计（items 从 items_json 解析）。
-        try {
-          const recall = await loadLatestMemoryRecall(workspacePath, activeSessionId);
-          if (recall) {
-            let items: Array<{
-              title: string;
-              source: string;
-              confidence: string;
-              score: number;
-            }> = [];
-            try {
-              const parsed: unknown = JSON.parse(recall.itemsJson);
-              if (Array.isArray(parsed)) {
-                items = parsed
-                  .filter(
-                    (item): item is { title: string; source: string; confidence: string; score: number } =>
-                      !!item &&
-                      typeof item === 'object' &&
-                      typeof (item as Record<string, unknown>).title === 'string'
-                  )
-                  .map((item) => ({
-                    title: item.title,
-                    source: String(item.source ?? ''),
-                    confidence: String(item.confidence ?? ''),
-                    score: Number(item.score ?? 0),
-                  }))
-                  .slice(0, 8);
-              }
-            } catch {
-              items = [];
-            }
-            snapshot.memoryRecall = {
-              recallId: recall.id,
-              query: recall.queryText,
-              estimatedTokens: recall.estimatedTokens,
-              createdAt: recall.createdAt,
-              status: recall.status,
-              items,
-            };
-          }
-        } catch {
-          // Recall 观测失败不阻塞上下文快照
         }
 
         set({ _latestContextSnapshot: { sessionId: activeSessionId, snapshot } });

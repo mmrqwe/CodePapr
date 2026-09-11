@@ -21,7 +21,6 @@ import {
 import { registerWorkspaceTools, type WorkspaceMutationListener } from '../tools/workspaceTools';
 
 import { registerMcpTools } from '../tools/mcpTools';
-import { registerMemoryTools } from '../tools/memoryTools';
 import { registerTodoListTools } from '../tools/todoListTool';
 import { getTodoListContext } from '../tools/todoListRegistry';
 import { mcpSearchHidesNativeWeb } from '../utils/mcpTypes';
@@ -37,7 +36,6 @@ import {
   type AppAgentPayload,
   type AppAgentResult,
 } from './agentWorkerProtocol';
-import type { RequestContextInsertion } from '@codepapr/types';
 import {
   startSubagentProgress,
   pushSubagentStep,
@@ -148,9 +146,7 @@ export interface AgentRuntimeHandle {
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
     images?: IImageContent[],
     /** PR1：主线程生成的 canonical user 消息 ID（ADR-009 前置）。 */
-    userMessageId?: string,
-    /** PR5（ADR-009 B3）：request-only 锚定插入（Recall Block）。 */
-    contextInsertions?: RequestContextInsertion[]
+    userMessageId?: string
   ): Promise<IAgentResponse>;
   getSession(): { logStore: AppendOnlyLog };
   cancel(): void;
@@ -249,9 +245,6 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
   const minimalSurface = config.settings.agentToolProfile === 'minimal';
   if (!minimalSurface) {
     registerTodoListTools(registry, config.sessionId);
-
-    // Memory 工具（ADR-008 PR4）：memory_write/search/forget/list。
-    registerMemoryTools(registry, config.workspacePath, config.sessionId);
 
     registerMcpTools(registry, config.settings.mcp, config.runtime.mcpToolDefinitions ?? [], config.runtime.mcpToolMappings, config.workspacePath);
   }
@@ -689,8 +682,7 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
     userInput: string,
     onStreamEvent?: (event: AgentRuntimeStreamEvent) => void,
     images?: IImageContent[],
-    userMessageId?: string,
-    contextInsertions?: RequestContextInsertion[]
+    userMessageId?: string
   ): Promise<IAgentResponse> {
     if (this.destroyed) {
       // 已被销毁的 agent 拒绝新回合：用 AgentDestroyedError（而非
@@ -735,7 +727,6 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
       ...(incrementalSync ? { incrementalSync } : {}),
       userInput,
       ...(userMessageId ? { userMessageId } : {}),
-      ...(contextInsertions && contextInsertions.length > 0 ? { contextInsertions } : {}),
       todoSnapshot: getTodoListContext(sessionId) ?? null,
       images,
       settings: this.config.settings,
@@ -1165,27 +1156,13 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
           if (appAgentEntry) {
             this.armAppAgentIdleTimer(message.requestId);
           }
-          // PR5（ADR-009 第11条）：memory_search 的结果可能携带 re-recall
-          // insertion，随 tool-response 下发给 worker push 进本回合 insertions。
-          // 第13条：insertion 本体必须从工具结果中剥离后再回传，否则会被
-          // stringify 进 tool 消息，泄漏到 AppendOnlyLog / archive / checkpoint。
-          let reRecallInsertion: RequestContextInsertion | undefined;
-          let cleanedResult = result;
-          if (result && typeof result === 'object' && 'reRecallInsertion' in result) {
-            const { reRecallInsertion: extracted, ...rest } = result as {
-              reRecallInsertion?: RequestContextInsertion;
-            } & Record<string, unknown>;
-            reRecallInsertion = extracted;
-            cleanedResult = rest;
-          }
           this.postToWorker({
             type: 'tool-response',
             payload: {
               requestId: message.requestId,
               toolRequestId: message.toolRequestId,
               success: true,
-              result: cleanedResult,
-              ...(reRecallInsertion ? { reRecallInsertion } : {}),
+              result,
             },
           } satisfies MainToAgentWorkerMessage);
         })

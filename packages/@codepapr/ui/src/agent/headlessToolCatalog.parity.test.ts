@@ -1,6 +1,6 @@
 /**
  * Parity guard：headless harness 的工具目录必须与桌面注册表（
- * registerWorkspaceTools + todo + memory，经 agentFactory 相同的
+ * registerWorkspaceTools + todo，经 agentFactory 相同的
  * FilteringToolRegistry 包装）逐 mode 一致，仅差评测边界内明确豁免的
  * UI-bound 工具集。桌面新增/调整可见工具而未同步 catalog 时，本测试
  * 必须失败。
@@ -23,7 +23,6 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
 import { registerWorkspaceTools } from '../tools/workspaceTools';
 import { registerTodoListTools } from '../tools/todoListTool';
-import { registerMemoryTools } from '../tools/memoryTools';
 import { createDefaultMcpSettings, mcpSearchHidesNativeWeb } from '../utils/mcpTypes';
 import type { McpSettings } from '../utils/mcpTypes';
 import {
@@ -66,7 +65,6 @@ function desktopVisibleNames(testCase: Case): string[] {
     disableWebSearchTools: testCase.mcpSearchEnabled,
   });
   registerTodoListTools(inner, 's1');
-  registerMemoryTools(inner, '/tmp/ws', 's1');
   return inner
     .getLlmTools()
     .map((tool) => tool.name)
@@ -95,7 +93,7 @@ function mcpSettingsWithSearch(searchOn: boolean): McpSettings {
 }
 
 /** 桌面极简路径的镜像：registerWorkspaceTools（含 mode 过滤）→ 跳过
- *  todo/memory（与 WorkerBackedAgent/agentFactory 一致）→ applyMinimalToolProfile。
+ *  todo（与 WorkerBackedAgent/agentFactory 一致）→ applyMinimalToolProfile。
  *  与生产同源调用 mcpSearchHidesNativeWeb（N1：minimal 下 MCP 不加载，web 不被替代）。 */
 function desktopMinimalNames(testCase: Case): string[] {
   const inner: ToolRegistry = isReadOnlyMode(testCase.mode)
@@ -135,7 +133,7 @@ describe('headlessToolCatalog ↔ desktop registry parity', () => {
     });
   }
 
-  it('harness 永不暴露 app-only / memory 工具（评测边界）', () => {
+  it('harness 永不暴露 app-only 工具（评测边界）', () => {
     for (const mode of ['ask', 'plan', 'agent'] as const) {
       const names = catalogNames({ mode, multimodalEnabled: true, mcpSearchEnabled: false });
       for (const excluded of HEADLESS_UI_BOUND_EXCLUDED) {
@@ -151,13 +149,13 @@ describe('headlessToolCatalog ↔ desktop registry parity', () => {
         .map((tool) => tool.name)
         .sort();
       expect(catalog).toEqual(desktop);
-      // 差异只允许是已登记的 UI-bound 排除项（headless 本就不含 memory/app/browser）。
+      // 差异只允许是已登记的 UI-bound 排除项（headless 本就不含 app/browser）。
       const omitted = desktop.filter((name) => !catalog.includes(name));
       expect(omitted.every((name) => HEADLESS_UI_BOUND_OMISSION_UNIVERSE.has(name))).toBe(true);
     }
   });
 
-  it('极简 + Agent（无 MCP 搜索）= 恰好 7 项 allowlist，无 memory/skill/git/lsp/app/todo', () => {
+  it('极简 + Agent（无 MCP 搜索）= 恰好 7 项 allowlist，无 skill/git/lsp/app/todo', () => {
     const names = buildHeadlessToolDefinitions({
       mode: 'agent',
       multimodalEnabled: false,
@@ -209,6 +207,5 @@ function desktopVisibleTools(testCase: Case) {
     disableWebSearchTools: testCase.mcpSearchEnabled,
   });
   registerTodoListTools(inner, 's1');
-  registerMemoryTools(inner, '/tmp/ws', 's1');
   return inner.getLlmTools();
 }

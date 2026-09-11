@@ -502,18 +502,18 @@
           <div class="idx">06</div>
           <div class="tt">
             <h3>项目记忆 <span>Project Memory</span></h3>
-            <div class="tags"><span class="tag">memory_write / memory_search / memory_forget / memory_list</span></div>
+            <div class="tags"><span class="tag">.CodePapr/MEMORY.md · 记忆管家（internal，无工具）</span></div>
           </div>
-          <div class="hz"><b>SQLite 账本</b>跨会话记忆与按需精准召回</div>
+          <div class="hz"><b>文件 + 管家</b>跨会话记忆，每回合全量注入会话引导</div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">MEM</div>
-            <div class="name">memory_write / memory_search / memory_forget / memory_list<span class="cchip c-text">记忆账本</span><span class="exp"></span></div>
+            <div class="name">.CodePapr/MEMORY.md<span class="cchip c-text">项目记忆文件</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>memory_write</b>：将结构化事实分类写入 SQLite 记忆账本（立即持久化，无需审核；拒绝凭空记录网页内容与敏感密钥）。<b>memory_search</b>：按关键词检索历史稳定记忆与会话检查点，支持受控 re-recall 注入。<b>memory_forget</b>：软删除过时条目。<b>memory_list</b>：列出稳定记忆目录。</div>
-          <div class="more"><div class="mbox">记忆按类别分层注入：用户偏好与项目事实进入下次会话前缀（Bootstrap），踩坑经验（procedure）按需召回，网页引用（citation）仅供检索；Ask 只读模式下仅开放 <code>memory_search</code>。</div></div>
+          <div class="desc">工作区内的单一 Markdown 文件（三节：用户偏好与约束 / 技术栈与环境约束 / 架构与业务已知事实），硬上限 60 行 / 约 2000 tokens。内置记忆管家在交付（双信号门）与压缩前（无条件，20s 超时）两个卡点自动维护；密钥脱敏、注入指令 / 危险命令 / 超限 / 洗记忆操作拒写。</div>
+          <div class="more"><div class="mbox">Agent 无 <code>memory_*</code> 工具，直写文件会被拦截拒绝；每回合直读文件渲染会话引导（保存后下一回合生效）。面板（上下文检查器 → 记忆）就是该文件的编辑器：预算条 + 保存 + 管家状态行。</div></div>
         </div>
       </section>
 
@@ -666,11 +666,11 @@
         <h4>运行模式权限白名单</h4>
         <div class="modelist">
           <b>只读模式 (Ask)</b><br>
-          <span class="mk">read grep list glob lsp diagnostics</span> read_image skill memory_search todo local_time<br><br>
+          <span class="mk">read grep list glob lsp diagnostics</span> read_image skill todo local_time<br><br>
           <b>规划模式 (Plan)</b><br>
           <span class="mk">+ question</span> 方案交互与决策确认<br><br>
           <b>全功能模式 (Agent/App)</b><br>
-          <span class="mk">+ write edit patch bash git memory_write/forget app_*</span>
+          <span class="mk">+ write edit patch bash git app_*</span>
         </div>
       </div>
     </aside>

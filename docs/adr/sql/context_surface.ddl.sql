@@ -1,5 +1,8 @@
 -- 参考 DDL（PR1 落库时以 db/mod.rs 的最终实现为准；本文件仅供评审与对齐）
 -- 原则：不对 messages 建外键（ADR-002）；全部 CREATE TABLE IF NOT EXISTS 增量迁移。
+--
+-- ⚠️ 历史快照：`memory_recalls` 段（ADR-009）已随 v9 迁移（ADR-016）删除；
+--    memory_entries / memory_candidates 同理，正文保留仅作评审历史。
 
 -- ---------------------------------------------------------------------------
 -- Context Surface：当前模型历史选择的唯一权威（ADR-001/003）

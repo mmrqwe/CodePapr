@@ -1,6 +1,6 @@
 # ADR-009: Memory Recall 采用 B3 —— 独立表 + request-time anchored insertion
 
-- 状态: Accepted
+- 状态: Superseded by [ADR-016](./ADR-016-memory-v5-memory-md.md)（Retrieval 与锚定插入机制整体退役）
 - 日期: 2026-08-16
 - 关联: ADR-001（L5 层）, ADR-002, ADR-005
 

@@ -59,9 +59,6 @@ export interface ContextBudgetStageTokens {
   currentUserInputTokens: number;
   /** 请求续写 suffix（question 答案等）。 */
   suffixTokens: number;
-  /** Turn-scoped request-only 插入（Recall Block，ADR-009 第15条：
-   *  虽不进 log，但随每次请求发送，必须计入预算估算）。 */
-  insertionTokens?: number;
 }
 
 export interface ContextBudgetBreakdown extends ContextBudgetStageTokens {
@@ -82,8 +79,7 @@ export function buildContextBudgetBreakdown(
     stages.checkpointTokens +
     stages.retainedTailTokens +
     stages.currentUserInputTokens +
-    stages.suffixTokens +
-    (stages.insertionTokens ?? 0);
+    stages.suffixTokens;
   return {
     ...stages,
     outputReserveTokens,

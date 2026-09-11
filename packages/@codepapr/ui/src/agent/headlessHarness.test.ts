@@ -117,7 +117,7 @@ describe('harness tool profile (default | minimal)', () => {
     return initFrame.payload.toolDefinitions.map((t) => t.name);
   };
 
-  it('minimal + agent：恰好 7 项 allowlist，无 git/todo/lsp/memory/app', () => {
+  it('minimal + agent：恰好 7 项 allowlist，无 git/todo/lsp/app', () => {
     const harness = createHarness();
     harness.init({
       ...BASE_INIT,
@@ -304,7 +304,7 @@ describe('UI-bound headless policies', () => {
     const harness = createHarness();
     harness.init({ ...BASE_INIT, mode: 'agent' });
     harness.run({ requestId: 'r1', sessionId: 's1', prompt: 'p' });
-    for (const name of ['memory_write', 'app_render', 'browser', 'workspace_project_graph', 'mcp__srv__tool']) {
+    for (const name of ['app_list', 'app_render', 'browser', 'workspace_project_graph', 'mcp__srv__tool']) {
       const routed = harness.mediator.handleOutgoing(toolRequest({ toolName: name }));
       expect(routed).toEqual([]);
     }

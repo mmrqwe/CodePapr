@@ -44,9 +44,9 @@ export const DEFAULT_OFFLOAD_CHARS = 100_000;
 export const DEFAULT_OFFLOAD_PREVIEW_CHARS = 2_000;
 export const DEFAULT_CEILING_CHARS = 150_000;
 
-// reRecallInsertion（ADR-009 第13条）：request-only augmentation，绝不允许
+// __images / __question：UI 侧信道（base64 图片 / 提问卡片），绝不允许
 // 随工具结果进入 AppendOnlyLog / archive / 搜索 / checkpoint。
-const INTERNAL_FIELDS = new Set(['__images', '__question', 'reRecallInsertion']);
+const INTERNAL_FIELDS = new Set(['__images', '__question']);
 
 function stripInternalFields(value: unknown): unknown {
   if (value === null || value === undefined) return value;

@@ -1136,12 +1136,12 @@ TTS 数据流：
         </div>
 
         <h3>记忆面板 — 跨会话项目记忆</h3>
-        <p>账本在 SQLite；记忆面板是唯一给人看/改的面。短指令进每次会话的 Bootstrap，踩坑经验按回合召回，网页引用只进搜索。分层与时间线见 <a href="context-architecture.html">上下文分层</a>。</p>
+        <p>跨会话记忆就是工作区里的一个文件 <code>.CodePapr/MEMORY.md</code>（三节：用户偏好与约束 / 技术栈与环境约束 / 架构与业务已知事实），可读、可 diff、可进 git。它由内置记忆管家（internal 子代理）后台维护，记忆面板就是它的编辑器。分层与时间线见 <a href="context-architecture.html">上下文分层</a>。</p>
         <ul>
-          <li><strong>自动写入：</strong>你说「记住 / 必须 / 不要」、测试成功、冷启动、Agent <code>memory_write</code>、面板手写，立刻留下或丢掉。没有准入按钮。</li>
-          <li><strong>面板三组：</strong>每次会话（手写 / 偏好 / 事实等，24 条 / 1500 tokens）、按需召回（踩坑）、仅搜索（网页引用）。</li>
-          <li><strong>进模型的时机：</strong>本回合只更新账本；当前前缀不动；压缩或新会话才把短指令带进前缀；踩坑等下一用户回合召回。</li>
-          <li><strong>怎么读：</strong>不会整库倒进请求。短指令已经在会话引导里；每个用户回合（含 Ask，Ask 下收紧至 3 条）系统用你这句话检索相关记忆（约 5 条）；不够再调 <code>memory_search</code>。想看目录才调 <code>memory_list</code>（最多 40 条预览）。网页引用只能搜到，不会自动召回。</li>
+          <li><strong>两个卡点：</strong>交付（回合结束，你说「记住 / 必须 / 不要」等线索词或本回合有验证成功的命令才跑）与压缩前（任何压缩提交前无条件跑，20s 超时）。</li>
+          <li><strong>写入边界：</strong>管家只看本回合用户原话 + assistant 最终文本（压缩卡点看骨架），绝不含原始工具输出；密钥自动脱敏，注入指令 / 危险命令 / 超限内容 / 「删除过半」的洗记忆操作都会拒写。</li>
+          <li><strong>Agent 不写记忆：</strong><code>memory_write / memory_search / memory_list / memory_forget</code> 已退役；Agent 直写 MEMORY.md 会被拦截拒绝，值得记住的事实在回答中说明即可。</li>
+          <li><strong>进模型的时机：</strong>每回合直读文件渲染会话引导——文件变了下一回合立即生效（一次性前缀 miss）；面板编辑同理。</li>
         </ul>
 
         <h3>/compact — 强制压缩上下文</h3>
@@ -1149,7 +1149,7 @@ TTS 数据流：
         <ul>
           <li><strong>强制模式：</strong>不受 90% 触发线限制（无效缩容仍会被拒绝，不留空转检查点）</li>
           <li><strong>确定性骨架：</strong>每回合保留「用户问题 + 最终结论」两行，工具调用/结果折叠为计数注记——<strong>零 LLM</strong>；最近 5 回合逐字保留。仅当骨架仍超预算时调用一次 Compactor 做二级摘要（失败则按行截断）</li>
-          <li><strong>刷新会话引导：</strong>压缩即记忆 epoch——从账本重渲染项目记忆进入稳定前缀</li>
+          <li><strong>刷新会话引导：</strong>压缩前先跑一次记忆管家（归整将被折叠的内容），再重渲染会话引导——新记忆随 epoch 立刻生效</li>
           <li><strong>使用场景：</strong>接近上下文上限或响应变慢时，压缩即可恢复流畅对话</li>
         </ul>
 
@@ -1168,7 +1168,7 @@ TTS 数据流：
             <tr><td><code>~/.codepapr/codepapr.sqlite</code></td><td>应用级设置、会话和缓存统计</td></tr>
             <tr><td><code>~/.codepapr/lsp-tools/</code></td><td>托管 LSP 工具下载缓存（首次需要时下载，下次复用）</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>项目级状态、聊天记录、缓存统计</td></tr>
-            <tr><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code> <code>memory_entries</code></td><td>跨会话项目记忆（面板为唯一给人看的面；Bootstrap 从账本渲染）</td></tr>
+            <tr><td><code>&lt;workspace&gt;/.CodePapr/MEMORY.md</code></td><td>跨会话项目记忆（记忆管家维护；面板可编辑；每回合注入会话引导）</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/skills</code></td><td>项目级技能文件</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/agents</code></td><td>项目级子代理定义</td></tr>
             <tr><td><code>&lt;workspace&gt;/.CodePapr/commands</code></td><td>项目级自定义命令</td></tr>
@@ -1284,7 +1284,7 @@ TTS 数据流：
             <tr><td><strong>compactor</strong></td><td>上下文压缩的二级摘要：仅当确定性骨架装不下预算时，把骨架合并成一份摘要（轮间 / mid-loop / Goal / 子代理共用）</td><td><code>compactionModel</code>（快速/主）</td><td>无（纯推理）</td></tr>
           </tbody>
         </table>
-        <p><small>两个内部代理均 <code>internal: true</code>，由运行时直接调用：Verifier 由 GoalRunner 验收循环调用（专属预算：6 轮工具 / 3 分钟墙钟）；Compactor 由压缩管线调用，零工具（transcript 已含全部事实）、不注入 skills/memory/project-graph（bootstrap 隔离），墙钟沿用子代理默认 20 分钟。v4 压缩主路径是确定性骨架（零 LLM），Compactor 只在骨架超预算时做一次二级摘要；未启用快速模型或摘要失败时降级为按行截断，绝不递归。</small></p>
+        <p><small>三个内部代理均 <code>internal: true</code>，由运行时直接调用：Verifier 由 GoalRunner 验收循环调用（专属预算：6 轮工具 / 3 分钟墙钟）；Compactor 由压缩管线在骨架超预算时调用；Memory-curator 由记忆管线在交付 / 压缩前两个卡点调用（素材绝不含原始工具输出）。三者均零工具、不注入 skills/memory/project-graph（bootstrap 隔离），墙钟沿用子代理默认 20 分钟。v4 压缩主路径是确定性骨架（零 LLM），Compactor 只在骨架超预算时做一次二级摘要；未启用快速模型或摘要失败时降级为按行截断，绝不递归。</small></p>
 
         <h3>自定义子代理</h3>
         <p>在 <code>.CodePapr/agents/&lt;name&gt;.md</code> 中用 YAML frontmatter + 正文声明一个子代理，主代理可以把子任务委派给它。同名 Agent 会覆盖内置定义。</p>
@@ -1954,24 +1954,23 @@ X-API-Key: your-api-key</code></pre>
           <thead><tr><th></th><th>装什么</th><th>何时变</th><th>缓存</th></tr></thead>
           <tbody>
             <tr><td>01 系统核心</td><td>系统提示、工具、参数、<code>AGENTS.md</code></td><td>会话内冻结</td><td>命中</td></tr>
-            <tr><td>02 会话引导</td><td>Skills 目录、项目记忆段、长期指导</td><td>记忆：压缩或新会话才换</td><td>命中</td></tr>
+            <tr><td>02 会话引导</td><td>Skills 目录、项目记忆段、长期指导</td><td>MEMORY.md 保存后下一回合换</td><td>通常命中</td></tr>
             <tr><td>03 会话状态</td><td>检查点 + 保留的近期对话</td><td>压缩时重写</td><td>epoch 内命中</td></tr>
-            <tr><td>04 本回合召回</td><td>这一轮检索到的旧经验</td><td>每个用户回合换新</td><td>从此处起 miss</td></tr>
-            <tr><td>05 本轮对话</td><td>当前用户消息 + 工具结果</td><td>只追加</td><td>尾部增量</td></tr>
+            <tr><td>04 本轮对话</td><td>当前用户消息 + 工具结果</td><td>只追加</td><td>尾部增量</td></tr>
           </tbody>
         </table>
 
         <h3>缓存命中模式</h3>
         <div class="diagram">同一用户回合内的多次工具调用：
-  [01][02][03][04 本回合召回][05 user + tools...]
-  → 04 之前字节不变，照常命中；04 起是本回合必要增量
+  [01][02][03][04 user + tools...]
+  → 01–03 字节不变，照常命中；04 起是本回合必要增量
 
 下一用户回合：
-  [01][02][03][04 新召回][05 新 user...]
-  → 01–03 仍命中；04 换新
+  [01][02][03][04 新 user...]
+  → 01–03 仍命中（MEMORY.md 未变时）
 
-压缩之后：
-  03 重写，02 的记忆段一并刷新；一次性 miss，之后重新累积命中
+MEMORY.md 保存之后（或压缩之后）：
+  02（含记忆段）/03 重写；一次性 miss，之后重新累积命中
 </div>
 
         <h3>关键不变量</h3>
@@ -1980,7 +1979,7 @@ X-API-Key: your-api-key</code></pre>
           <li>Skills 进入 bootstrap 而非 system prefix</li>
           <li>Workspace 路径只出现在 system prompt，不在 bootstrap 中重复</li>
           <li>Custom guidance 只在 bootstrap 中出现一次</li>
-          <li>session bootstrap 按"会话 × 稳定签名"缓存，账本新写入 / 项目图等易变状态不触发重建</li>
+          <li>session bootstrap 由每回合的 promptKey 决定：MEMORY.md / skills / 文件变化时下回合重建一次（保存即生效），否则持续命中</li>
           <li>每轮 user prompt 的动态内容（日期 / 诊断）置于尾部，不改既有前缀</li>
         </ul>
 

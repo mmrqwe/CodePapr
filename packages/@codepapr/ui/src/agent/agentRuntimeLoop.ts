@@ -155,12 +155,6 @@ const compactionCommitWaiters = new Map<
 >();
 let nextCompactionRequestId = 0;
 
-// PR5（ADR-009 第11条）：re-recall 的回合内状态。activeChatAgent 供
-// tool-response 分发时 push 新 insertion；每 chat 至多一次（第11条）。
-let activeChatAgent: Agent | null = null;
-let activeUserMessageId: string | null = null;
-let reRecallPushedThisChat = false;
-
 // 子代理（含 mentor）墙钟上限。流层改为无限重连后，长时间网络波动也会消耗
 // 子代理预算；放宽到 20 分钟，避免「重连中」的子代理被墙钟误杀。
 const SUBAGENT_WALL_CLOCK_TIMEOUT_MS = 1_200_000;
@@ -672,10 +666,6 @@ async function requestToolExecution(
       toolName,
       arguments: args,
       ...(toolCallId ? { toolCallId } : {}),
-      // PR5（ADR-009 第11条）：memory_search 需要 recall anchor。
-      ...(toolName === 'memory_search' && activeUserMessageId
-        ? { userMessageId: activeUserMessageId }
-        : {}),
       ...(appAccess ? { appAccess } : {}),
     });
 
@@ -818,8 +808,7 @@ function intentFromCommit(
 async function _commitContextCompactionRequest(
   chatRequestId: string,
   sessionId: string,
-  commit: MidLoopCompactionCommit,
-  settings: WorkerAgentSettings
+  commit: MidLoopCompactionCommit
 ): Promise<void> {
   const requestId = `${chatRequestId}:compaction-${++nextCompactionRequestId}`;
   const result = new Promise<{
@@ -1633,7 +1622,7 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
       () => _refreshBootstrapRequest(payload.requestId),
       () => sessionAbortControllers.get(payload.requestId)?.signal,
       (commit) =>
-        _commitContextCompactionRequest(payload.requestId, payload.sessionId, commit, payload.settings),
+        _commitContextCompactionRequest(payload.requestId, payload.sessionId, commit),
       payload.userMessageId
     ),
   });
@@ -1711,16 +1700,10 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
     },
     payload.images,
     abortController.signal,
-    payload.userMessageId,
-    payload.contextInsertions
+    payload.userMessageId
   );
 
   let response: IAgentResponse;
-  // PR5（ADR-009 第11条）：激活 re-recall 上下文——tool-response 分发时
-  // 据此 push 新 insertion；每 chat 至多一次。
-  activeChatAgent = agent;
-  activeUserMessageId = payload.userMessageId ?? null;
-  reRecallPushedThisChat = false;
   try {
     response = await Promise.race([
       chatPromise,
@@ -1729,8 +1712,6 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   } finally {
     clearIdle();
     unbindChatIdle(armIdle);
-    activeChatAgent = null;
-    activeUserMessageId = null;
   }
 
   const subagentEntries = subagentCacheStatsMap.get(payload.requestId);
@@ -1866,17 +1847,6 @@ function dispatchWorkerMessage(message: MainToAgentWorkerMessage): void {
     const waiter = toolResponseWaiters.get(message.payload.toolRequestId);
     if (!waiter) {
       return;
-    }
-
-    // PR5（ADR-009 第11条）：memory_search 的 re-recall insertion —— push
-    // 进本回合 Agent（request-only，追加在旧 insertion 之后），每 chat ≤1。
-    if (
-      message.payload.reRecallInsertion &&
-      activeChatAgent &&
-      !reRecallPushedThisChat
-    ) {
-      reRecallPushedThisChat = true;
-      activeChatAgent.pushContextInsertions([message.payload.reRecallInsertion]);
     }
 
     toolResponseWaiters.delete(message.payload.toolRequestId);

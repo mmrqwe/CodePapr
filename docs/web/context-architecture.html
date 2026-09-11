@@ -136,7 +136,7 @@ src-tauri/src/host.rs (RPC client)   shell/lsp/server/chat
 <tr><td><code>shell/*</code></td><td>17</td><td>execute · startBackground · openSession · sendCommand</td></tr>
 <tr><td><code>lsp/*</code></td><td>12</td><td>startServer · request · diagnostics · batchSymbols</td></tr>
 <tr><td><code>symbols/*</code></td><td>8</td><td>definition · references · hover · checkSyntax</td></tr>
-<tr><td><code>db/*</code></td><td>59</td><td>loadSettings · saveMessageBatch · memory* · paprStorage*</td></tr>
+<tr><td><code>db/*</code></td><td>45</td><td>loadSettings · saveMessageBatch · paprStorage*</td></tr>
 <tr><td><code>snapshot/*</code></td><td>11</td><td>ensure · create · diff · restorePlan · restoreExecute</td></tr>
 <tr><td><code>mcp/*</code></td><td>10</td><td>listTools · callTool · updateSettings · disconnectAll</td></tr>
 <tr><td><code>agent/*</code></td><td>5</td><td>start · send · stop · respondPermission</td></tr>
@@ -162,7 +162,7 @@ src-tauri/src/host.rs (RPC client)   shell/lsp/server/chat
 </div>
 <div class="tbl-wrap"><table><tr><th>库</th><th>路径</th><th>内容</th></tr>
 <tr><td>App DB</td><td><code>~/.codepapr/codepapr.sqlite</code></td><td>全局设置、provider/model、最近工作区</td></tr>
-<tr><td>Project DB</td><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>会话消息、checkpoint、<code>memory_entries</code>、ProjectGraph 缓存</td></tr>
+<tr><td>Project DB</td><td><code>&lt;workspace&gt;/.CodePapr/project.sqlite</code></td><td>会话消息、checkpoint、ProjectGraph 缓存</td></tr>
 <tr><td>Papr App DB</td><td><code>&lt;appDir&gt;/db.sqlite</code></td><td>单个 .papr 应用的键值存储与 inbox</td></tr>
 </table></div>
 <p class="note">三处均由 <code>codepapr-core::db</code> 打开，即<strong>宿主进程在写</strong>（App 存储是唯一在客户端进程内直连的例外）。旧版 <code>state.json</code>/<code>project.json</code> 首次打开或保存时自动导入 SQLite。</p>
@@ -178,15 +178,14 @@ src-tauri/src/host.rs (RPC client)   shell/lsp/server/chat
 </section>
 <section class="sec" id="context">
 <h2>上下文分层（TypeScript 侧）</h2>
-<p class="lead">领域副作用交给宿主之后，提示词组装与缓存分区仍在 <code>@codepapr/core</code>（TS 侧）。完整细节见 <code>docs/adr/ADR-001…011</code>。</p>
+<p class="lead">领域副作用交给宿主之后，提示词组装与缓存分区仍在 <code>@codepapr/core</code>（TS 侧）。完整细节见 <code>docs/adr/ADR-001…016</code>。</p>
 <div class="tbl-wrap"><table><tr><th>层</th><th>内容</th><th>何时变</th></tr>
 <tr><td>01 系统核心</td><td>系统提示、工具定义、<code>AGENTS.md</code></td><td>会话内冻结</td></tr>
-<tr><td>02 会话引导</td><td>Skills 目录、插件 inbox 摘要、项目记忆段</td><td>压缩或新会话才换</td></tr>
+<tr><td>02 会话引导</td><td>Skills 目录、插件 inbox 摘要、项目记忆段（MEMORY.md）</td><td>MEMORY.md 保存或压缩后下一回合换</td></tr>
 <tr><td>03 会话状态</td><td>检查点（任务进度）+ 近期对话</td><td>压缩时重写</td></tr>
-<tr><td>04 本回合召回</td><td>命中的踩坑经验（procedure）</td><td>每个用户回合换新</td></tr>
-<tr><td>05 本轮对话</td><td>当前用户消息、工具结果</td><td>只往尾部追加</td></tr>
+<tr><td>04 本轮对话</td><td>当前用户消息、工具结果</td><td>只往尾部追加</td></tr>
 </table></div>
-<p class="note">项目记忆以 SQLite 账本（<code>memory_entries</code>）为唯一权威，面板是唯一人工面；短指令进 02，踩坑经验进 04 按需召回，网页/MCP 引用只在 <code>memory_search</code> 里可见，永不自动进前缀。</p>
+<p class="note">项目记忆的唯一权威是工作区文件 <code>.CodePapr/MEMORY.md</code>：内置记忆管家在交付 / 压缩前两个卡点维护它，每回合全量注入 02（保存后下一回合生效）；Agent 无记忆工具，直写文件会被拒绝。面板即该文件的编辑器。</p>
 </section>
 </div>
 <footer><div class="container">CodePapr · 系统架构 · <a href="index.html">首页</a> · <a href="tutorial.html">教程</a> · <a href="tool-inventory.html">工具全景</a></div></footer>

@@ -217,6 +217,7 @@ LLM 可通过 4 个工具管理 app（仅 App 模式）：
 | **mentor** | 架构/算法指导 | 可配置独立模型 | 无 |
 | **verifier**（内部） | Goal 验收——只读核实 Worker 是否真正达成目标 | `verifierModelTier` 档位 | read, grep, glob, list |
 | **compactor**（内部） | 上下文压缩——生成可恢复检查点 | `compactionModel` 档位 | 无（纯推理） |
+| **memory-curator**（内部） | 维护 `.CodePapr/MEMORY.md`（交付 / 压缩前两个卡点） | `compactionModel` 档位 | 无（纯推理） |
 
 主 Agent 通过 `task` 工具调度子代理。每个子代理拥有独立的 Session，只接收委派的任务描述，不受历史对话污染。主 Agent 的 TodoList 指令会提示它主动委派代码分析给 Explore、网页搜索给 Scout。
 
@@ -343,35 +344,32 @@ Hover 任意用户消息 → 下方出现"重置到此点"和"复制"按钮：
 
 **二级摘要**：仅当以上确定性装配仍装不下时，调用一次 Compactor 把骨架合并成摘要（输入预瘦身，最老的行先丢）。Compactor 不可用或失败时按行截断降级。**不存在递归压缩**。
 
-**压缩即记忆 epoch**：每次压缩都会重读记忆账本重渲染 Session Bootstrap（写回前缀缓存），因此「新记住的 confirmed 条目 / 被遗忘的条目」最迟在下一次压缩（任意入口，含 Goal 循环与 mid-loop）或新会话生效；写入/遗忘本身不拆当前前缀缓存。回合末与 Goal 的压缩提交为单事务并 await（失败回滚，不留半提交状态）；mid-loop 在 Worker 内换 epoch，主线程校验通过后原子提交，刷新失败时沿用旧 Bootstrap——不存在「无前缀记忆」的 epoch。
+**压缩即记忆 epoch**：每次压缩前，记忆管家都会先跑一次（20s 超时）把本段落折叠的内容归整进 `.CodePapr/MEMORY.md`，再重渲染 Session Bootstrap（写回前缀缓存）——新记忆随 epoch 立刻生效。回合末与 Goal 的压缩提交为单事务并 await（失败回滚，不留半提交状态）；mid-loop 在 Worker 内换 epoch，主线程校验通过后原子提交，刷新失败时沿用旧 Bootstrap——不存在「无前缀记忆」的 epoch。
 
-**子代理同引擎（headless）**：task 子代理的长执行同样在窗口 90% 触发同一骨架压缩，但只在内存里替换 log——不写 surface / archive、无 UI 检查点；internal 代理（compactor/verifier）不接入，因此压缩链深度封顶为 1。子代理嵌套受 `SUBAGENT_MAX_DEPTH = 2` 限制，超限的 `task` 调用直接报错。
+**子代理同引擎（headless）**：task 子代理的长执行同样在窗口 90% 触发同一骨架压缩，但只在内存里替换 log——不写 surface / archive、无 UI 检查点；internal 代理（compactor/verifier/curator）不接入，因此压缩链深度封顶为 1。子代理嵌套受 `SUBAGENT_MAX_DEPTH = 2` 限制，超限的 `task` 调用直接报错。
 
-## 项目记忆（零审核自动写入）
+## 项目记忆（MEMORY.md + 记忆管家）
 
-分层与时间线（给人看的版本）见 [`docs/web/context-architecture.html`](../web/context-architecture.html)。
+跨会话项目记忆就是工作区里的一个文件：**`.CodePapr/MEMORY.md`**（三节：用户偏好与约束 / 技术栈与环境约束 / 架构与业务已知事实）。它可读、可 diff、可进 git；记忆面板是它的编辑器。
 
-项目记忆不是「整段塞进模型」。权威数据在 SQLite `memory_entries`；记忆面板是唯一给人看/改的面。不同种类的记忆进上下文的**不同层**，变化时机也不一样。
+**谁在写**：内置记忆管家（internal 子代理，零工具、fast 档）在后台维护。两个卡点：
 
-| 种类 | 存在哪 | 进哪一层 | 何时进当前会话的模型 | 怎么变 |
-|---|---|---|---|---|
-| 用户手写笔记 | 账本；面板「每次会话」 | Session Bootstrap（稳定前缀） | 会话启动从账本渲染；压缩 epoch 会刷新 | 你在面板增改立刻落库；**当前会话前缀不重建**，下次会话或压缩后才带上 |
-| 偏好 / 约束 / 项目事实 | 账本；面板「每次会话」 | 同上，Bootstrap | 同上：本回合写入账本，**下一次 Bootstrap 刷新**才进前缀 | 你说「记住 / 必须 / 不要」（回合后自动抽取）、工作区实证、测试成功 → 立刻 persist 成 `[verified]`，无需点同意 |
-| Agent 便签（`memory_write`） | 账本；面板「按需召回」 | Turn-scoped Recall / `memory_search` | 写入后的**下一用户回合**，若检索命中 | 立刻 persist、无需审核，但恒为 `[reported]`（未证实），**永不进固定前缀**；Agent 不得声称它能让某事实每次会话自动可见 |
-| 踩坑经验 (`procedure`) | 账本；面板「按需召回」 | Turn-scoped Recall / `memory_search` | 写入后的**下一用户回合**，若检索命中 | 同一错误踩两次等；不进每次会话的前缀 |
-| 网页 / MCP 引用 (`citation`) | 账本；面板「仅搜索」 | 仅 `memory_search` | 模型主动搜索才会看到 | web / MCP / `https` 证据；**永不进 Bootstrap，自动 Recall 也跳过** |
-| 当前任务目标 / 待办 | Session Checkpoint | Session State | 压缩后作为检查点 | 随压缩 epoch 变；**不是**跨会话项目记忆 |
-| 大段工具输出 | `.CodePapr/tool-output/` | 不自动注入 | `read_artifact` 按需 | 写时冻结 |
+| 卡点 | 时机 | 触发条件 |
+| --- | --- | --- |
+| 交付 | 回合结束 | 双信号门：本回合用户原话含记忆线索词（记住 / 必须 / 不要 / 以后 / 约定 / always / never…），或本回合有验证成功的测试/构建命令 |
+| 压缩前 | 任意压缩入口（回合末 epoch、`/compact`、Goal、mid-loop）提交前 | 无条件运行，20s 超时 |
 
-**写入（零审核）**：确定性门 `planMemoryWrite` 只做 persist 或 drop。面板是完整目录（每次会话 / 按需召回 / 仅搜索，可遗忘），没有准入队列。Agent 不得让你去确认记忆。注入指令、密钥、危险命令会被丢弃。若 Agent 仍 `write`/`patch` `.CodePapr/memory.md`，会被拦截，走同一策略，不落盘。
+管家只看「本回合用户原话 + assistant 最终文本」（压缩卡点看将被折叠的骨架），**绝不含原始工具输出**。输出完整文件内容或 `NO_CHANGE`；改完立即落盘。
 
-**读取**：不会把账本整库塞进请求。短指令已经在会话引导里；每个用户回合（含 Ask，Ask 下收紧至 3 条）用你这句话做关键词召回（约 5 条 / 1200 tokens，跳过 citation）；不够时 Agent 调 `memory_search`（含 citation，Ask 也可用）。想看目录才调 `memory_list`（最多 40 条预览）。`memory_search` 不会每句话自动跑一遍。
+**机械兜底**：密钥自动脱敏；注入指令 / 危险命令 / 策略绕过的内容拒写；超过 60 行或约 2000 tokens 拒写；「零新增且删除过半」视为洗记忆，拒写；保存时文件被并发修改则拒绝，面板重载后可重试。
 
-**加载与缓存**：会话启动时从账本渲染 Bootstrap 段注入 Session Bootstrap（`log[0]`，`isPrefixSystem`），按「会话 × 稳定签名」冻结。渲染结果排除在签名外，新记住的内容**不拆当前前缀缓存**；`memory_forget` 同理——当前会话的 Bootstrap 不回滚重渲染（工具返回会注明「下次会话前缀不再包含」），遗忘在下一次压缩 epoch 刷新或新会话生效。这是刻意契约：换取前缀缓存稳定，面板与账本始终是权威事实源。压缩 epoch 随 `refreshBootstrap` 刷新；新会话总是重读账本。每用户回合另做一次 Recall（citation 不进入自动 Recall）。
+**Agent 不写记忆**：`memory_write / memory_search / memory_list / memory_forget` 已全部退役，Agent 直写 `.CodePapr/MEMORY.md` 会被拦截拒绝。Agent 发现值得记住的事实应在回答中说明，由用户确认，管家下一回合归纳进来。
 
-**没有冷启动摘要**：项目结构 / 技术栈这类可即时探测的信息不进账本（子代理需要时用 ProjectGraph 现取）。记忆只记「一条一个事实」；`reported`（Agent 自报）超过 400 字直接丢弃。
+**注入**：每回合直读文件渲染 Session Bootstrap（不再冻结账本快照）。文件保存后**下一回合**立即生效——若文件变了，会话前缀重建一次（一次性缓存 miss），换「保存即生效」。
 
-**写即更新**：同内容哈希幂等（沿用既有 entry id）；同 category 的近义改述（短文本 bigram Jaccard ≥ 0.8，长文本 containment ≥ 0.85 且长度比 ≥ 0.6）**新者胜**——写入新表述会替换旧条目（旧的归档为 superseded，面板可查看/恢复），更正事实不需要先 forget；`memory_write` 还可传 `supersedesEntryId` 跨类别指名替换。护栏：`reported`（Agent 自报）不得覆盖 `confirmed`（用户原话/工具实证）条目，此类冲突保留原文并明确提示，只能由用户在面板编辑。`cold-start-*` 同源派生条目只保留最新一条；面板另有「清理重复」与多选批量遗忘。召回侧再兜一层：与已选条目近义的候选、以及超过 3 条的同一 category 都会被过滤掉。
+**迁移**：旧计划库中的记忆账本在首次打开时自动把 `confirmed + active` 条目按内容去重导出为 MEMORY.md 种子（文件已存在则跳过），随后删除全部记忆表。你不需要手动搬运。
+
+**面板**：上下文检查器 → 记忆 Tab。编辑器带行/token 预算条、保存按钮与管家状态行（最近一次动作：空闲 / 已更新 / 已拒绝 / 失败 / 超时）。
 
 ## 代码智能（lsp / list）
 
@@ -632,7 +630,7 @@ macOS 上 `bash` 工具、Shell 会话与 app 后端进程都通过 `sandbox-exe
 | --- | --- |
 | `~/.codepapr/codepapr.sqlite` | 应用级设置 |
 | `<workspace>/.CodePapr/project.sqlite` | 项目级状态、聊天记录、缓存统计 |
-| `<workspace>/.CodePapr/project.sqlite` 的 `memory_entries` | 跨会话项目记忆（面板为唯一给人看的面；Bootstrap 从账本渲染） |
+| `<workspace>/.CodePapr/MEMORY.md` | 跨会话项目记忆（记忆管家维护；面板可编辑；每回合注入 Session Bootstrap） |
 | `<workspace>/.CodePapr/store` | 项目级文本记录 |
 | `<workspace>/.CodePapr/skills` | 项目级技能文件 |
 | `<workspace>/.CodePapr/agents` | 项目级自定义子代理 |

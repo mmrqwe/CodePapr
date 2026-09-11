@@ -33,16 +33,6 @@ describe('stringifyToolResult', () => {
     expect(result).toBe(JSON.stringify({ data: 'ok' }));
   });
 
-  it('strips reRecallInsertion so recall never enters the log (ADR-009 rule 13)', () => {
-    const result = stringifyToolResult({
-      query: 'oauth',
-      results: '- [verified] ok',
-      reRecallInsertion: { anchorMessageId: 'u1', renderedMessages: [] },
-    });
-    expect(result).toBe(JSON.stringify({ query: 'oauth', results: '- [verified] ok' }));
-    expect(result).not.toContain('reRecallInsertion');
-  });
-
   it('returns a string for undefined (never leaks undefined content)', () => {
     expect(stringifyToolResult(undefined)).toBe('{}');
   });

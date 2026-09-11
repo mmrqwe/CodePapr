@@ -501,19 +501,19 @@
         <div class="tierhead">
           <div class="idx">06</div>
           <div class="tt">
-            <h3>Project Memory <span>Ledger &amp; Retrieval</span></h3>
-            <div class="tags"><span class="tag">memory_write / memory_search / memory_forget / memory_list</span></div>
+            <h3>Project Memory <span>File &amp; Curator</span></h3>
+            <div class="tags"><span class="tag">.CodePapr/MEMORY.md · memory curator (internal, no tools)</span></div>
           </div>
-          <div class="hz"><b>SQLite Ledger</b>Cross-session facts and targeted recall</div>
+          <div class="hz"><b>File + curator</b>Cross-session memory, injected in full every turn</div>
         </div>
 
         <div class="item">
           <div class="row">
             <div class="addr">MEM</div>
-            <div class="name">memory_write / memory_search / memory_forget / memory_list<span class="cchip c-text">Memory Ledger</span><span class="exp"></span></div>
+            <div class="name">.CodePapr/MEMORY.md<span class="cchip c-text">Project memory file</span><span class="exp"></span></div>
           </div>
-          <div class="desc"><b>memory_write</b>: Immediately persists categorized facts into the SQLite ledger (no admit queue; drops volatile web clippings and secrets). <b>memory_search</b>: Keyword retrieval over stable memories and session checkpoints with re-recall triggers. <b>memory_forget</b>: Soft-deletes obsolete entries. <b>memory_list</b>: Lists the catalog of active memories.</div>
-          <div class="more"><div class="mbox">Memories are layered by category: preferences and project facts enter next-session Bootstrap, procedures are recalled per-turn, and web citations remain search-only; Ask mode keeps <code>memory_search</code> active while blocking mutations.</div></div>
+          <div class="desc">A single Markdown file in the workspace (three sections: user preferences &amp; constraints / tech stack &amp; environment / architecture &amp; known facts), hard-capped at 60 lines / ~2000 tokens. The built-in memory curator maintains it at two checkpoints — delivery (dual-signal gate) and pre-compaction (unconditional, 20s timeout) — with mechanical gates for secrets, injection, dangerous commands, size, and memory-washing.</div>
+          <div class="more"><div class="mbox">The Agent has no <code>memory_*</code> tools and direct file writes are rejected; every turn reads the file into session bootstrap (effective the next turn after saving). The panel (Context inspector → Memory) is that file's editor: budget bar + save + curator status line.</div></div>
         </div>
       </section>
 
@@ -666,11 +666,11 @@
         <h4>Mode Whitelists</h4>
         <div class="modelist">
           <b>Read-Only (Ask)</b><br>
-          <span class="mk">read grep list glob lsp diagnostics</span> read_image skill memory_search todo local_time<br><br>
+          <span class="mk">read grep list glob lsp diagnostics</span> read_image skill todo local_time<br><br>
           <b>Planning (Plan)</b><br>
           <span class="mk">+ question</span> Interactive decisions<br><br>
           <b>Full Capability (Agent/App)</b><br>
-          <span class="mk">+ write edit patch bash git memory_write/forget app_*</span>
+          <span class="mk">+ write edit patch bash git app_*</span>
         </div>
       </div>
     </aside>

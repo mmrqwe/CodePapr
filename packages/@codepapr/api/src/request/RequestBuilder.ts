@@ -20,7 +20,6 @@ import {
   IToolDefinition,
   IMessage,
   CacheConsistencyError,
-  RequestContextInsertion,
 } from '@codepapr/types';
 import { Logger, sha256, estimateTokens } from '@codepapr/common';
 import { Serializer, applyHistoryToolSummaries, stripConsumedImages } from '@codepapr/core';
@@ -42,59 +41,6 @@ interface BuildOptions {
    *  用于输出被 max_tokens 截断后的自动续写：把已输出的部分 assistant 内容 +
    *  「继续」指令追加到请求尾部，让模型从截断处续写。 */
   suffixMessages?: IMessage[];
-  /**
-   * PR5（ADR-009 B3）：request-only 锚定插入——编译产物里在 anchorMessageId
-   * 之前临时插入（Recall Block 等），不进入 appendLog / logHash / 校验基线。
-   * 同一回合的 tool loop 复用同一组插入，字节稳定。
-   */
-  contextInsertions?: RequestContextInsertion[];
-}
-
-/**
- * 把 request-only 插入编译进 log 消息序列（纯函数，不修改 appendLog）：
- * 每条 insertion 插在 anchorMessageId 对应消息之前；同 anchor 多条按 order
- * 升序。anchor 缺失时跳过该插入并告警（宁可缺召回，不可错位）。
- */
-export function insertAnchoredContext(
-  messages: readonly IMessage[],
-  insertions: readonly RequestContextInsertion[]
-): IMessage[] {
-  if (insertions.length === 0) return [...messages];
-
-  const byAnchor = new Map<string, RequestContextInsertion[]>();
-  for (const insertion of insertions) {
-    const entries = byAnchor.get(insertion.anchorMessageId) ?? [];
-    entries.push(insertion);
-    byAnchor.set(insertion.anchorMessageId, entries);
-  }
-
-  const anchorIds = new Set(byAnchor.keys());
-  const compiled: IMessage[] = [];
-  for (const message of messages) {
-    if (anchorIds.has(message.id)) {
-      const entries = byAnchor.get(message.id)!;
-      entries.sort((a, b) => a.order - b.order);
-      for (const insertion of entries) {
-        compiled.push({
-          id: insertion.id,
-          role: insertion.role,
-          content: insertion.content,
-          timestamp: 0,
-          metadata: {
-            requestOnly: true,
-            source: insertion.source,
-          },
-        });
-        anchorIds.delete(message.id);
-      }
-    }
-    compiled.push(message);
-  }
-
-  for (const missing of anchorIds) {
-    log.warn(`anchored insertion skipped: anchor message ${missing} not in log`);
-  }
-  return compiled;
 }
 
 function buildProviderCacheControl(
@@ -137,13 +83,10 @@ export class RequestBuilder {
     // ✅ 检查 4: 前缀未变化
     this.validatePrefixUnchanged(opts.prefix);
 
-    // ✅ 检查 5: 构造消息数组（前缀 + 日志 [+ request-only 锚定插入] [+ 临时续写尾部]）
+    // ✅ 检查 5: 构造消息数组（前缀 + 日志 [+ 临时续写尾部]）
     const prefixMessages = opts.prefix.toMessageArray();
     const logMessages = opts.appendLog.toMessageArray();
-    const compiledLog = opts.contextInsertions
-      ? insertAnchoredContext(logMessages, opts.contextInsertions)
-      : logMessages;
-    let messages = [...prefixMessages, ...compiledLog, ...(opts.suffixMessages ?? [])];
+    let messages = [...prefixMessages, ...logMessages, ...(opts.suffixMessages ?? [])];
 
     // Strip images from consumed user messages
     // Only the LAST user message with images keeps them; all earlier ones are stripped.
@@ -162,11 +105,6 @@ export class RequestBuilder {
     // per message — not the per-round break the old sliding-window prune
     // caused (its flip point sat N rounds back, invalidating the whole
     // protected window every round).
-    //
-    // NOTE: Old tool results are NOT placeholder-pruned here. That pruning
-    // happens once, at context-rebuild time (buildEffectiveContextMessages),
-    // where it coincides with the compaction prefix rewrite and is idempotent
-    // for identical input.
     messages = applyHistoryToolSummaries(messages);
 
     // ✅ 检查 6: 确定性序列化

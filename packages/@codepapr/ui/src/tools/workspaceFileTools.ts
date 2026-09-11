@@ -36,31 +36,16 @@ import {
 import { applySearchReplaceDiff, applySearchReplacePatch } from './workspaceToolUtils';
 import { lspLanguageFromPath } from '../utils/editorLanguage';
 import { type WorkspaceToolContext } from './workspaceToolContext';
-import {
-  isMemoryFilePath,
-  proposeMemoryCandidateFromWrite,
-  MEMORY_WRITE_INTERCEPT_NOTE,
-} from './memoryTools';
+import { isMemoryFilePath, MEMORY_WRITE_INTERCEPT_NOTE } from '../utils/memoryFile';
 import { assertAgentCodePaprAccess, effectiveCodePaprMode } from './codepaprAgentAccess';
 
 /**
- * ADR-008/010：memory.md 的 Agent 直接写入被拦截 → 自动写入策略。
+ * v5：MEMORY.md 是记忆管家与面板的领地，Agent 的 write/patch/diff 一律拒绝。
  */
-async function interceptMemoryFileWrite(
-  ctx: WorkspaceToolContext,
-  relativePath: string,
-  content: string
-): Promise<{ intercepted: true; candidateId: string } | { intercepted: false }> {
-  if (!isMemoryFilePath(relativePath)) {
-    return { intercepted: false };
+function assertNotMemoryFileWrite(relativePath: string): void {
+  if (isMemoryFilePath(relativePath)) {
+    throw new Error(MEMORY_WRITE_INTERCEPT_NOTE);
   }
-  const result = await proposeMemoryCandidateFromWrite({
-    workspacePath: ctx.workspace(),
-    sessionId: ctx.sessionId,
-    content,
-    origin: 'workspace-write-tool',
-  });
-  return { intercepted: true, candidateId: result.candidateId };
 }
 
 /**
@@ -124,7 +109,6 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     notifyWorkspaceMutation,
     editHistory,
     options,
-    sessionId: toolSessionId,
   } = ctx;
   // app 模式或 in-app agent（appAccess.allowCodepaprApps）放行 .CodePapr/apps
   const agentMode = options.mode ?? 'agent';
@@ -309,20 +293,8 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       content: asString(args.content, 'content'),
     };
     await ensureExternalPathAllowed(parsed.relativePath, 'write', context?.signal);
+    assertNotMemoryFileWrite(parsed.relativePath);
     assertCodePapr(parsed.relativePath, 'write', context?.appAccess);
-
-    // ADR-008：memory.md 拦截 → 候选（不落盘）。
-    const memoryIntercept = await interceptMemoryFileWrite(ctx, parsed.relativePath, parsed.content);
-    if (memoryIntercept.intercepted) {
-      return {
-        path: '.CodePapr/memory.md',
-        intercepted: true,
-        candidateId: memoryIntercept.candidateId,
-        bytes: 0,
-        change: { kind: 'updated', added: 0, deleted: 0, beforeLines: 0, afterLines: 0 },
-        notes: [MEMORY_WRITE_INTERCEPT_NOTE],
-      } satisfies WriteFileResult;
-    }
 
     const before = await readBeforeContent(parsed.relativePath);
 
@@ -398,19 +370,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       expectedOccurrences: parsed.expectedOccurrences,
     });
 
-    // ADR-008：memory.md 拦截 → 候选（不落盘）。
-    const memoryIntercept = await interceptMemoryFileWrite(ctx, parsed.relativePath, patched.content);
-    if (memoryIntercept.intercepted) {
-      return {
-        path: '.CodePapr/memory.md',
-        intercepted: true,
-        candidateId: memoryIntercept.candidateId,
-        replacements: patched.replacements,
-        bytes: 0,
-        change: { kind: 'updated', added: 0, deleted: 0, beforeLines: 0, afterLines: 0 },
-        notes: [MEMORY_WRITE_INTERCEPT_NOTE],
-      } satisfies ApplyPatchResult;
-    }
+    assertNotMemoryFileWrite(parsed.relativePath);
 
     // 前置 AST 语法预检：仅当修改引入新语法错误时拦截、不落盘（语言不支持则降级跳过）
     const notes: string[] = [];
@@ -499,30 +459,11 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       }
     }
 
-    const diff = applySearchReplaceDiff(fileContents, parsed.patches);
-
-    // ADR-008/010：memory.md 拦截 → 自动写入（不落盘）；其余文件正常走写盘。
-    const interceptedFiles: ApplyDiffFileResult[] = [];
-    const writeFiles = diff.files.filter((file) => !isMemoryFilePath(file.path));
-    for (const file of diff.files) {
-      if (!isMemoryFilePath(file.path)) continue;
-      const result = await proposeMemoryCandidateFromWrite({
-        workspacePath: workspace(),
-        sessionId: toolSessionId,
-        content: file.content,
-        origin: 'workspace-apply-diff-tool',
-      });
-      interceptedFiles.push({
-        path: file.path,
-        intercepted: true,
-        candidateId: result.candidateId,
-        patches: file.patches,
-        replacements: file.replacements,
-        bytes: 0,
-        change: { kind: 'updated', added: 0, deleted: 0, beforeLines: 0, afterLines: 0 },
-        notes: [MEMORY_WRITE_INTERCEPT_NOTE],
-      });
+    for (const patch of parsed.patches) {
+      assertNotMemoryFileWrite(patch.relativePath);
     }
+    const diff = applySearchReplaceDiff(fileContents, parsed.patches);
+    const writeFiles = diff.files;
 
     // 前置 AST 语法预检：任一文件引入新语法错误则整体拦截、全部不落盘（语言不支持则降级跳过）
     const notes: string[] = [];
@@ -648,7 +589,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     notifyWorkspaceMutation(files.map((file) => file.path));
 
     return {
-      files: [...files, ...interceptedFiles],
+      files,
       totalFiles: diff.totalFiles,
       totalPatches: diff.totalPatches,
       totalReplacements: diff.totalReplacements,

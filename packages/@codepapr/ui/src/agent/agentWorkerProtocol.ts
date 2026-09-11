@@ -9,7 +9,6 @@ import type {
   IImageContent,
   IMessage,
   IToolDefinition,
-  RequestContextInsertion,
   TodoListContext,
 } from '@codepapr/types';
 import type { ContextCheckpointPayload } from '../utils/contextCompaction';
@@ -149,7 +148,6 @@ export interface AgentWorkerChatPayload {
    * Request-only 上下文插入（ADR-009 B3）：RequestBuilder 编译时锚定插入，
    * 不进 log / archive / surface。PR5 接线。
    */
-  contextInsertions?: RequestContextInsertion[];
   /** 回合开始时主线程的 TodoList 快照：worker 用它播种本进程注册表镜像，
    *  供回合中压缩检查点的「当前任务清单（权威状态）」分区读取；
    *  回合中镜像再由 `todo` 工具返回值持续刷新。 */
@@ -180,10 +178,6 @@ export interface AgentWorkerToolResponse {
   success: boolean;
   result?: unknown;
   error?: string;
-  /** PR5（ADR-009 第11条）：memory_search 触发的 re-recall 插入（order 递增，
-   *  追加在旧 insertion 之后）。worker 收到后 push 进本回合 Agent 的
-   *  contextInsertions，每 turn 至多一次。 */
-  reRecallInsertion?: RequestContextInsertion;
 }
 
 // ── Harness（外部 CLI / 评测机）协议 ────────────────────────────────
