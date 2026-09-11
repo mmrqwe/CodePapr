@@ -310,7 +310,7 @@ describe('MemoryLedgerPanel', () => {
     clickButton(container, '多选');
     await flush();
 
-    const boxes = [...container.querySelectorAll('input[type="checkbox"]')].filter(
+    const boxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].filter(
       (box) => box.getAttribute('aria-label') === '多选'
     );
     expect(boxes).toHaveLength(2);
