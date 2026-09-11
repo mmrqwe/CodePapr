@@ -48,8 +48,8 @@ beforeEach(() => {
   clearCuratorOutcomes();
 });
 
-describe('交付卡点（双信号门）', () => {
-  it('无线索词、无验证命令 → 不调 curator', async () => {
+describe('交付卡点（多信号门）', () => {
+  it('无信号、无验证命令 → 不调 curator', async () => {
     await runDeliveryCuratorForTurn({
       workspacePath: '/ws',
       turnMessages: [userMsg('u1', '改一下按钮颜色'), assistantMsg('a1', '好了')],
@@ -57,6 +57,15 @@ describe('交付卡点（双信号门）', () => {
     });
     expect(runMemoryCuratorMock).not.toHaveBeenCalled();
     expect(getLastCuratorOutcome('/ws')).toBeUndefined();
+  });
+
+  it('普通模态词「必须」不触发（日常任务指令不再每回合误触）', async () => {
+    await runDeliveryCuratorForTurn({
+      workspacePath: '/ws-must',
+      turnMessages: [userMsg('u1', '这个必须修复'), assistantMsg('a1', '好了')],
+      settings,
+    });
+    expect(runMemoryCuratorMock).not.toHaveBeenCalled();
   });
 
   it('线索词命中 → 调 curator，素材含用户原话与最终答复', async () => {
@@ -85,11 +94,41 @@ describe('交付卡点（双信号门）', () => {
     expect(runMemoryCuratorMock).toHaveBeenCalledTimes(1);
   });
 
+  it('Agent「记忆候选」提议 → 调 curator（无需用户线索词）', async () => {
+    await runDeliveryCuratorForTurn({
+      workspacePath: '/ws',
+      turnMessages: [
+        userMsg('u1', '把 CI 理顺'),
+        assistantMsg('a1', '完成。\n记忆候选：CI 统一 node 22'),
+      ],
+      settings,
+    });
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('Ask 模式 → 永不触发交付 curator（压缩前卡点兜底）', async () => {
+    await runDeliveryCuratorForTurn({
+      workspacePath: '/ws-ask',
+      turnMessages: [userMsg('u1', '记住这个约束'), assistantMsg('a1', '好的')],
+      settings,
+      workMode: 'ask',
+    });
+    expect(runMemoryCuratorMock).not.toHaveBeenCalled();
+    scheduleDeliveryCuratorForTurn({
+      workspacePath: '/ws-ask',
+      turnMessages: [userMsg('u1', '记住这个约束'), assistantMsg('a1', '好的')],
+      settings,
+      workMode: 'ask',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runMemoryCuratorMock).not.toHaveBeenCalled();
+  });
+
   it('curator 抛错 → 不上抛，记录 failed', async () => {
     runMemoryCuratorMock.mockRejectedValue(new Error('provider 500'));
     await runDeliveryCuratorForTurn({
       workspacePath: '/ws',
-      turnMessages: [userMsg('u1', '必须用 pnpm'), assistantMsg('a1', '好')],
+      turnMessages: [userMsg('u1', '不要再用 npm'), assistantMsg('a1', '好')],
       settings,
     });
     expect(getLastCuratorOutcome('/ws')).toMatchObject({ kind: 'failed', trigger: 'turn' });
@@ -100,7 +139,7 @@ describe('交付卡点（双信号门）', () => {
     expect(() =>
       scheduleDeliveryCuratorForTurn({
         workspacePath: '/ws',
-        turnMessages: [userMsg('u1', '必须用 pnpm'), assistantMsg('a1', '好')],
+        turnMessages: [userMsg('u1', '不要再用 npm'), assistantMsg('a1', '好')],
         settings,
       })
     ).not.toThrow();

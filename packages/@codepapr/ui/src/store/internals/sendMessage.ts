@@ -76,6 +76,7 @@ import {
   verifyCompactionLanded,
 } from './contextSurfaceStore';
 import { runPreCompactCurator, scheduleDeliveryCuratorForTurn } from './memoryTurnPipeline';
+import { applyEpochCompaction } from './epochCompaction';
 import { loadMemorySectionForPrompt } from '../../utils/memoryFile';
 import type { MidLoopCompactionCommit } from '../../agent/agentWorkerProtocol';
 import { loadSessionMessages, waitForPendingProjectStateSave } from '../../utils/projectStorage';
@@ -168,24 +169,9 @@ export function isTurnInFlight(): boolean {
   return turnInFlight;
 }
 
-/** checkpoint 计划基于 base 消息数组计算（压缩模型调用期间 isLoading=false，
- *  用户可能 reset/清空/追加消息）。应用前校验当前数组是否仍是安全的插入基座：
- *  允许追加（长度增长且 insertIndex 之前的内容一致）；禁止删除/重排——旧
- *  insertIndex 落到末尾会让已删除内容以摘要形式复活（#15）。 */
-export function isSafeCheckpointInsert(
-  base: readonly UIMessage[] | undefined,
-  current: readonly UIMessage[] | undefined,
-  insertIndex: number
-): boolean {
-  if (base === current) return true;
-  if (!base || !current) return false;
-  if (current.length < base.length) return false;
-  const checkLen = Math.min(Math.max(insertIndex, 0), base.length);
-  for (let i = 0; i < checkLen; i += 1) {
-    if (current[i] !== base[i]) return false;
-  }
-  return true;
-}
+// checkpoint 插入基座校验（#15）已随 epoch 提交抽到 epochCompaction 模块；
+// 此处保留 re-export 供既有单测引用。
+export { isSafeCheckpointInsert } from './epochCompaction';
 
 // Snapshot the current todo digest so a context checkpoint can freeze it. The
 // frozen digest is reused on every rebuild (instead of re-rendering from live
@@ -589,120 +575,26 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               return true;
             }
             if (checkpointResult && 'message' in checkpointResult) {
-              if (checkpointResult.cacheStats && compactSessionId) {
-                const cpTier: 'primary' | 'fast' = checkpointResult.modelTier === 'primary' ? 'primary' : 'fast';
-                set((s) => {
-                  if (
-                    s.workspacePath !== workspaceForSlash
-                    || !s.sessions.some((session) => session.id === compactSessionId)
-                  ) {
-                    return {};
-                  }
-                  return {
-                    conversationStats:
-                      s.activeSessionId === compactSessionId
-                        ? addConversationStats(s.conversationStats, cpTier, checkpointResult.cacheStats!)
-                        : s.conversationStats,
-                    sessionConversationStats: {
-                      ...s.sessionConversationStats,
-                      [compactSessionId]: addConversationStats(
-                        getSessionConversationStats(s.sessionConversationStats, compactSessionId),
-                        cpTier,
-                        checkpointResult.cacheStats!
-                      ),
-                    },
-                  };
-                });
-              }
+              // 统一 epoch 提交（与回合末 / Goal 同一条路）：curator → 基座校验插
+              // checkpoint → 销毁旧 agent → await 单事务提交。destroy 策略：
+              // /compact 发生在两回合之间，下一条消息按压缩后的 sessionMessages
+              // 重建即可；无 workspace 时不落 surface（旧行为），commit 由调用方
+              // 注入 no-op。
               if (compactSessionId) {
-                let compactApplied = false;
-                let compactNextMessages: UIMessage[] | null = null;
-                set((s) => {
-                  if (
-                    s.workspacePath !== workspaceForSlash
-                    || !s.sessions.some((session) => session.id === compactSessionId)
-                  ) {
-                    return {};
-                  }
-                  // 必须在 updater 内读最新消息：/compact 不置 isLoading，压缩
-                  // 模型调用期间用户可继续发消息，用 await 前捕获的 sessionMsgs
-                  // 写回会把 await 期间产生的消息整个覆盖丢失。insertIndex 由
-                  // insertCheckpointAtRetainedBoundary 内部做 clamp。
-                  const liveMessages = s.sessionMessages[compactSessionId] ?? [];
-                  // #15：压缩模型调用期间用户可能 reset/清空——校验插入基座，
-                  // 已删除内容不得以摘要形式复活（此时整个 checkpoint 丢弃，
-                  // 也不失效 agent）。
-                  if (!isSafeCheckpointInsert(sessionMsgs, liveMessages, checkpointResult.insertIndex)) {
-                    return {};
-                  }
-                  compactApplied = true;
-                  const nextMessages = insertCheckpointAtRetainedBoundary(
-                    liveMessages,
-                    checkpointResult.message,
-                    checkpointResult.insertIndex
-                  );
-                  compactNextMessages = nextMessages;
-                  return {
-                    messages: s.activeSessionId === compactSessionId ? nextMessages : s.messages,
-                    sessionMessages: { ...s.sessionMessages, [compactSessionId]: nextMessages },
-                  };
+                const compactResult = await applyEpochCompaction(get, set, {
+                  checkpoint: checkpointResult,
+                  baseMessages: sessionMsgs,
+                  trigger: 'manual',
+                  sessionId: compactSessionId,
+                  strategy: 'destroy',
+                  settings: normalizedSettings,
+                  workspacePath: workspaceForSlash ?? '',
+                  commit: workspaceForSlash ? commitCheckpointOrdered : async () => true,
                 });
-
-                // v5 卡点 2（/compact 入口）：骨架先经 curator 落 MEMORY.md，
-                // 再走提交；invalidate 后下一发送按新文件重算 Bootstrap。
-                if (compactApplied && workspaceForSlash) {
-                  const manualPayload = checkpointResult.message.contextCheckpoint;
-                  await runPreCompactCurator({
-                    workspacePath: workspaceForSlash,
-                    skeleton: manualPayload?.skeleton ?? [],
-                    activityText: manualPayload?.activityText,
-                    summaryBlock: manualPayload?.summaryBlock,
-                    settings: normalizedSettings,
-                  });
-                }
-
-                // PR1：压缩提交（ADR-005）——单事务写 compaction 行 + 新 surface
-                // generation；失败记 failed 行并回滚 checkpoint 消息（不变式 5）。
-                // commitCheckpointOrdered 保证 checkpoint 消息先落 archive 再提交。
-                if (compactApplied && compactNextMessages && workspaceForSlash) {
-                  const committed = await commitCheckpointOrdered({
-                    sessionId: compactSessionId,
-                    workspace: workspaceForSlash,
-                    messages: compactNextMessages,
-                    trigger: 'manual',
-                    payload: checkpointResult.message.contextCheckpoint ?? null,
-                    checkpointMessageId: checkpointResult.message.id,
-                  });
-                  if (!committed) {
-                    return true;
-                  }
-                }
-
-                // ⚠️ 修复：压缩后必须让下一回合真正使用压缩后的上下文。
-                // 旧实现只往视图插入 checkpoint 消息，_agent 原样复用（全量历史
-                // 照发），"已节省 X KB" 是假提示。无回合在飞时销毁/失效旧 agent，
-                // 下一条消息按压缩后的 sessionMessages 重建（与回合后 checkpoint
-                // 路径一致）；回合在飞时留给回合后的自动压缩处理，绝不触碰运行中
-                // 的 agent（destroy 会让在飞回合的 chat() 被拒）。
-                if (compactApplied) {
-                  const compactAgent = get()._agent;
-                  const compactAgentOwner = get()._agentSessionId;
-                  const compactTurnInFlight =
-                    get().isLoading && get().loadingSessionId === compactSessionId;
-                  if (compactAgent && compactAgentOwner === compactSessionId && !compactTurnInFlight) {
-                    try {
-                      // 可能在跑 app-agent（papr.agent.run，不占 isLoading）：
-                      // 有在飞 app 执行时 detach 等其结算完自我销毁。
-                      if (compactAgent.hasActiveAppAgentRequests?.()) {
-                        compactAgent.detachAndCleanupWhenIdle?.();
-                      } else {
-                        compactAgent.destroy();
-                      }
-                    } catch {
-                      // already torn down
-                    }
-                    set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
-                  }
+                // 基座失效（并发 reset/清空未复活已删内容）或提交失败（commit
+                // 内部已回滚并 toast）：不报成功。
+                if (!compactResult.applied || !compactResult.committed) {
+                  return true;
                 }
               }
               const compactT = getTranslation(normalizedSettings.lang);
@@ -1350,8 +1242,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             pluginsSection,
             mode,
           );
-          // Inject the frozen, memory-containing bootstrap so the main agent's
-          // log[0] actually carries ledger-rendered memory. The factory prefers
+          // Inject the per-turn (memory-containing) bootstrap so the main agent's
+          // log[0] actually carries the current MEMORY.md. The factory prefers
           // runtime.sessionBootstrapPrompt over its skills+custom-only fallback
           // (agentFactory.ts); without this the computed bootstrap above is used
           // only as a cache key and memory never reaches the primary agent.
@@ -1935,165 +1827,6 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 )
               : undefined;
 
-          type CheckpointWithMessage = Extract<
-            Awaited<ReturnType<typeof maybeGenerateContextCheckpoint>>,
-            { message: UIMessage }
-          >;
-
-          /**
-           * 压缩 epoch 统一提交（所有主线程入口共用：回合末、Goal、/compact 的重建
-           * 策略等价物）。顺序：重读账本渲染 epoch Bootstrap → prime 缓存 + 写回
-           * runtime config → 基座校验插 checkpoint → 就地重建 agent → **await** 单事务
-           * commit（ADR-005，失败在 commitCheckpointOrdered 内回滚）。
-           * Goal 循环（inFlightTurn=true）跳过「另一回合在飞」守卫：迭代间隙本循环
-           * 就是唯一在飞回合，重建后把新句柄写回外层 agent 变量继续跑。
-           */
-          const applyEpochCompaction = async (params: {
-            checkpoint: CheckpointWithMessage;
-            baseMessages: UIMessage[];
-            trigger: 'manual' | 'token-limit';
-            inFlightTurn: boolean;
-            sessionId: string;
-          }): Promise<boolean> => {
-            const { checkpoint, baseMessages, trigger, inFlightTurn, sessionId: sid } = params;
-            // v5 卡点 2（pre-compact）：素材=本次将折叠的骨架；写入在 epoch
-            // 重渲染 Bootstrap 之前完成 → 新记忆随本 epoch 立即生效。
-            const preCompactPayload = checkpoint.message.contextCheckpoint;
-            await runPreCompactCurator({
-              workspacePath,
-              skeleton: preCompactPayload?.skeleton ?? [],
-              activityText: preCompactPayload?.activityText,
-              summaryBlock: preCompactPayload?.summaryBlock,
-              settings: normalizedSettings,
-            });
-            const prevAgent = get()._agent;
-            const prevAgentOwner = get()._agentSessionId;
-            // 压缩 = epoch 变化：Bootstrap 随 epoch 刷新。重读账本重渲染，写回
-            // 缓存并更新 config——就地重建与之后任何 crash/换模型重建都拿到刷新
-            // 版，而不是回合首冻结的旧快照。刷新失败非致命：沿用旧 Bootstrap
-            // （绝不产出无记忆前缀的新 epoch）。
-            let epochBootstrap = runtimeSessionBootstrapPrompt;
-            try {
-              const epochMemorySection = (await loadMemorySectionForPrompt(workspacePath)) ?? undefined;
-              epochBootstrap = buildAgentSessionBootstrapPrompt(
-                normalizedSettings,
-                workspacePath,
-                skillDefinitions,
-                epochMemorySection,
-                pluginsSection,
-                mode,
-              );
-            } catch {
-              // keep frozen turn-start bootstrap
-            }
-            if (epochBootstrap !== runtimeSessionBootstrapPrompt) {
-              runtimeAgentConfig.sessionBootstrapPrompt = epochBootstrap;
-            }
-            const epochPromptKey = [runtimeSystemPrompt, epochBootstrap]
-              .filter(Boolean)
-              .join('\n\n--- session-bootstrap ---\n\n');
-            let checkpointApplied = false;
-            let turnNextMessages: UIMessage[] | null = null;
-            let rebuiltAgent: ReturnType<typeof createAgent> | null = null;
-            set((s) => {
-              const currentSessionMessages = s.sessionMessages[sid] ?? [];
-              // 校验插入基座：reset/清空后旧 insertIndex 会把已删除内容以
-              // 摘要形式插回末尾（复活）——整个 checkpoint 丢弃。
-              if (!isSafeCheckpointInsert(baseMessages, currentSessionMessages, checkpoint.insertIndex)) {
-                return {};
-              }
-              checkpointApplied = true;
-              const nextSessionMessages = insertCheckpointAtRetainedBoundary(
-                currentSessionMessages,
-                checkpoint.message,
-                checkpoint.insertIndex
-              );
-              turnNextMessages = nextSessionMessages;
-              const isCurrentSession = s.activeSessionId === sid;
-              rebuiltAgent = isCurrentSession
-                ? createAgent(
-                    normalizedSettings,
-                    sid,
-                    s.workspacePath,
-                    nextSessionMessages,
-                    {
-                      model: route.model,
-                      thinkingEnabled: route.thinkingEnabled,
-                      temperature: route.temperature,
-                      maxTokens: route.maxTokens,
-                      systemPrompt: runtimeSystemPrompt,
-                    },
-                    runtimeAgentConfig,
-                  )
-                : null;
-
-              return {
-                messages: isCurrentSession ? nextSessionMessages : s.messages,
-                sessionMessages: {
-                  ...s.sessionMessages,
-                  [sid]: nextSessionMessages,
-                },
-                // 检查点压缩了上下文：旧 agent 的 logStore 已失效。用户仍在查看
-                // 则就地重建；否则置空（下次发送按 sessionMessages 重建），
-                // 绝不保留带旧上下文的 agent。
-                _agent: rebuiltAgent,
-                _agentModel: isCurrentSession ? route.model : null,
-                _agentPromptKey: isCurrentSession ? epochPromptKey : null,
-                _agentSessionId: isCurrentSession ? sid : null,
-                conversationStats:
-                  checkpoint.cacheStats && isCurrentSession
-                    ? addConversationStats(
-                        s.conversationStats,
-                        checkpoint.modelTier === 'primary' ? 'primary' : 'fast',
-                        checkpoint.cacheStats
-                      )
-                    : s.conversationStats,
-                sessionConversationStats: checkpoint.cacheStats
-                  ? {
-                      ...s.sessionConversationStats,
-                      [sid]: addConversationStats(
-                        getSessionConversationStats(s.sessionConversationStats, sid),
-                        checkpoint.modelTier === 'primary' ? 'primary' : 'fast',
-                        checkpoint.cacheStats
-                      ),
-                    }
-                  : s.sessionConversationStats,
-              };
-            });
-            if (!checkpointApplied || !turnNextMessages) {
-              return false;
-            }
-            // Goal 循环继续在同一变量上跑：句柄必须换到新实例。
-            if (inFlightTurn && rebuiltAgent) {
-              agent = rebuiltAgent;
-            }
-            // 被替换/失效的旧 agent 已空闲（回合结束/迭代间隙），销毁以回收
-            // worker；仅当它仍属于本会话时才销毁，避免误伤竞态下新建的 agent。
-            // app-agent（papr.agent.run）不占 isLoading：detach 等其结算完自毁。
-            if (prevAgent && prevAgentOwner === sid && get()._agent !== prevAgent) {
-              try {
-                if (prevAgent.hasActiveAppAgentRequests?.()) {
-                  prevAgent.detachAndCleanupWhenIdle?.();
-                } else {
-                  prevAgent.destroy();
-                }
-              } catch {
-                // already torn down
-              }
-            }
-            // ADR-005 单事务提交。必须 await：失败回滚不得与下一回合的
-            // surface 读取竞态（旧 void commit 的「UI 有 checkpoint、surface
-            // 未提交」窗口就在这里消失）。
-            return await commitCheckpointOrdered({
-              sessionId: sid,
-              workspace: workspacePath,
-              messages: turnNextMessages,
-              trigger,
-              payload: checkpoint.message.contextCheckpoint ?? null,
-              checkpointMessageId: checkpoint.message.id,
-            });
-          };
-
           let resp: IAgentResponse;
           if (isGoalMode && goalCondition) {
             // ── Goal 自主循环（Worker + Evaluator 双模型） ──
@@ -2342,13 +2075,28 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     activeSessionId ?? undefined
                   );
                   if (cp && 'message' in cp && activeSessionId) {
-                    await applyEpochCompaction({
+                    const epochResult = await applyEpochCompaction(get, set, {
                       checkpoint: cp,
                       baseMessages: compactionBaseMessages,
                       trigger: 'manual',
-                      inFlightTurn: true,
                       sessionId: activeSessionId,
+                      workspacePath,
+                      settings: normalizedSettings,
+                      commit: commitCheckpointOrdered,
+                      rebuild: {
+                        skillDefinitions,
+                        pluginsSection,
+                        mode,
+                        route,
+                        runtimeSystemPrompt,
+                        fallbackBootstrapPrompt: runtimeSessionBootstrapPrompt,
+                        runtimeAgentConfig,
+                      },
                     });
+                    // Goal 循环继续在同一变量上跑：句柄换到新实例。
+                    if (epochResult.rebuiltAgent) {
+                      agent = epochResult.rebuiltAgent;
+                    }
                   }
                 },
                 writeGoalState: async (state) => {
@@ -2635,6 +2383,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               turnMessages:
                 turnAnchorIndex >= 0 ? turnHistory.slice(turnAnchorIndex) : turnHistory.slice(-6),
               settings: normalizedSettings,
+              workMode: mode,
             });
           }
           // #15：checkpoint 计划基于该数组计算；压缩模型调用期间用户可能
@@ -2664,12 +2413,23 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // 的 agent。
             const anotherTurnRunning = get().isLoading || get().loadingSessionId !== null;
             if (!anotherTurnRunning) {
-              await applyEpochCompaction({
+              await applyEpochCompaction(get, set, {
                 checkpoint: checkpointResult,
                 baseMessages: checkpointBaseMessages,
                 trigger: 'token-limit',
-                inFlightTurn: false,
                 sessionId: activeSessionId!,
+                workspacePath,
+                settings: normalizedSettings,
+                commit: commitCheckpointOrdered,
+                rebuild: {
+                  skillDefinitions,
+                  pluginsSection,
+                  mode,
+                  route,
+                  runtimeSystemPrompt,
+                  fallbackBootstrapPrompt: runtimeSessionBootstrapPrompt,
+                  runtimeAgentConfig,
+                },
               });
             }
           }

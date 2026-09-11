@@ -98,12 +98,13 @@ function buildToolContextConfig(settings: Settings): ToolContextConfig {
 }
 
 /**
- * Build a callback that re-renders session bootstrap from the memory ledger.
+ * Build a callback that re-renders session bootstrap from MEMORY.md.
  * Used by mid-loop context compaction to refresh memory at epoch boundaries
  * (the epoch resets anyway, so no extra cache break). The fresh bootstrap is
- * also written back to the session bootstrap cache under the turn's signature,
- * so later rebuilds (crash recovery / model switch) re-inject the REFRESHED
- * snapshot instead of the one frozen at session start.
+ * used for the compacted epoch itself; the main-thread commit path also writes
+ * the refreshed prompt back into the runtime config. On read failure it falls
+ * back to the turn-start bootstrap — an epoch without a memory prefix must not
+ * exist.
  * Returns null when no bootstrap can be produced.
  */
 function buildBootstrapRefresher(
@@ -124,7 +125,7 @@ function buildBootstrapRefresher(
         runtime.mode ?? 'agent'
       ).trim();
     } catch (err) {
-      // 账本暂时读不到：沿用本会话已冻结的 Bootstrap（epoch 刷新只是
+      // MEMORY.md 暂时读不到：沿用本会话回合首的 Bootstrap（epoch 刷新只是
       // 换内容，不是删前缀）。绝不产出无记忆段的 epoch。
       console.warn('[agent-factory] epoch Bootstrap 刷新失败，沿用旧版:', err);
       return runtime.sessionBootstrapPrompt?.trim() || null;
@@ -141,10 +142,10 @@ export interface AgentRuntimeConfig {
   memorySection?: string;
   /** 仅供 explore/scout 子代理注入（主会话 Bootstrap 已不含 project-graph）。 */
   projectGraphSummary?: string;
-  /** 已按 session 记忆化（冻结）的会话引导，含 skills/memory/character/custom。
-   *  优先用它注入 log[0]，兑现账本记忆每次会话自动加载；缺省时回退到仅 skills+custom。 */
+  /** 本回合渲染的会话引导（含 skills/memory/character/custom），优先注入
+   *  log[0]；缺省时回退到仅 skills+custom。 */
   sessionBootstrapPrompt?: string;
-  /** 本回合 Bootstrap 缓存签名；mid-loop 刷新后据此把新 Bootstrap 写回缓存。 */
+  /** 语言（Bootstrap 等运行时渲染用）。 */
   lang?: Lang;
   /** 当前工作模式：ask/plan 会在注册层屏蔽变更类工具。缺省 agent。 */
   mode?: PromptMode;

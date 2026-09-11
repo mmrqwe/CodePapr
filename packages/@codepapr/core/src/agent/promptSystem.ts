@@ -1368,10 +1368,10 @@ function buildToolConstraints(
   if (hasTool(toolNames, 'write') && mode === 'agent') {
     common.push(
       lang === 'en'
-        ? '- [Project Memory] Long-term project memory lives in `.CodePapr/MEMORY.md`, maintained automatically by the memory curator (at turn delivery and pre-compaction) and editable by the user in the memory panel. Do not try to write it yourself — direct writes are rejected. If you discover a durable fact (a user preference, a verified environment fact, a project convention), state it clearly in your final answer so the user can confirm it; the curator will fold it in.'
+        ? '- [Project Memory] Long-term project memory lives in `.CodePapr/MEMORY.md`, maintained automatically by the memory curator (at turn delivery and pre-compaction) and editable by the user in the memory panel. Do not try to write it yourself — direct writes are rejected. If you discover a durable fact (a user preference, a verified environment fact, a project convention), end your final answer with a separate line starting with `Memory candidate:` stating it — the curator will validate and fold it in, and the user can see it in the conversation.'
         : lang === 'zh-TW'
-        ? '- [項目記憶] 長期專案記憶位於 `.CodePapr/MEMORY.md`，由記憶管家在後台自動維護（回合交付 / 壓縮前兩個卡點），用戶也可在記憶面板直接編輯。不要嘗試自己寫入——直接寫入會被拒絕。若你發現了值得長期記住的事實（用戶偏好、驗證過的環境事實、專案約定），請在最終答覆中明確說明，讓用戶確認；管家會把它歸整進去。'
-        : '- [项目记忆] 长期项目记忆位于 `.CodePapr/MEMORY.md`，由记忆管家在后台自动维护（回合交付 / 压缩前两个卡点），用户也可在记忆面板直接编辑。不要尝试自己写入——直接写入会被拒绝。若你发现了值得长期记住的事实（用户偏好、验证过的环境事实、项目约定），请在最终答复中明确说明，让用户确认；管家会把它归整进去。'
+        ? '- [項目記憶] 長期專案記憶位於 `.CodePapr/MEMORY.md`，由記憶管家在後台自動維護（回合交付 / 壓縮前兩個卡點），用戶也可在記憶面板直接編輯。不要嘗試自己寫入——直接寫入會被拒絕。若你發現了值得長期記住的事實（用戶偏好、驗證過的環境事實、專案約定），請在最終答覆末尾另起一行以「記憶候選：」開頭寫明——管家會校驗並歸整，用戶也能在對話中看到。'
+        : '- [项目记忆] 长期项目记忆位于 `.CodePapr/MEMORY.md`，由记忆管家在后台自动维护（回合交付 / 压缩前两个卡点），用户也可在记忆面板直接编辑。不要尝试自己写入——直接写入会被拒绝。若你发现了值得长期记住的事实（用户偏好、验证过的环境事实、项目约定），请在最终答复末尾另起一行以「记忆候选：」开头写明——管家会校验并归整，用户也能在对话中看到。'
     );
   }
   if (common.length > 0) {

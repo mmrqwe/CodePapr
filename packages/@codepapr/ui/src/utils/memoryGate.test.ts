@@ -14,9 +14,10 @@ function user(id: string, content: string, extra: Partial<GateMessage> = {}): Ga
 function assistant(
   id: string,
   content: string,
-  toolInvocations?: GateMessage['toolInvocations']
+  toolInvocations?: GateMessage['toolInvocations'],
+  extra: Partial<GateMessage> = {}
 ): GateMessage {
-  return { id, role: 'assistant', content, toolInvocations };
+  return { id, role: 'assistant', content, toolInvocations, ...extra };
 }
 
 function bash(
@@ -28,11 +29,19 @@ function bash(
 }
 
 describe('detectTurnMemorySignals', () => {
-  it('线索词：记住/必须/禁止/以后都 命中', () => {
+  it('线索词：记住/以后都 命中；普通模态词「必须/禁止/always」不再触发', () => {
     expect(detectTurnMemorySignals([user('u1', '记住以后都用 pnpm')]).cue).toBe(true);
-    expect(detectTurnMemorySignals([user('u1', '这个项目必须用中文注释')]).cue).toBe(true);
-    expect(detectTurnMemorySignals([user('u1', '禁止提交 .env')]).cue).toBe(true);
+    expect(detectTurnMemorySignals([user('u1', '以后都用 pnpm')]).cue).toBe(true);
+    expect(detectTurnMemorySignals([user('u1', '这个项目必须用中文注释')]).cue).toBe(false);
+    expect(detectTurnMemorySignals([user('u1', '这个项目必须用中文注释')]).constraint).toBe(false);
+    expect(detectTurnMemorySignals([user('u1', '禁止提交 .env')]).cue).toBe(false);
     expect(detectTurnMemorySignals([user('u1', '接下来改按钮样式')]).cue).toBe(false);
+  });
+
+  it('持久禁令：不要再用 / never … again 命中', () => {
+    expect(detectTurnMemorySignals([user('u1', '不要再用 npm 安装依赖')]).constraint).toBe(true);
+    expect(detectTurnMemorySignals([user('u1', 'never use npm again')]).constraint).toBe(true);
+    expect(detectTurnMemorySignals([user('u1', 'must use pnpm')]).cue).toBe(true);
   });
 
   it('线索词忽略合成/隐藏消息（goal 锚点、checkpoint）', () => {
@@ -43,6 +52,30 @@ describe('detectTurnMemorySignals', () => {
       detectTurnMemorySignals([
         user('u1', '必须记住', { contextCheckpoint: {} as never }),
       ]).cue
+    ).toBe(false);
+  });
+
+  it('Agent 主动提议：最终答复「记忆候选：」命中；ask 答复与合成消息不算', () => {
+    expect(
+      detectTurnMemorySignals([
+        user('u1', '把构建脚本整理一下'),
+        assistant('a1', '完成了。\n记忆候选：构建统一走 pnpm，禁止 npm'),
+      ]).agentProposal
+    ).toBe(true);
+    expect(
+      detectTurnMemorySignals([
+        assistant('a1', '完成了。\nMemory candidate: use pnpm everywhere'),
+      ]).agentProposal
+    ).toBe(true);
+    expect(
+      detectTurnMemorySignals([
+        assistant('a1', '记忆候选：提问语境', undefined, { workMode: 'ask' }),
+      ]).agentProposal
+    ).toBe(false);
+    expect(
+      detectTurnMemorySignals([
+        assistant('a1', '记忆候选：合成', undefined, { synthetic: true }),
+      ]).agentProposal
     ).toBe(false);
   });
 
@@ -62,10 +95,47 @@ describe('detectTurnMemorySignals', () => {
     ).toBe('npm run build');
   });
 
-  it('shouldRunDeliveryCurator：两个信号任一命中即开', () => {
-    expect(shouldRunDeliveryCurator({ cue: false, verifiedCommand: null })).toBe(false);
-    expect(shouldRunDeliveryCurator({ cue: true, verifiedCommand: null })).toBe(true);
-    expect(shouldRunDeliveryCurator({ cue: false, verifiedCommand: 'pnpm test' })).toBe(true);
+  it('shouldRunDeliveryCurator：任一信号命中即开', () => {
+    expect(
+      shouldRunDeliveryCurator({
+        cue: false,
+        constraint: false,
+        agentProposal: false,
+        verifiedCommand: null,
+      })
+    ).toBe(false);
+    expect(
+      shouldRunDeliveryCurator({
+        cue: true,
+        constraint: false,
+        agentProposal: false,
+        verifiedCommand: null,
+      })
+    ).toBe(true);
+    expect(
+      shouldRunDeliveryCurator({
+        cue: false,
+        constraint: true,
+        agentProposal: false,
+        verifiedCommand: null,
+      })
+    ).toBe(true);
+    expect(
+      shouldRunDeliveryCurator({
+        cue: false,
+        constraint: false,
+        agentProposal: true,
+        verifiedCommand: null,
+      })
+    ).toBe(true);
+    expect(
+      shouldRunDeliveryCurator({
+        cue: false,
+        constraint: false,
+        agentProposal: false,
+        verifiedCommand: 'pnpm test',
+      })
+    ).toBe(true);
   });
 });
 

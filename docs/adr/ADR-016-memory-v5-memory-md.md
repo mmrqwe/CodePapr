@@ -33,7 +33,7 @@
 
 internal 子代理（零工具、fast 档、复用压缩模型/温度、prompt 运行时注入）。两个卡点：
 
-- **交付卡点**：回合结束，双信号门命中才跑——本回合用户原话含记忆线索词（「记住 / 必须 / 不要 / 以后 / 约定 / prefer / always / never…」），或本回合有验证成功的测试/构建命令。命中则 fire-and-forget（不阻塞回合收尾）。
+- **交付卡点**：回合结束，多信号门命中才跑——显式记忆意图（「记住 / 以后都 / please remember…」）、持久禁令（「不要再用 / never … again」）、**Agent 主动提议**（最终答复里以「记忆候选：」/`Memory candidate:` 标记的稳定事实），或本回合有验证成功的测试/构建命令。命中则 fire-and-forget（不阻塞回合收尾）。**Ask 模式永不触发**；普通模态词（必须 / 务必 / always…）不触发——它们是日常任务指令的高频词，纳入会每回合误触（费 token + 前缀缓存抖动），兜底交给压缩前卡点。
 - **压缩前卡点**：任意压缩入口（回合末 epoch、`/compact`、Goal force、mid-loop 提交前）**无条件**运行，20s 超时。压缩本来就重置前缀缓存，这一刀零额外成本；写入发生在 epoch 重渲染 Bootstrap 之前，新记忆立刻随 epoch 生效。
 
 管家输出三选一：完整 MEMORY.md 内容 / `NO_CHANGE` / 拒绝说明。写入走 `requestMemoryMdWrite` 单飞队列 + `expectedContent` 并发守卫（读取后被并发修改则拒绝，面板重载后再试）。
@@ -45,7 +45,7 @@ internal 子代理（零工具、fast 档、复用压缩模型/温度、prompt �
 
 ### 4. Agent 无记忆工具
 
-`memory_write` / `memory_search` / `memory_list` / `memory_forget` 全部退役。Agent 被明确告知：「不要自己写 MEMORY.md——直接写入会被拒绝。发现值得长期记住的事实在回答中说明，由用户确认，管家会归纳。」`workspaceFileTools` 对 `.CodePapr/MEMORY.md` 的 `write` / `patch` / `diff` 直接抛错拒绝。
+`memory_write` / `memory_search` / `memory_list` / `memory_forget` 全部退役。Agent 被明确告知：「不要自己写 MEMORY.md——直接写入会被拒绝。发现值得长期记住的事实，在最终答复末尾另起一行以『记忆候选：』写明。」`workspaceFileTools` 对 `.CodePapr/MEMORY.md` 的 `write` / `patch` / `diff` 直接抛错拒绝。Agent 由此获得的是**受控提议通道**（标记 → 交付门 → 管家校验落盘），不是裸写权限；提议与实际落盘之间永远隔着管家提示词 + 机械门。
 
 ### 5. 注入：每回合直读，不再冻结
 

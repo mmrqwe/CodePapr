@@ -13,6 +13,7 @@
  */
 
 import type { CompactionSettings, UIMessage } from './types';
+import type { WorkMode } from '../../utils/agentPrompts';
 import {
   buildSkeletonMaterial,
   buildTurnMaterial,
@@ -124,13 +125,18 @@ async function runCuratorSafe(params: {
 
 /**
  * 卡点 1：交付触发（门控）。调用方传「本回合」的消息切片（含本轮 user 消息），
- * 不传全史——否则历史里的旧「必须…」会每回合重复触发。
+ * 不传全史——否则历史里的旧线索会每回合重复触发。Ask 模式永不触发：它不产生
+ * 工作事实，用户约束更多是提问语境，交给压缩前卡点兜底。
  */
 export async function runDeliveryCuratorForTurn(params: {
   workspacePath: string;
   turnMessages: readonly UIMessage[];
   settings: CompactionSettings;
+  workMode?: WorkMode;
 }): Promise<void> {
+  if (params.workMode === 'ask') {
+    return;
+  }
   const signals = detectTurnMemorySignals(params.turnMessages as never);
   if (!shouldRunDeliveryCurator(signals)) {
     return;
@@ -148,6 +154,7 @@ export function scheduleDeliveryCuratorForTurn(params: {
   workspacePath: string;
   turnMessages: readonly UIMessage[];
   settings: CompactionSettings;
+  workMode?: WorkMode;
 }): void {
   void runDeliveryCuratorForTurn(params).catch(() => undefined);
 }
