@@ -96,7 +96,7 @@ function currentTodoDigest(sessionId: string): string | undefined {
  * Build the session-bootstrap log message (log[0] shape) carrying a freshly
  * rendered bootstrap. Mid-loop compaction drops the original bootstrap (it sits
  * before the checkpoint and is summarized away); re-injecting a fresh one here
- * restores the ledger-rendered memory / skills / plugins into the new epoch.
+ * restores the MEMORY.md-rendered memory / skills / plugins into the new epoch.
  * The epoch is already being reset, so this adds no extra prefix-cache break.
  */
 export function buildSessionBootstrapMessage(bootstrap: string): IMessage {
@@ -120,8 +120,8 @@ export function buildSessionBootstrapMessage(bootstrap: string): IMessage {
  * UI uses between turns (checkpoint summary + pruning) and return the compacted
  * core messages, which the Agent swaps in as a new context epoch.
  *
- * `refreshBootstrap` (optional) re-reads the volatile memory ledger and
- * rebuilds the session bootstrap (and primes the per-session bootstrap cache);
+ * `refreshBootstrap` (optional) re-reads MEMORY.md and rebuilds the session
+ * bootstrap;
  * when it returns a non-empty string, the compacted epoch is prefixed with a
  * fresh bootstrap message so memory stays current across long sessions without
  * breaking the prefix cache (the epoch is reset anyway).

@@ -23,9 +23,9 @@ import { toolByName } from '../tools/workspaceToolDefinitions';
 
 /**
  * P0 评测边界：这些工具依赖桌面 WebView 生命周期/面板（browser overlay、
- * app 生命周期、memory 准入）。headless 不声明它们——模型看不到就不会
- * 调用，避免“每次调用必失败”的脏 trace。P1 若开放 CDP/memory 数据面，
- * 从这里移除对应项并接入应答器。
+ * app 生命周期）。headless 不声明它们——模型看不到就不会调用，避免
+ * “每次调用必失败”的脏 trace。P1 若开放 CDP 数据面，从这里移除对应项
+ * 并接入应答器。
  */
 export const HEADLESS_UI_BOUND_EXCLUDED: ReadonlySet<string> = new Set([
   'browser',

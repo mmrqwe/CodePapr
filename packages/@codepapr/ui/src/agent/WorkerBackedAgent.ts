@@ -240,7 +240,7 @@ function createWorkerToolExecutor(config: WorkerBackedAgentConfig): {
   );
 
   // TodoList 工具：handler 改主线程的 store，由 Worker 通过 tool-request 桥回执行
-  // 极简工具面：todo/memory/MCP 不在 allowlist，不注册（worker 收到的
+  // 极简工具面：todo/MCP 不在 allowlist，不注册（worker 收到的
   // toolDefinitions 同步缺位，幻觉调用在 worker 侧报 unknown tool）。
   const minimalSurface = config.settings.agentToolProfile === 'minimal';
   if (!minimalSurface) {

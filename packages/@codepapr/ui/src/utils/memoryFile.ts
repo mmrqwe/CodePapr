@@ -8,7 +8,7 @@
  *   机械门（密钥 redact、注入风险、token/行数上限、无新增 mass-drop 检查）；
  *   校验不过 = 拒写并返回原因（curator 与面板保存共用同一道门）。
  *
- * 尺寸限制：MEMORY_MD_MAX_TOKENS 是唯一硬闸（约 8KB ≈ 60 行），curator 输出
+ * 尺寸限制：MEMORY_MD_MAX_TOKENS 是唯一硬闸（约 16KB ≈ 120 行），curator 输出
  * 与手工保存共用；因此注入端不需要二次裁剪。旧账本 → 文件的 seed 迁移由
  * Rust DB v9 迁移在打开项目时完成，TS 侧不再读账本。
  */
@@ -19,8 +19,8 @@ import { invoke } from '@tauri-apps/api/core';
 
 export const MEMORY_MD_PATH = '.CodePapr/MEMORY.md';
 /** 写盘硬顶（估算口径）：注入预算与文件预算同源，注入端不再截断。 */
-export const MEMORY_MD_MAX_TOKENS = 2_000;
-export const MEMORY_MD_MAX_LINES = 60;
+export const MEMORY_MD_MAX_TOKENS = 4_000;
+export const MEMORY_MD_MAX_LINES = 120;
 
 export type MemoryMdLang = 'zh-CN' | 'zh-TW' | 'en';
 

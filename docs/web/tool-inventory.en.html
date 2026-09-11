@@ -512,7 +512,7 @@
             <div class="addr">MEM</div>
             <div class="name">.CodePapr/MEMORY.md<span class="cchip c-text">Project memory file</span><span class="exp"></span></div>
           </div>
-          <div class="desc">A single Markdown file in the workspace (three sections: user preferences &amp; constraints / tech stack &amp; environment / architecture &amp; known facts), hard-capped at 60 lines / ~2000 tokens. The built-in memory curator maintains it at two checkpoints — delivery (dual-signal gate) and pre-compaction (unconditional, 20s timeout) — with mechanical gates for secrets, injection, dangerous commands, size, and memory-washing.</div>
+          <div class="desc">A single Markdown file in the workspace (three sections: user preferences &amp; constraints / tech stack &amp; environment / architecture &amp; known facts), hard-capped at 120 lines / ~4000 tokens. The built-in memory curator maintains it at two checkpoints — delivery (dual-signal gate) and pre-compaction (unconditional, 20s timeout) — with mechanical gates for secrets, injection, dangerous commands, size, and memory-washing.</div>
           <div class="more"><div class="mbox">The Agent has no <code>memory_*</code> tools and direct file writes are rejected; every turn reads the file into session bootstrap (effective the next turn after saving). The panel (Context inspector → Memory) is that file's editor: budget bar + save + curator status line.</div></div>
         </div>
       </section>

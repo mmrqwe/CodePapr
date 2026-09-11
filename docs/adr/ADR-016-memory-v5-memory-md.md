@@ -64,6 +64,6 @@ internal 子代理（零工具、fast 档、复用压缩模型/温度、prompt �
 - **删除**：`memory_*` 工具、账本读写/召回/审计、FTS 与近义合并、`cold-start` 派生收敛、memory IPC 路由与 Tauri 命令、`sessionBootstrapCache` 冻结与 `refreshBootstrap` epoch 机器、re-recall anchor 插入机制、`planMemoryWrite` 写入门与 `RequestContextInsertion`。
 - **保留**：`envelopeContent` / `redactSecrets`（供管家机械门复用）、Session Bootstrap 分层（ADR-001/004）。
 - 记忆可见性：从「最迟下次压缩有效」变为「保存后下一回合生效」。
-- Recall 消失：所有记忆每回合全量注入；60 行硬上限就是预算。
+- Recall 消失：所有记忆每回合全量注入；120 行硬上限就是预算。
 - 质量责任转移：从确定性门 + 条目级规则转移到「管家提示词 + 机械兜底 + 用户可编辑」。
 - 不支持按种类差异化注入（citation / procedure 等概念随账本一起退役）。

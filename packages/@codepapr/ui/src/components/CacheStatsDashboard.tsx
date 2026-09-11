@@ -8,64 +8,6 @@ import {
 import type { ConversationStats, ModelTierStats } from '../store/internals/types';
 import { getTranslation, type Lang } from '../utils/i18n';
 
-interface DeepSeekPriceTier {
-  cacheReadPerMillionRmb: number;
-  cacheMissInputPerMillionRmb: number;
-  outputPerMillionRmb: number;
-}
-
-interface DeepSeekPricing {
-  modelLabel: string;
-  offPeak: DeepSeekPriceTier;
-  peak: DeepSeekPriceTier;
-}
-
-const PRIMARY_PRICING: DeepSeekPricing = {
-  modelLabel: 'deepseek-v4-pro',
-  offPeak: {
-    cacheReadPerMillionRmb: 0.15,
-    cacheMissInputPerMillionRmb: 4.5,
-    outputPerMillionRmb: 13.5,
-  },
-  peak: {
-    cacheReadPerMillionRmb: 0.3,
-    cacheMissInputPerMillionRmb: 9,
-    outputPerMillionRmb: 27,
-  },
-};
-
-const FAST_PRICING: DeepSeekPricing = {
-  modelLabel: 'deepseek-v4-flash',
-  offPeak: {
-    cacheReadPerMillionRmb: 0.05,
-    cacheMissInputPerMillionRmb: 1.5,
-    outputPerMillionRmb: 4.5,
-  },
-  peak: {
-    cacheReadPerMillionRmb: 0.1,
-    cacheMissInputPerMillionRmb: 3,
-    outputPerMillionRmb: 9,
-  },
-};
-
-function formatRmb(value: number): string {
-  return `¥${value.toFixed(5)}`;
-}
-
-function tierCost(
-  cacheRead: number,
-  cacheMissInput: number,
-  output: number,
-  tier: DeepSeekPriceTier
-): number {
-  return (
-    (cacheRead * tier.cacheReadPerMillionRmb +
-      cacheMissInput * tier.cacheMissInputPerMillionRmb +
-      output * tier.outputPerMillionRmb) /
-    1_000_000
-  );
-}
-
 function StatRow({ label, value, color = 'text-fg-soft' }: { label: string; value: string | number; color?: string }) {
   return (
     <div className="flex justify-between items-center py-1.5">
@@ -78,34 +20,18 @@ function StatRow({ label, value, color = 'text-fg-soft' }: { label: string; valu
 interface ModelStatsBlockProps {
   title: string;
   stats: ModelTierStats;
-  pricing?: DeepSeekPricing;
   t: Record<string, string>;
-  showCost?: boolean;
   footnote?: string;
-  /** 弹窗宽屏模式：卡片内命中率/token 明细、耗时/费用改为左右并排。 */
+  /** 弹窗宽屏模式：卡片内命中率/token/耗时明细左右并排。 */
   wide?: boolean;
 }
 
-function ModelStatsBlock({ title, stats, pricing, t, showCost = true, footnote, wide = false }: ModelStatsBlockProps) {
+function ModelStatsBlock({ title, stats, t, footnote, wide = false }: ModelStatsBlockProps) {
   const { totalCacheRead, totalCacheCreation, totalInput, totalOutput, calls, rounds } = stats;
 
   const totalTokens = totalCacheRead + totalCacheCreation + totalInput;
   const totalCacheMissInput = totalCacheCreation + totalInput;
   const hitRate = totalTokens > 0 ? totalCacheRead / totalTokens : 0;
-
-  const costWithCacheOffPeak = pricing
-    ? tierCost(totalCacheRead, totalCacheMissInput, totalOutput, pricing.offPeak)
-    : 0;
-  const costWithCachePeak = pricing
-    ? tierCost(totalCacheRead, totalCacheMissInput, totalOutput, pricing.peak)
-    : 0;
-  const costWithoutCacheOffPeak = pricing
-    ? tierCost(0, totalTokens, totalOutput, pricing.offPeak)
-    : 0;
-  const costWithoutCachePeak = pricing
-    ? tierCost(0, totalTokens, totalOutput, pricing.peak)
-    : 0;
-  const savings = costWithoutCacheOffPeak > 0 ? 1 - costWithCacheOffPeak / costWithoutCacheOffPeak : 0;
 
   const hitColor =
     hitRate >= 0.8 ? 'text-green-400' : hitRate >= 0.5 ? 'text-yellow-400' : 'text-fg-muted';
@@ -152,41 +78,6 @@ function ModelStatsBlock({ title, stats, pricing, t, showCost = true, footnote, 
                 value={formatDuration(stats.toolRuntimeMs)}
                 color="text-fg-soft"
               />
-            </div>
-          )}
-
-          {showCost && pricing && (
-            <div>
-              <p className="mb-2 text-[11px] font-medium text-fg-muted">{t.costEstimation}</p>
-              <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1.5">
-                <span />
-                <span className="text-right text-[10px] text-fg-dim">{t.offPeakLabel}</span>
-                <span className="text-right text-[10px] text-fg-dim">{t.peakLabel}</span>
-
-                <span className="text-xs text-fg-muted">{t.actualCost}</span>
-                <span className="text-right font-mono text-xs font-medium text-accent">
-                  {formatRmb(costWithCacheOffPeak)}
-                </span>
-                <span className="text-right font-mono text-xs font-medium text-accent">
-                  {formatRmb(costWithCachePeak)}
-                </span>
-
-                <span className="text-xs text-fg-muted">{t.withoutCache}</span>
-                <span className="text-right font-mono text-xs text-fg-muted">
-                  {formatRmb(costWithoutCacheOffPeak)}
-                </span>
-                <span className="text-right font-mono text-xs text-fg-muted">
-                  {formatRmb(costWithoutCachePeak)}
-                </span>
-              </div>
-              <div className="mt-2 border-t border-line pt-2">
-                <StatRow
-                  label={t.savings}
-                  value={`${(savings * 100).toFixed(1)}%`}
-                  color={savings > 0.5 ? 'text-green-400' : 'text-fg-muted'}
-                />
-              </div>
-              <p className="mt-2 text-[10px] leading-relaxed text-fg-dim">{t.priceNotice}</p>
             </div>
           )}
         </div>
@@ -280,7 +171,6 @@ export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: 
             <ModelStatsBlock
               title={t.primaryModelTag}
               stats={displayedStats.primary}
-              pricing={PRIMARY_PRICING}
               t={t}
               wide={wide}
             />
@@ -288,7 +178,6 @@ export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: 
             <ModelStatsBlock
               title={t.fastModelTag}
               stats={displayedStats.fast}
-              pricing={FAST_PRICING}
               t={t}
               wide={wide}
             />
@@ -299,7 +188,6 @@ export function CacheStatsDashboard({ lang, collapsible = true, wide = false }: 
                   title={`${t.mentorModelTag} · ${settings.mentorModel}`}
                   stats={displayedStats.mentor}
                   t={t}
-                  showCost={false}
                   footnote={t.mentorStatsIncludedNote}
                   wide={wide}
                 />

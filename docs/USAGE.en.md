@@ -303,7 +303,7 @@ Cross-session project memory is a single file in your workspace: **`.CodePapr/ME
 
 The curator only sees the turn's user text and the assistant's final text (for compaction it sees the skeleton being folded) — **never raw tool output**. It returns the full file content or `NO_CHANGE`, and writes immediately.
 
-**Mechanical guardrails**: secrets are redacted; injection instructions / dangerous commands / policy bypasses are rejected; files over 60 lines or ~2000 tokens are rejected; “no additions while dropping more than half the items” is treated as memory-washing and rejected; a concurrent edit causes a conflict, reload and retry from the panel.
+**Mechanical guardrails**: secrets are redacted; injection instructions / dangerous commands / policy bypasses are rejected; files over 120 lines or ~4000 tokens are rejected; “no additions while dropping more than half the items” is treated as memory-washing and rejected; a concurrent edit causes a conflict, reload and retry from the panel.
 
 **The Agent does not write memory**: `memory_write / memory_search / memory_list / memory_forget` are retired, and direct writes to `.CodePapr/MEMORY.md` by the Agent are intercepted and rejected. When the Agent finds a durable fact, it should state it in the answer for you to confirm; the curator folds it in on a later turn.
 

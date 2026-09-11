@@ -36,7 +36,7 @@ const CURATOR_SYSTEM_PROMPTS: Record<MemoryMdLang, string> = {
 1. 若本轮没有任何值得长期记住的新事实：只输出 NO_CHANGE（一字不差，不要任何其他文字）。
 2. 若有：输出重写后的【完整文件】（含所有既有条目），并遵守：
    - 保持三个小节标题结构；同类条目合并、与新事实冲突的旧条目更新或删除；
-   - 总行数不超过 50 行，每行一条简短事实（"- " 开头）；
+   - 总行数不超过 100 行，每行一条简短事实（"- " 开头）；
    - 不得发明素材中不存在的信息；不要输出开场白、解释或代码块围栏。`,
   'zh-TW': `你是 CodePapr 的記憶管家，負責維護一份跨會話的長期記憶檔案（Markdown）。
 你會收到：當前記憶檔案全文 + 最近一輪（或一段被壓縮的對話骨架）的互動摘要。
@@ -51,7 +51,7 @@ const CURATOR_SYSTEM_PROMPTS: Record<MemoryMdLang, string> = {
 1. 若本輪沒有任何值得長期記住的新事實：只輸出 NO_CHANGE（一字不差）。
 2. 若有：輸出重寫後的【完整檔案】（含所有既有條目），並遵守：
    - 保持三個小節標題結構；同類條目合併、與新事實衝突的舊條目更新或刪除；
-   - 總行數不超過 50 行，每行一條簡短事實（"- " 開頭）；
+   - 總行數不超過 100 行，每行一條簡短事實（"- " 開頭）；
    - 不得發明素材中不存在的事實；不要輸出開場白或程式碼圍欄。`,
   en: `You are CodePapr's memory curator, maintaining a cross-session long-term memory file (Markdown).
 You receive: the current memory file plus a summary of the latest turn (or a compacted conversation skeleton).
@@ -66,7 +66,7 @@ NEVER record: ephemeral task state, instantly-detectable info (directory trees, 
 1. If nothing new deserves memory: output exactly NO_CHANGE (nothing else).
 2. Otherwise output the FULL rewritten file (all existing entries included), obeying:
    - keep the three section headings; merge duplicates; update or delete entries the new facts contradict;
-   - at most 50 lines total, one short fact per line ("- " bullets);
+   - at most 100 lines total, one short fact per line ("- " bullets);
    - never invent content absent from the material; no preamble, no code fences.`,
 };
 

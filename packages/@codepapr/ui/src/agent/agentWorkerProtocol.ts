@@ -460,8 +460,7 @@ export type AgentWorkerToMainMessage =
       /** Assistant tool-call id this execution fulfills; preferred for matching
        *  the pending call over name+arguments (robust for identical calls). */
       toolCallId?: string;
-      /** PR5（ADR-009 第11条）：当前回合 canonical user message id，仅
-       *  memory_search 等需要 recall anchor 的工具随请求下发。 */
+      /** 当前回合 canonical user message id（消息身份，随请求下发）。 */
       userMessageId?: string;
       /** app agent 专属：该 app 的两轴访问档，主线程据此构建 bash 等工具的沙箱 */
       appAccess?: { network: boolean; workspaceWrite: boolean; allowCodepaprApps?: boolean };
