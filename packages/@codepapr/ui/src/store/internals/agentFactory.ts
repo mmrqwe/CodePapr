@@ -39,6 +39,7 @@ import { registerMcpTools } from '../../tools/mcpTools';
 import { registerTodoListTools } from '../../tools/todoListTool';
 import { mcpSearchHidesNativeWeb } from '../../utils/mcpTypes';
 import {
+  buildFastProviderInstance,
   buildProviderInstance,
   shouldUseSidecarAgentRuntime,
   shouldUseWorkerAgentRuntime,
@@ -309,6 +310,11 @@ export function buildUiTaskToolContext(
   const baseModel = (overrides.model ?? settings.model).trim();
   const provider = buildProviderInstance(settings, sessionId);
   const providerName = resolveProviderName(settings);
+  const fastProvider = buildFastProviderInstance(settings, sessionId);
+  const fastProviderName = resolveProviderName({
+    apiMode: settings.fastApiMode,
+    apiFormat: settings.fastApiFormat,
+  });
 
   // Filter out mentor agent when mentor is not enabled
   const availableAgents = runtime.agentDefinitions.filter(
@@ -344,6 +350,8 @@ export function buildUiTaskToolContext(
     sessionId,
     provider,
     providerName,
+    fastProvider,
+    fastProviderName,
     baseModel,
     fastModelEnabled: settings.fastModelEnabled,
     fastModel: settings.fastModel,

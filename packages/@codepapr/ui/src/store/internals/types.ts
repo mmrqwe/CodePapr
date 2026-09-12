@@ -68,6 +68,11 @@ export interface Settings {
   baseURL: string;
   model: string;
   fastModel: string;
+  /** 快速档凭据（派生自 active fast profile；运行时分流到独立端点时使用）。 */
+  fastApiMode: ApiMode;
+  fastApiFormat: ApiFormat;
+  fastApiKey: string;
+  fastBaseURL: string;
   apiKey: string;
   /** 自定义附加请求头（派生自主配置文件 primaryProfile.extraHeaders）。 */
   extraHeaders?: Record<string, string>;
@@ -188,6 +193,10 @@ export interface CompactionSettings {
   apiFormat: ApiFormat;
   apiKey: string;
   baseURL: string;
+  fastApiMode?: ApiMode;
+  fastApiFormat?: ApiFormat;
+  fastApiKey?: string;
+  fastBaseURL?: string;
   streamIdleTimeoutMs: number;
   maxContextTokens: number;
   lang?: Lang;

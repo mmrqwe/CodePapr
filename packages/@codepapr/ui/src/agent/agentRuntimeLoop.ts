@@ -509,13 +509,25 @@ function mergeTwoCacheStats(
 
 /** sessionId：对话级稳定标识，透传给 OpenCode Go 网关做会话级缓存路由
  *  （provider 实例每回合重建，缺省会回退为随机 id，破坏缓存亲和性）。 */
-function buildProvider(settings: WorkerAgentSettings, sessionId?: string) {
-  if (settings.apiMode === 'local') {
+type WorkerProviderKind = 'deepseek' | 'openai' | 'claude' | 'response';
+
+function buildProviderFrom(
+  input: {
+    apiMode: WorkerAgentSettings['apiMode'];
+    provider: WorkerProviderKind;
+    apiKey: string;
+    baseURL: string;
+    extraHeaders?: Record<string, string>;
+    streamIdleTimeoutMs: number;
+  },
+  sessionId?: string
+) {
+  if (input.apiMode === 'local') {
     return new LocalProvider({
-      apiKey: settings.apiKey.trim() || 'local',
-      baseURL: settings.baseURL.trim().replace(/\/+$/, '') || DEFAULT_LOCAL_BASE_URL,
-      idleTimeoutMs: settings.streamIdleTimeoutMs,
-      ...(settings.extraHeaders ? { extraHeaders: settings.extraHeaders } : {}),
+      apiKey: input.apiKey.trim() || 'local',
+      baseURL: input.baseURL.trim().replace(/\/+$/, '') || DEFAULT_LOCAL_BASE_URL,
+      idleTimeoutMs: input.streamIdleTimeoutMs,
+      ...(input.extraHeaders ? { extraHeaders: input.extraHeaders } : {}),
     });
   }
 
@@ -526,16 +538,16 @@ function buildProvider(settings: WorkerAgentSettings, sessionId?: string) {
     sessionId?: string;
     extraHeaders?: Record<string, string>;
   } = {
-    apiKey: settings.apiKey.trim(),
-    idleTimeoutMs: settings.streamIdleTimeoutMs,
+    apiKey: input.apiKey.trim(),
+    idleTimeoutMs: input.streamIdleTimeoutMs,
     ...(sessionId ? { sessionId } : {}),
-    ...(settings.extraHeaders ? { extraHeaders: settings.extraHeaders } : {}),
+    ...(input.extraHeaders ? { extraHeaders: input.extraHeaders } : {}),
   };
-  if (settings.apiMode === 'custom') {
-    config.baseURL = settings.baseURL.trim().replace(/\/+$/, '');
+  if (input.apiMode === 'custom') {
+    config.baseURL = input.baseURL.trim().replace(/\/+$/, '');
   }
 
-  switch (settings.provider) {
+  switch (input.provider) {
     case 'deepseek':
       return new DeepSeekProvider(config);
     case 'claude':
@@ -545,6 +557,49 @@ function buildProvider(settings: WorkerAgentSettings, sessionId?: string) {
     default:
       return new OpenAIProvider(config);
   }
+}
+
+function buildProvider(settings: WorkerAgentSettings, sessionId?: string) {
+  return buildProviderFrom(
+    {
+      apiMode: settings.apiMode,
+      provider: settings.provider,
+      apiKey: settings.apiKey,
+      baseURL: settings.baseURL,
+      extraHeaders: settings.extraHeaders,
+      streamIdleTimeoutMs: settings.streamIdleTimeoutMs,
+    },
+    sessionId
+  );
+}
+
+function resolveFastProviderKind(settings: WorkerAgentSettings): WorkerProviderKind {
+  const apiMode = settings.fastApiMode ?? settings.apiMode;
+  const apiFormat = settings.fastApiFormat ?? settings.apiFormat;
+  if (apiMode === 'deepseek') return 'deepseek';
+  if (apiMode === 'local') return 'openai';
+  return apiFormat;
+}
+
+/** 快速档 provider：与 providerFactory.buildFastProviderInstance 同语义——
+ *  同 provider 类型继承主档 baseURL，key 为空回退主档；异类用自身端点默认值。 */
+function buildFastProvider(settings: WorkerAgentSettings, sessionId?: string) {
+  const apiMode = settings.fastApiMode ?? settings.apiMode;
+  const apiFormat = settings.fastApiFormat ?? settings.apiFormat;
+  const apiKey = (settings.fastApiKey ?? '').trim() || settings.apiKey.trim();
+  const sameProviderKind = apiMode === settings.apiMode && apiFormat === settings.apiFormat;
+  const baseURL = (settings.fastBaseURL ?? '').trim() || (sameProviderKind ? settings.baseURL : '');
+  return buildProviderFrom(
+    {
+      apiMode,
+      provider: resolveFastProviderKind(settings),
+      apiKey,
+      baseURL,
+      extraHeaders: settings.extraHeaders,
+      streamIdleTimeoutMs: settings.streamIdleTimeoutMs,
+    },
+    sessionId
+  );
 }
 
 function createLog(sessionId: string, messages: IMessage[]): AppendOnlyLog {
@@ -913,11 +968,15 @@ async function runSubagent(
       : `subagent-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   // 子代理是一次独立的子对话：会话路由 id 在父对话下按 run 派生，
   // run 内多轮工具调用稳定复用（provider 每 run 只建一次）。
-  let subagentProvider: ILLMProvider = buildProvider(
-    payload.settings,
-    `${payload.sessionId}:subagent:${runId}`
-  );
-  let subagentProviderName: 'deepseek' | 'openai' | 'claude' | 'response' = payload.providerName;
+  // fast 档（explore/scout 快速模式、按任务自动分流）走 active fast profile
+  // 的独立端点/密钥；mentor 档在下方覆盖。
+  const subagentSessionId = `${payload.sessionId}:subagent:${runId}`;
+  let subagentProvider: ILLMProvider =
+    exec.tier === 'fast'
+      ? buildFastProvider(payload.settings, subagentSessionId)
+      : buildProvider(payload.settings, subagentSessionId);
+  let subagentProviderName: 'deepseek' | 'openai' | 'claude' | 'response' =
+    exec.tier === 'fast' ? resolveFastProviderKind(payload.settings) : payload.providerName;
   if (exec.mentor) {
     const config = {
       apiKey: exec.mentor.apiKey,
@@ -1274,11 +1333,15 @@ async function handleRunAppAgent(
   if (!ALLOWED_MODEL_TIERS.has(model)) {
     model = 'main';
   }
+  // 快速档分流：provider 也换成 active fast profile 的独立端点/密钥。
+  let isFastTier = false;
   if (model === 'main') {
-    model = cachedSettings.appSubAgentModelTier === 'fast'
+    isFastTier = cachedSettings.appSubAgentModelTier === 'fast';
+    model = isFastTier
       ? (cachedSettings.fastModel || cachedSettings.model)
       : cachedSettings.model;
   } else if (model === 'fast') {
+    isFastTier = true;
     model = cachedSettings.fastModel || cachedSettings.model;
   } else if (model === 'mentor') {
     // mentorEnabled 关闭时不允许借用 mentor 模型名，回落到主模型。
@@ -1290,8 +1353,12 @@ async function handleRunAppAgent(
   // app 子代理是一次独立对话：run 内稳定（provider 与 AppendOnlyLog 共用同一 id），
   // 供 OpenCode Go 网关做会话级缓存路由。
   const appAgentSessionId = `app-agent-${payload.appId}-${Date.now()}`;
-  let agentProvider: ILLMProvider = buildProvider(cachedSettings, appAgentSessionId);
-  let agentProviderName: 'deepseek' | 'openai' | 'claude' | 'response' = cachedSettings.provider;
+  let agentProvider: ILLMProvider = isFastTier
+    ? buildFastProvider(cachedSettings, appAgentSessionId)
+    : buildProvider(cachedSettings, appAgentSessionId);
+  let agentProviderName: 'deepseek' | 'openai' | 'claude' | 'response' = isFastTier
+    ? resolveFastProviderKind(cachedSettings)
+    : cachedSettings.provider;
 
   const isMentor = payload.model === 'mentor' && cachedSettings.mentorEnabled;
   if (isMentor) {
@@ -1596,10 +1663,21 @@ async function handleChat(payload: AgentWorkerChatPayload): Promise<void> {
   if (payload.todoSnapshot && Array.isArray(payload.todoSnapshot.tasks)) {
     setTodoListContext(payload.sessionId, payload.todoSnapshot, 'none');
   }
+  // 主回合 fast 分流（slash 命令声明 model: fast 等）：payload.model 为快速
+  // 模型名时用 active fast profile 的独立端点/密钥；默认主模型不受影响。
+  const useFastTierForChat =
+    payload.settings.fastModelEnabled &&
+    !!payload.settings.fastModel.trim() &&
+    payload.model === payload.settings.fastModel.trim() &&
+    payload.model !== payload.settings.model.trim();
   const agent = new Agent({
     session,
-    provider: buildProvider(payload.settings, payload.sessionId),
-    providerName: payload.providerName,
+    provider: useFastTierForChat
+      ? buildFastProvider(payload.settings, payload.sessionId)
+      : buildProvider(payload.settings, payload.sessionId),
+    providerName: useFastTierForChat
+      ? resolveFastProviderKind(payload.settings)
+      : payload.providerName,
     requestBuilder: new RequestBuilder(),
     cacheValidator: new CacheValidator(),
     maxToolRounds: payload.settings.maxToolRounds,

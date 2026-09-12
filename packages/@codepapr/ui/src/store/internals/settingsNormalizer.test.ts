@@ -476,6 +476,59 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     });
     expect(settings220k.maxContextTokens).toBe(200_000);
   });
+
+  it('编辑非槽位 profile（local）往返 normalize 不被遗留 per-mode 配置覆盖', () => {
+    const base = normalizeSettings({});
+    const edited = base.modelProfiles.map((p) =>
+      p.id === 'profile-local'
+        ? { ...p, model: 'qwen3-coder', baseURL: 'http://127.0.0.1:9999/v1', apiKey: 'sk-local' }
+        : p
+    );
+    const roundTripped = normalizeSettings({ ...base, modelProfiles: edited });
+
+    const local = roundTripped.modelProfiles.find((p) => p.id === 'profile-local');
+    expect(local?.model).toBe('qwen3-coder');
+    expect(local?.baseURL).toBe('http://127.0.0.1:9999/v1');
+    expect(local?.apiKey).toBe('sk-local');
+    // 遗留 local 配置是派生视图，随 profile 同步（单一真相）
+    expect(roundTripped.local.model).toBe('qwen3-coder');
+    expect(roundTripped.local.baseURL).toBe('http://127.0.0.1:9999/v1');
+    expect(roundTripped.local.apiKey).toBe('sk-local');
+  });
+
+  it('编辑兼任 mentor 的 custom profile：字段保留且 mentor 派生同步', () => {
+    const base = normalizeSettings({});
+    expect(base.mentorProfileId).toBe('profile-custom');
+    const edited = base.modelProfiles.map((p) =>
+      p.id === 'profile-custom'
+        ? { ...p, model: 'gpt-4.1-mini', baseURL: 'https://api.openai.com/v1', apiKey: 'sk-custom' }
+        : p
+    );
+    const roundTripped = normalizeSettings({ ...base, modelProfiles: edited });
+
+    const custom = roundTripped.modelProfiles.find((p) => p.id === 'profile-custom');
+    expect(custom?.apiKey).toBe('sk-custom');
+    expect(roundTripped.mentorApiKey).toBe('sk-custom');
+    expect(roundTripped.mentorModel).toBe('gpt-4.1-mini');
+    // 遗留 custom 配置同样从 profile 派生
+    expect(roundTripped.custom.apiKey).toBe('sk-custom');
+    expect(roundTripped.custom.model).toBe('gpt-4.1-mini');
+  });
+
+  it('fast 凭据派生自 active fast profile（换槽后同步切换）', () => {
+    const base = normalizeSettings({});
+    expect(base.fastApiMode).toBe('deepseek');
+    expect(base.fastApiKey).toBe('');
+    expect(base.fastBaseURL).toBe('');
+
+    const customProfile = base.modelProfiles.find((p) => p.id === 'profile-custom')!;
+    const withCustomFast = normalizeSettings({ ...base, fastProfileId: customProfile.id });
+    expect(withCustomFast.fastModel).toBe(customProfile.model);
+    expect(withCustomFast.fastApiMode).toBe('custom');
+    expect(withCustomFast.fastApiFormat).toBe('openai');
+    expect(withCustomFast.fastApiKey).toBe(customProfile.apiKey);
+    expect(withCustomFast.fastBaseURL).toBe(customProfile.baseURL);
+  });
 });
 
 describe('normalizeSettings extraHeaders（自定义请求头）', () => {

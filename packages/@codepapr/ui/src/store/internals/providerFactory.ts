@@ -74,6 +74,40 @@ export function buildProviderForProfile(
   );
 }
 
+interface FastProviderBuildInput extends ProviderBuildInput {
+  /** 快速档凭据（来自 active fast profile）。缺省（旧档/无配置）时回退主档。 */
+  fastApiMode?: ApiMode;
+  fastApiFormat?: ApiFormat;
+  fastApiKey?: string;
+  fastBaseURL?: string;
+}
+
+/**
+ * 快速档 provider：fast profile 与主档同类型时继承主档 baseURL；否则用自身
+ * 端点（空 = 各自服务商默认端点）。key 为空时回退主档 key（与 mentor 语义一致）。
+ */
+export function buildFastProviderInstance(
+  s: FastProviderBuildInput,
+  sessionId?: string
+) {
+  const apiMode = s.fastApiMode ?? s.apiMode;
+  const apiFormat = s.fastApiFormat ?? s.apiFormat;
+  const apiKey = (s.fastApiKey ?? '').trim() || s.apiKey;
+  const sameProviderKind = apiMode === s.apiMode && apiFormat === s.apiFormat;
+  const baseURL = (s.fastBaseURL ?? '').trim() || (sameProviderKind ? s.baseURL : '');
+  return buildProviderInstance(
+    {
+      apiMode,
+      apiFormat,
+      apiKey,
+      baseURL,
+      streamIdleTimeoutMs: s.streamIdleTimeoutMs,
+      extraHeaders: s.extraHeaders,
+    },
+    sessionId
+  );
+}
+
 export { toWorkerAgentSettings, resolveWorkerMultimodalEnabled } from './workerSettings';
 
 export function shouldUseWorkerAgentRuntime(): boolean {

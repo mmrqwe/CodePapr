@@ -1022,12 +1022,14 @@ fn import_legacy_project_state(
 
 pub const PRIMARY_KEY_ACCOUNT: &str = "api_key";
 pub const MENTOR_KEY_ACCOUNT: &str = "mentor_api_key";
+pub const FAST_KEY_ACCOUNT: &str = "fast_api_key";
 
 /// Names of settings JSON fields that hold API keys and must be diverted to
 /// the Stronghold vault instead of being persisted as plaintext in SQLite.
-const SECRET_FIELDS: [(&str, &str); 2] = [
+const SECRET_FIELDS: [(&str, &str); 3] = [
     ("apiKey", PRIMARY_KEY_ACCOUNT),
     ("mentorApiKey", MENTOR_KEY_ACCOUNT),
+    ("fastApiKey", FAST_KEY_ACCOUNT),
 ];
 
 /// Moves API key values from the settings JSON into the Stronghold vault,

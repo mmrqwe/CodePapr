@@ -152,8 +152,8 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
           </h3>
           <p className="text-xs text-fg-muted mt-1">
             {currentLang === 'en'
-              ? 'Assign configured profiles to primary, fast, and mentor roles.'
-              : '将配置好的模型分配给主模型、快速模型与导师模型角色。'}
+              ? 'Assign configured profiles to primary, fast, and mentor roles. Edit profile parameters in the model pool below.'
+              : '将配置好的模型分配给主模型、快速模型与导师模型角色；模型参数在下方「模型配置池」中编辑。'}
           </p>
         </div>
 
@@ -176,24 +176,15 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
               </div>
 
               {primaryProfile && (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleEditProfile(primaryProfile)}
-                    className="rounded-lg border border-line bg-base px-2.5 py-1 text-xs text-fg-muted hover:border-line-strong hover:text-fg transition-colors"
-                  >
-                    {t.editProfile}
-                  </button>
-                  <ConnectionTestButton
-                    labels={{
-                      idle: t.testProfileConnection,
-                      connecting: t.llmTestConnecting,
-                      success: t.llmTestSuccess,
-                      failedPrefix: t.llmTestFailed,
-                    }}
-                    onTest={() => runTestForProfile(primaryProfile)}
-                  />
-                </div>
+                <ConnectionTestButton
+                  labels={{
+                    idle: t.testProfileConnection,
+                    connecting: t.llmTestConnecting,
+                    success: t.llmTestSuccess,
+                    failedPrefix: t.llmTestFailed,
+                  }}
+                  onTest={() => runTestForProfile(primaryProfile)}
+                />
               )}
             </div>
 
@@ -271,24 +262,15 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
                 </label>
 
                 {local.fastModelEnabled && fastProfile && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleEditProfile(fastProfile)}
-                      className="rounded-lg border border-line bg-base px-2.5 py-1 text-xs text-fg-muted hover:border-line-strong hover:text-fg transition-colors"
-                    >
-                      {t.editProfile}
-                    </button>
-                    <ConnectionTestButton
-                      labels={{
-                        idle: t.testProfileConnection,
-                        connecting: t.llmTestConnecting,
-                        success: t.llmTestSuccess,
-                        failedPrefix: t.llmTestFailed,
-                      }}
-                      onTest={() => runTestForProfile(fastProfile)}
-                    />
-                  </div>
+                  <ConnectionTestButton
+                    labels={{
+                      idle: t.testProfileConnection,
+                      connecting: t.llmTestConnecting,
+                      success: t.llmTestSuccess,
+                      failedPrefix: t.llmTestFailed,
+                    }}
+                    onTest={() => runTestForProfile(fastProfile)}
+                  />
                 )}
               </div>
             </div>
@@ -363,24 +345,15 @@ export function SettingsLlmTab({ local, update, t, currentLang }: SettingsTabPro
                 </label>
 
                 {local.mentorEnabled && mentorProfile && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleEditProfile(mentorProfile)}
-                      className="rounded-lg border border-line bg-base px-2.5 py-1 text-xs text-fg-muted hover:border-line-strong hover:text-fg transition-colors"
-                    >
-                      {t.editProfile}
-                    </button>
-                    <ConnectionTestButton
-                      labels={{
-                        idle: t.testProfileConnection,
-                        connecting: t.llmTestConnecting,
-                        success: t.llmTestSuccess,
-                        failedPrefix: t.llmTestFailed,
-                      }}
-                      onTest={() => runTestForProfile(mentorProfile)}
-                    />
-                  </div>
+                  <ConnectionTestButton
+                    labels={{
+                      idle: t.testProfileConnection,
+                      connecting: t.llmTestConnecting,
+                      success: t.llmTestSuccess,
+                      failedPrefix: t.llmTestFailed,
+                    }}
+                    onTest={() => runTestForProfile(mentorProfile)}
+                  />
                 )}
               </div>
             </div>

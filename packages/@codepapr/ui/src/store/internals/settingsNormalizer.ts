@@ -875,57 +875,32 @@ export function normalizeSettings(
   const activeFastProfile = modelProfiles.find((p) => p.id === fastProfileId) || activePrimaryProfile;
   const activeMentorProfile = modelProfiles.find((p) => p.id === mentorProfileId) || activePrimaryProfile;
 
-  // If per-mode configs were provided in input, sync them into the corresponding profiles
-  if (input.deepseek) {
-    const dsProfile = modelProfiles.find((p) => p.id === 'profile-deepseek' || p.apiMode === 'deepseek');
-    if (dsProfile) {
-      if (typeof input.deepseek.apiKey === 'string') dsProfile.apiKey = input.deepseek.apiKey.trim();
-      if (typeof input.deepseek.baseURL === 'string') dsProfile.baseURL = input.deepseek.baseURL.trim();
-      if (typeof input.deepseek.model === 'string') dsProfile.model = input.deepseek.model.trim();
-      if (typeof input.deepseek.fastModel === 'string') {
-        const dsFast = modelProfiles.find((p) => p.id === 'profile-deepseek-fast');
-        if (dsFast) dsFast.model = input.deepseek.fastModel.trim();
+  // 单一真相：有显式 profiles 时，modelProfiles 是唯一可写入口。per-mode 配置
+  // 与扁平字段全部由当前槽位 profile 派生，绝不反向写回 profile——否则
+  // 「模型配置池」里的编辑会在保存时被旧值（持久化的扁平字段/旧 per-mode 配置）
+  // 冲掉。无显式 profiles 的旧档走 buildSynthesizedProfiles 合成路径。
+  if (hasExplicitProfiles) {
+    const deepseekProfile = modelProfiles.find((p) => p.apiMode === 'deepseek');
+    if (deepseekProfile) {
+      deepseek.apiKey = deepseekProfile.apiKey;
+      deepseek.baseURL = deepseekProfile.baseURL;
+      deepseek.model = deepseekProfile.model;
+      if (activeFastProfile.apiMode === 'deepseek') {
+        deepseek.fastModel = activeFastProfile.model;
       }
     }
-  }
-  if (input.custom) {
-    const customProfile = modelProfiles.find((p) => p.id === 'profile-custom' || (p.apiMode === 'custom' && p.id !== 'profile-mentor'));
+    const customProfile = modelProfiles.find((p) => p.apiMode === 'custom');
     if (customProfile) {
-      if (typeof input.custom.apiKey === 'string') customProfile.apiKey = input.custom.apiKey.trim();
-      if (typeof input.custom.baseURL === 'string') customProfile.baseURL = input.custom.baseURL.trim();
-      if (typeof input.custom.model === 'string') customProfile.model = input.custom.model.trim();
+      custom.apiKey = customProfile.apiKey;
+      custom.baseURL = customProfile.baseURL;
+      custom.model = customProfile.model;
     }
-  }
-  if (input.local) {
-    const localProfile = modelProfiles.find((p) => p.id === 'profile-local' || p.apiMode === 'local');
+    const localProfile = modelProfiles.find((p) => p.apiMode === 'local');
     if (localProfile) {
-      if (typeof input.local.apiKey === 'string') localProfile.apiKey = input.local.apiKey.trim();
-      if (typeof input.local.baseURL === 'string') localProfile.baseURL = input.local.baseURL.trim();
-      if (typeof input.local.model === 'string') localProfile.model = input.local.model.trim();
+      local.apiKey = localProfile.apiKey;
+      local.baseURL = localProfile.baseURL;
+      local.model = localProfile.model;
     }
-  }
-
-  // If explicit flat fields were provided in input, sync into active slot profiles
-  if (typeof input.apiKey === 'string') {
-    activePrimaryProfile.apiKey = input.apiKey.trim();
-  }
-  if (typeof input.model === 'string') {
-    activePrimaryProfile.model = input.model.trim();
-  }
-  if (typeof input.baseURL === 'string') {
-    activePrimaryProfile.baseURL = input.baseURL.trim();
-  }
-  if (typeof input.fastModel === 'string') {
-    activeFastProfile.model = input.fastModel.trim();
-  }
-  if (typeof input.mentorModel === 'string') {
-    activeMentorProfile.model = input.mentorModel.trim();
-  }
-  if (typeof input.mentorApiKey === 'string') {
-    activeMentorProfile.apiKey = input.mentorApiKey.trim();
-  }
-  if (typeof input.mentorBaseURL === 'string') {
-    activeMentorProfile.baseURL = input.mentorBaseURL.trim();
   }
 
   const effectiveApiMode = hasExplicitProfiles ? activePrimaryProfile.apiMode : apiMode;
@@ -935,6 +910,10 @@ export function normalizeSettings(
   const effectiveFastModel = hasExplicitProfiles ? activeFastProfile.model : fastModel;
   const effectiveApiKey = hasExplicitProfiles ? activePrimaryProfile.apiKey : apiKey;
   const effectiveBaseURL = hasExplicitProfiles ? activePrimaryProfile.baseURL : baseURL;
+  const effectiveFastApiMode = activeFastProfile.apiMode;
+  const effectiveFastApiFormat = activeFastProfile.apiFormat;
+  const effectiveFastApiKey = activeFastProfile.apiKey;
+  const effectiveFastBaseURL = activeFastProfile.baseURL;
   const effectiveExtraHeaders = hasExplicitProfiles
     ? activePrimaryProfile.extraHeaders
     : sanitizeExtraHeaders(input.extraHeaders);
@@ -1009,24 +988,6 @@ export function normalizeSettings(
       ? activePrimaryProfile.multimodalEnabled
       : multimodalEnabled;
 
-  // Keep per-mode configs up-to-date with active configurations
-  if (effectiveApiMode === 'deepseek') {
-    deepseek.apiKey = effectiveApiKey;
-    deepseek.baseURL = effectiveBaseURL;
-    deepseek.model = effectiveModel;
-    deepseek.fastModel = effectiveFastModel;
-  } else if (effectiveApiMode === 'custom') {
-    custom.apiKey = effectiveApiKey;
-    custom.baseURL = effectiveBaseURL;
-    custom.model = effectiveModel;
-    custom.fastModel = effectiveFastModel;
-  } else if (effectiveApiMode === 'local') {
-    local.apiKey = effectiveApiKey;
-    local.baseURL = effectiveBaseURL;
-    local.model = effectiveModel;
-    local.fastModel = effectiveFastModel;
-  }
-
   return {
     ...DEFAULT_SETTINGS,
     ...cleanInput,
@@ -1046,6 +1007,10 @@ export function normalizeSettings(
         ? input.fastModelEnabled
         : DEFAULT_SETTINGS.fastModelEnabled,
     fastModel: effectiveFastModel,
+    fastApiMode: effectiveFastApiMode,
+    fastApiFormat: effectiveFastApiFormat,
+    fastApiKey: effectiveFastApiKey,
+    fastBaseURL: effectiveFastBaseURL,
     apiKey: effectiveApiKey,
     baseURL: effectiveBaseURL,
     extraHeaders: effectiveExtraHeaders,
@@ -1160,13 +1125,6 @@ export function resolveProviderName(settings: { apiMode: ApiMode; apiFormat: Api
 
 export function resolveMultimodalEnabled(settings: Settings, currentModel: string): boolean {
   return modelSupportsVision(settings, currentModel);
-}
-
-export function getActiveModeConfig(settings: Settings): ModeConfig & { apiFormat: ApiFormat } {
-  const cfg = settings.apiMode === 'deepseek' ? settings.deepseek
-    : settings.apiMode === 'custom' ? settings.custom
-    : settings.local;
-  return { ...cfg, apiFormat: settings.apiFormat };
 }
 
 export function getProviderLabel(settings: Settings): string {

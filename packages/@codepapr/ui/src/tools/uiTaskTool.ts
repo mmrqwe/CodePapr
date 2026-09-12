@@ -32,6 +32,9 @@ export interface UiTaskToolContext {
   sessionId?: string;
   provider: ILLMProvider;
   providerName: 'deepseek' | 'openai' | 'claude' | 'response';
+  /** 快速档 provider（active fast profile 的独立端点/密钥）；缺省回退主 provider。 */
+  fastProvider?: ILLMProvider;
+  fastProviderName?: 'deepseek' | 'openai' | 'claude' | 'response';
   baseModel: string;
   fastModelEnabled: boolean;
   fastModel: string;
@@ -163,6 +166,11 @@ export async function runSubagent(
 
     let provider = context.provider;
     let providerName: 'deepseek' | 'openai' | 'claude' | 'response' = context.providerName;
+    // fast 档 → active fast profile 的独立 provider；mentor 档在下方覆盖。
+    if (exec.tier === 'fast' && context.fastProvider) {
+      provider = context.fastProvider;
+      providerName = context.fastProviderName ?? context.providerName;
+    }
     if (exec.mentor) {
       const mentorSessionId = context.sessionId ? `${context.sessionId}:mentor` : undefined;
       const config = {

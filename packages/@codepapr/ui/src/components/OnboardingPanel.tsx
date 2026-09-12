@@ -22,25 +22,30 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
 
   const handleSave = () => {
     if (!canSave) return;
-    // setSettings 合并当前 settings 后经 normalizeSettings 规范化，扁平字段
-    // 只在无 per-mode 配置时才迁移；首次启动时 deepseek 配置对象恒已存在
-    // （默认值或磁盘加载），扁平字段会被丢弃。必须直接写入 per-mode 配置，
-    // 与 SettingsLlmTab 的写法保持一致。
-    setSettings({
-      apiMode: 'deepseek',
-      apiFormat: 'openai',
-      provider: 'deepseek',
-      baseURL: '',
-      apiKey: trimmedKey,
-      model,
-      fastModel: 'deepseek-v4-flash',
-      deepseek: {
-        ...settings.deepseek,
-        apiKey: trimmedKey,
-        model,
-        fastModel: 'deepseek-v4-flash',
-      },
+    // modelProfiles 是单一真相：直接更新 primary/fast 槽位的 profile，
+    // 扁平字段与 per-mode 配置都由 normalizeSettings 从其派生。
+    const nextProfiles = settings.modelProfiles.map((p) => {
+      if (p.id === settings.primaryProfileId) {
+        return {
+          ...p,
+          apiMode: 'deepseek' as const,
+          apiFormat: 'openai' as const,
+          baseURL: '',
+          apiKey: trimmedKey,
+          model,
+        };
+      }
+      if (p.id === settings.fastProfileId) {
+        return {
+          ...p,
+          apiMode: 'deepseek' as const,
+          apiFormat: 'openai' as const,
+          model: 'deepseek-v4-flash',
+        };
+      }
+      return p;
     });
+    setSettings({ modelProfiles: nextProfiles });
     onDismiss();
   };
 

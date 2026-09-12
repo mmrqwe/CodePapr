@@ -26,7 +26,7 @@ import {
   type SubagentSessionResult,
 } from '@codepapr/core';
 import { RequestBuilder, CacheValidator } from '@codepapr/api';
-import { buildProviderInstance } from '../store/internals/providerFactory';
+import { buildFastProviderInstance, buildProviderInstance } from '../store/internals/providerFactory';
 import { resolveProviderName } from '../store/internals/settingsNormalizer';
 import type { CompactionSettings } from '../store/internals/types';
 
@@ -112,8 +112,17 @@ export async function runCompactorSession(
 ): Promise<SubagentSessionResult> {
   const { definition, prompt, settings, baseModel, lang, abortSignal } = params;
 
-  const provider = buildProviderInstance(settings);
-  const providerName = resolveProviderName(settings);
+  // fast 档（默认）走 active fast profile 的独立端点/密钥；primary 档用主档。
+  const useFastTier = resolveEffectiveCompactorTier(settings) === 'fast';
+  const provider = useFastTier
+    ? buildFastProviderInstance(settings)
+    : buildProviderInstance(settings);
+  const providerName = useFastTier
+    ? resolveProviderName({
+        apiMode: settings.fastApiMode ?? settings.apiMode,
+        apiFormat: settings.fastApiFormat ?? settings.apiFormat,
+      })
+    : resolveProviderName(settings);
 
   const exec = resolveSubagentExecution({
     definition,

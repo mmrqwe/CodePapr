@@ -282,6 +282,16 @@ describe('SettingsModal', () => {
     expect(container.textContent).toContain('DeepSeek Flash (快速)');
     expect(container.textContent).toContain('自定义 API (Custom)');
     expect(container.textContent).toContain('新建模型配置');
+
+    // 槽位区只选择+展示：编辑入口只存在于模型配置池卡片（与「复制」按钮同数）。
+    const editButtons = Array.from(container.querySelectorAll('button')).filter(
+      (b) => b.textContent?.trim() === '编辑配置'
+    );
+    const duplicateButtons = Array.from(container.querySelectorAll('button')).filter(
+      (b) => b.textContent?.trim() === '复制配置'
+    );
+    expect(editButtons.length).toBeGreaterThan(0);
+    expect(editButtons.length).toBe(duplicateButtons.length);
   });
 
   it('mentor sub-agent tab keeps prompt settings and points model config to LLM', async () => {
@@ -419,5 +429,67 @@ describe('SettingsModal', () => {
       (p) => p.id === currentSettings.primaryProfileId
     );
     expect(primary?.maxContextTokens).toBe(150000);
+  });
+
+  it('edits to a non-slot profile (local) survive the settings save round-trip', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+
+    const llmTab = container.querySelector(
+      'button[title="配置主模型、快速模型、导师模型、API 接入方式和采样参数。"]'
+    );
+    expect(llmTab).not.toBeNull();
+    await act(async () => {
+      llmTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const localEditButton = Array.from(container.querySelectorAll('button'))
+      .filter((b) => b.textContent?.trim() === '编辑配置')
+      .find((b) => b.closest('div.rounded-2xl')?.textContent?.includes('本地模型 (Local)'));
+    expect(localEditButton).toBeDefined();
+    await act(async () => {
+      localEditButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const modelInput = container.querySelector(
+      'input[list="profile-model-presets"]'
+    ) as HTMLInputElement;
+    expect(modelInput).not.toBeNull();
+    await act(async () => {
+      setInputValue(modelInput, 'qwen3-coder');
+    });
+
+    const urlInput = container.querySelector(
+      'input[placeholder^="http://127.0.0.1:8080/v1"]'
+    ) as HTMLInputElement;
+    expect(urlInput).not.toBeNull();
+    await act(async () => {
+      setInputValue(urlInput, 'http://127.0.0.1:9999/v1');
+    });
+
+    const saveProfileButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '保存配置'
+    );
+    expect(saveProfileButton).toBeDefined();
+    await act(async () => {
+      saveProfileButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '保存'
+    );
+    expect(saveButton).toBeDefined();
+    await act(async () => {
+      saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const settings = useAgentStore.getState().settings;
+    const local = settings.modelProfiles.find((p) => p.id === 'profile-local');
+    expect(local?.model).toBe('qwen3-coder');
+    expect(local?.baseURL).toBe('http://127.0.0.1:9999/v1');
+    // 遗留 local 配置是派生视图，保存后同步反映 profile 编辑
+    expect(settings.local.model).toBe('qwen3-coder');
+    expect(settings.local.baseURL).toBe('http://127.0.0.1:9999/v1');
   });
 });

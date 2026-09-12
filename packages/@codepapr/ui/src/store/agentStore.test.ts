@@ -3593,25 +3593,20 @@ describe('normalizeSettings', () => {
 
 describe('useAgentStore.setSettings onboarding 回归（N1）', () => {
   it('首次引导保存的 API Key 不被静默丢弃', () => {
-    // 模拟 OnboardingPanel.handleSave 的完整调用：setSettings 合并现有
-    // settings（恒含 per-mode 配置）后走 normalizeSettings，扁平字段会被
-    // activeConfig 派生值覆盖，因此必须把 key/model 同步写进 deepseek 配置
-    // （与 SettingsLlmTab 的写法一致）。
-    useAgentStore.getState().setSettings({
-      apiMode: 'deepseek',
-      apiFormat: 'openai',
-      provider: 'deepseek',
-      baseURL: '',
-      apiKey: 'sk-onboarding',
-      model: 'deepseek-chat',
-      fastModel: 'deepseek-v4-flash',
-      deepseek: {
-        ...useAgentStore.getState().settings.deepseek,
-        apiKey: 'sk-onboarding',
-        model: 'deepseek-chat',
-        fastModel: 'deepseek-v4-flash',
-      },
+    // 模拟 OnboardingPanel.handleSave 的完整调用：modelProfiles 是单一真相，
+    // 引导直接更新 primary/fast 槽位 profile；扁平字段与 deepseek 配置都由
+    // normalizeSettings 从 profile 派生（N1 回归：key 不被静默丢弃）。
+    const before = useAgentStore.getState().settings;
+    const nextProfiles = before.modelProfiles.map((p) => {
+      if (p.id === before.primaryProfileId) {
+        return { ...p, apiKey: 'sk-onboarding', model: 'deepseek-chat' };
+      }
+      if (p.id === before.fastProfileId) {
+        return { ...p, model: 'deepseek-v4-flash' };
+      }
+      return p;
     });
+    useAgentStore.getState().setSettings({ modelProfiles: nextProfiles });
 
     const settings = useAgentStore.getState().settings;
     expect(settings.deepseek.apiKey).toBe('sk-onboarding');

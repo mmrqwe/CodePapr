@@ -13,6 +13,7 @@ vi.mock('@codepapr/core', async (importOriginal) => {
 
 vi.mock('../store/internals/providerFactory', () => ({
   buildProviderInstance: vi.fn(() => ({ fake: 'provider' })),
+  buildFastProviderInstance: vi.fn(() => ({ fake: 'fast-provider' })),
 }));
 
 vi.mock('../store/internals/settingsNormalizer', () => ({
@@ -24,7 +25,7 @@ import {
   runSubagentSession,
   type ResolvedSubagentExecution,
 } from '@codepapr/core';
-import { buildProviderInstance } from '../store/internals/providerFactory';
+import { buildFastProviderInstance, buildProviderInstance } from '../store/internals/providerFactory';
 import { resolveProviderName } from '../store/internals/settingsNormalizer';
 import {
   resolveEffectiveCompactorTier,
@@ -222,9 +223,35 @@ describe('runCompactorSession', () => {
     expect(result.cacheStats).toBeDefined();
   });
 
-  it('provider 由 settings 构建，providerName 由 settings 解析', async () => {
+  it('fast 档：provider 取 fast profile 凭据，providerName 按 fast 档解析', async () => {
     await runCompactorSession({ definition, prompt: 'p', settings, baseModel: 'primary-model', lang: 'zh-CN' });
-    expect(buildProviderInstance).toHaveBeenCalledWith(settings);
-    expect(resolveProviderName).toHaveBeenCalledWith(settings);
+    expect(buildFastProviderInstance).toHaveBeenCalledWith(settings);
+    expect(buildProviderInstance).not.toHaveBeenCalled();
+    expect(resolveProviderName).toHaveBeenCalledWith({
+      apiMode: settings.fastApiMode,
+      apiFormat: settings.fastApiFormat,
+    });
+  });
+
+  it('primary 档：provider 用主档凭据', async () => {
+    const primarySettings = makeSettings({
+      compactionModel: 'primary',
+      fastModelEnabled: true,
+      fastModel: 'fast-model',
+    });
+    const primaryDefinition = buildCompactorDefinition({
+      settings: primarySettings,
+      lang: 'zh-CN',
+      baseModel: 'primary-model',
+    });
+    await runCompactorSession({
+      definition: primaryDefinition,
+      prompt: 'p',
+      settings: primarySettings,
+      baseModel: 'primary-model',
+      lang: 'zh-CN',
+    });
+    expect(buildProviderInstance).toHaveBeenCalledWith(primarySettings);
+    expect(buildFastProviderInstance).not.toHaveBeenCalled();
   });
 });

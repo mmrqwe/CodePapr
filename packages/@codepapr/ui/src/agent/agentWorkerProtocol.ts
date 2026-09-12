@@ -32,6 +32,11 @@ export interface WorkerAgentSettings {
   agentToolProfile?: AgentToolProfile;
   fastModelEnabled: boolean;
   fastModel: string;
+  /** 快速档独立凭据（来自 active fast profile；缺省时回退主档）。 */
+  fastApiMode?: WorkerApiMode;
+  fastApiFormat?: WorkerApiFormat;
+  fastApiKey?: string;
+  fastBaseURL?: string;
   temperature: number;
   maxTokens: number;
   maxToolRounds: number;
