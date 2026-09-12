@@ -403,7 +403,7 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
     const { allowedExternalDirs, allowedExternalFiles } = get();
     for (const dir of allowedExternalDirs) {
       // 平台感知大小写：macOS/Windows 上同一目录的不同大小写写法必须放行
-      // （否则用户授权 /Users/example/x 后 /Users/example/x 仍被误拒）。
+      // （否则用户授权 /Users/EXAMPLE/x 后 /Users/example/x 仍被误拒）。
       if (pathUnderDir(normalized, dir)) return true;
     }
     for (const file of allowedExternalFiles) {

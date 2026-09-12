@@ -3796,7 +3796,7 @@ mod tests {
 
     #[test]
     fn merge_recent_workspace_dedupes_case_insensitively_on_macos_windows() {
-        if !recent_paths_equivalent("/Users/example/x", "/Users/example/x") {
+        if !recent_paths_equivalent("/Users/EXAMPLE/x", "/Users/example/x") {
             // Linux：大小写敏感，跳过大小写去重断言
             return;
         }
@@ -3805,12 +3805,12 @@ mod tests {
                 {"path":"/Users/example/x","name":"x","lastOpenedAt":10,"pinned":false}
             ]}"#,
         );
-        let merged = merge_recent_workspace(input, "/Users/example/x").expect("merge should succeed");
+        let merged = merge_recent_workspace(input, "/Users/EXAMPLE/x").expect("merge should succeed");
         let value: serde_json::Value = serde_json::from_str(&merged).expect("valid json");
         let recent = value["recentWorkspaces"].as_array().expect("array");
 
         assert_eq!(recent.len(), 1, "大小写不同的同一目录应去重");
-        assert_eq!(recent[0]["path"], "/Users/example/x");
+        assert_eq!(recent[0]["path"], "/Users/EXAMPLE/x");
     }
 
     #[test]

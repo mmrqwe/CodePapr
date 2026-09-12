@@ -1,7 +1,7 @@
 /** 平台感知的路径等价比较。
  *
  *  macOS/Windows 文件系统默认大小写不敏感：路径比较必须按大小写不敏感处理，
- *  否则同一目录（如 /Users/example/x vs /Users/example/x）会被误判为不同路径——
+ *  否则同一目录（如 /Users/EXAMPLE/x vs /Users/example/x）会被误判为不同路径——
  *  外部路径放行匹配、recent 去重、URI 归属判断都会误拒/重复。
  *  Linux 保持大小写敏感。
  */

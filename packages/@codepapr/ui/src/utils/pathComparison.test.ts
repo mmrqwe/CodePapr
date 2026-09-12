@@ -19,13 +19,13 @@ describe('pathsEquivalent', () => {
 
   it('case differs only matters on case-insensitive filesystems', () => {
     withPlatform('darwin', () => {
-      expect(pathsEquivalent('/Users/example/x', '/Users/example/x')).toBe(true);
+      expect(pathsEquivalent('/Users/EXAMPLE/x', '/Users/example/x')).toBe(true);
     });
     withPlatform('win32', () => {
-      expect(pathsEquivalent('C:\\Users\\example', 'c:\\users\\example')).toBe(true);
+      expect(pathsEquivalent('C:\\Users\\EXAMPLE', 'c:\\users\\example')).toBe(true);
     });
     withPlatform('linux', () => {
-      expect(pathsEquivalent('/Users/example/x', '/Users/example/x')).toBe(false);
+      expect(pathsEquivalent('/Users/EXAMPLE/x', '/Users/example/x')).toBe(false);
     });
   });
 });
@@ -33,15 +33,15 @@ describe('pathsEquivalent', () => {
 describe('pathUnderDir', () => {
   it('matches the dir itself and children, platform-aware case', () => {
     withPlatform('darwin', () => {
-      expect(pathUnderDir('/Users/example/work', '/Users/example/work')).toBe(true);
-      expect(pathUnderDir('/Users/example/work/src/a.ts', '/Users/example/work')).toBe(true);
-      expect(pathUnderDir('/Users/example/elsewhere', '/Users/example/work')).toBe(false);
+      expect(pathUnderDir('/Users/EXAMPLE/work', '/Users/example/work')).toBe(true);
+      expect(pathUnderDir('/Users/EXAMPLE/work/src/a.ts', '/Users/example/work')).toBe(true);
+      expect(pathUnderDir('/Users/EXAMPLE/elsewhere', '/Users/example/work')).toBe(false);
     });
   });
 
   it('keeps exact semantics on case-sensitive platforms', () => {
     withPlatform('linux', () => {
-      expect(pathUnderDir('/Users/example/work', '/Users/example/work')).toBe(false);
+      expect(pathUnderDir('/Users/EXAMPLE/work', '/Users/example/work')).toBe(false);
       expect(pathUnderDir('/Users/example/work/src/a.ts', '/Users/example/work')).toBe(true);
     });
   });
