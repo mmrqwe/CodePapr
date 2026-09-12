@@ -129,7 +129,7 @@ interface DeepSeekStreamChunk {
 
 export class DeepSeekProvider extends BaseLLMProvider {
   name = 'deepseek';
-  models = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'];
+  models = ['deepseek-v4-pro', 'deepseek-flash', 'deepseek-chat', 'deepseek-reasoner'];
 
   constructor(config: ProviderConfig) {
     super({

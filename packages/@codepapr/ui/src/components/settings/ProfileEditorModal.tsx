@@ -154,7 +154,7 @@ export function ProfileEditorModal({
         apiMode: 'deepseek',
         apiFormat: 'openai',
         baseURL: '',
-        model: 'deepseek-v4-flash',
+        model: 'deepseek-flash',
         maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
         maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
         temperature: 0.7,

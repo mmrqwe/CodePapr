@@ -8,7 +8,7 @@ import {
 const settings = {
   model: 'deepseek-v4-pro',
   fastModelEnabled: true,
-  fastModel: 'deepseek-v4-flash',
+  fastModel: 'deepseek-flash',
   temperature: 0.7,
   maxTokens: 393_216,
   thinkingEnabled: true,
@@ -50,14 +50,14 @@ describe('modelRouting', () => {
   it('honors an explicit fast model hint', () => {
     const route = selectTaskModelRoute(settings, 'agent', '帮我摘要这篇文章', 'fast');
     expect(route.tier).toBe('fast');
-    expect(route.model).toBe('deepseek-v4-flash');
+    expect(route.model).toBe('deepseek-flash');
   });
 
   it('routes context compaction to the fast model when available', () => {
     const route = selectContextCompactionModelRoute(settings);
 
     expect(route?.tier).toBe('fast');
-    expect(route?.model).toBe('deepseek-v4-flash');
+    expect(route?.model).toBe('deepseek-flash');
     expect(route?.reason).toBe('context-compaction');
     expect(route?.thinkingEnabled).toBe(false);
     expect(route?.maxTokens).toBe(393_216);

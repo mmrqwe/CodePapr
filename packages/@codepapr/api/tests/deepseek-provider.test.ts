@@ -568,7 +568,7 @@ describe('DeepSeekProvider', () => {
 
     const provider = new DeepSeekProvider({ apiKey: 'test-key' });
     await provider.chat({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       thinking: { type: 'enabled' },
       messages: [
         {
@@ -634,7 +634,7 @@ describe('DeepSeekProvider', () => {
 
     const provider = new DeepSeekProvider({ apiKey: 'test-key' });
     await provider.chat({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       thinking: { type: 'disabled' },
       messages: [
         {
@@ -685,7 +685,7 @@ describe('DeepSeekProvider', () => {
 
     const provider = new DeepSeekProvider({ apiKey: 'test-key' });
     const response = await provider.chat({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       messages: [{ id: 'u1', role: 'user', content: '继续', timestamp: 1 }],
       maxTokens: 1024,
     });
@@ -711,7 +711,7 @@ describe('DeepSeekProvider', () => {
     const provider = new DeepSeekProvider({ apiKey: 'test-key' });
     const response = await provider.streamChat?.(
       {
-        model: 'deepseek-v4-flash',
+        model: 'deepseek-flash',
         messages: [{ id: 'u1', role: 'user', content: '继续', timestamp: 1 }],
         maxTokens: 1024,
       },
@@ -753,7 +753,7 @@ describe('DeepSeekProvider', () => {
 
     const provider = new DeepSeekProvider({ apiKey: 'test-key' });
     const response = await provider.chat({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       thinking: { type: 'enabled', reasoningEffort: 'max' },
       messages: [
         {

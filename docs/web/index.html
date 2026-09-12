@@ -369,7 +369,7 @@
   <div class="container">
     <div class="status"><span class="live"></span>开源 · 本地优先 · Tauri 桌面 · codepapr-server 宿主 · 插件市场 · MCP · 前缀缓存</div>
     <h1>CodePapr — <span class="gradient">全武汉最好的Harness</span></h1>
-    <p>桌面工作台 + 本地 codepapr-server 宿主：搜索、修改、执行与验证都在本机完成。主 Agent 调度 Explore / Scout / Mentor，深度适配 LLM 前缀缓存。</p>
+    <p>一个跑在本机的编码 Agent：搜索、修改、执行、验证都在本地 codepapr-server 宿主完成。主 Agent 协调 Explore / Scout / Mentor 三个子代理，并为 LLM 前缀缓存做逐字节优化。</p>
     <div class="hero-actions">
       <a href="#" onclick="showComingSoon(event)" class="btn btn-primary">
         <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -405,13 +405,13 @@
       <div class="mode-card plan reveal">
         <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14h2M13 14h2M9 18h2M13 18h2"/></svg></div>
         <h3>Plan</h3>
-        <p>大改动前先出方案、任务清单与验证路径；可用 question 澄清歧义，确认后再落地。</p>
+        <p>大改动前先出方案、任务清单和验证方式；有歧义会先问你，确认后再动手。</p>
         <span class="tag">规划 · 拆解</span>
       </div>
       <div class="mode-card agent reveal">
         <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
         <h3>Agent</h3>
-        <p>完全自主执行：搜索项目、读写文件、跑命令、做验证。修复 Bug、实现功能一步到位。</p>
+        <p>自己搜索项目、读写文件、跑命令、做验证——修 Bug、实现功能一步到位。</p>
         <span class="tag">执行 · 读写</span>
       </div>
       <div class="mode-card app reveal">
@@ -442,15 +442,15 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
-        <div><h4>Agent 自主执行</h4><p>自动搜索 + 读写 + 跑命令 + 验证。Agent 循环在桌面端 @codepapr/core，副作用经本地宿主执行，界面保持流畅。</p></div>
+        <div><h4>Agent 自主执行</h4><p>搜索、读写文件、跑命令、验证全自动。Agent 循环跑在桌面端 @codepapr/core，文件与命令操作交给本地宿主，界面保持流畅。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-cyan"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
-        <div><h4>Git 深度集成</h4><p>Diff、提交、分支切换、安全回退。Agent 负责分析，人工保留高风险操作。</p></div>
+        <div><h4>Git 集成</h4><p>Diff、提交、分支切换、安全回退。Agent 负责分析，人工保留高风险操作。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
-        <div><h4>浏览器联动</h4><p>启动预览、页面交互、截图。前端联调在一个窗口里闭环。</p></div>
+        <div><h4>浏览器联动</h4><p>启动预览、页面交互、截图。前端联调一个窗口搞定。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg></div>
@@ -470,7 +470,7 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4"/><path d="M9 3v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></div>
-        <div><h4>项目记忆（零审核）</h4><p>偏好、约束与已验证事实自动写入 SQLite 账本；面板是唯一给人看的面。短指令进 Bootstrap，踩坑经验按回合 Recall，网页引用只进搜索。<a href="context-architecture.html">上下文怎么拼</a>。</p></div>
+        <div><h4>项目记忆（自动维护）</h4><p>偏好、约束和验证过的事实由记忆管家整理进 .CodePapr/MEMORY.md：可读、可改、可 diff，面板即编辑器，保存后下一回合生效。<a href="context-architecture.html">上下文怎么拼</a>。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
@@ -478,11 +478,11 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
-        <div><h4>多 Agent 协作</h4><p>主 Agent 经 task 调度 Explore（代码）、Scout（网页）、Mentor（架构）；另有 Verifier / Compactor。</p></div>
+        <div><h4>多 Agent 协作</h4><p>主 Agent 通过 task 把任务分派给 Explore（代码）、Scout（网页）、Mentor（架构）；另有 Verifier、Compactor 和记忆管家。</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
-        <div><h4>桌面 + CLI 宿主</h4><p>桌面与 codepapr-cli 共用本地 codepapr-server（JSON-RPC）。领域能力在 codepapr-core，客户端只做瘦调用方。<a href="tutorial.html#cli-host">教程</a></p></div>
+        <div><h4>桌面 + CLI 宿主</h4><p>桌面和 codepapr-cli 共用同一个本地 codepapr-server（JSON-RPC）。功能都实现在 codepapr-core，客户端只负责调用。<a href="tutorial.html#cli-host">教程</a></p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
@@ -578,7 +578,7 @@
       </table>
     </div>
     <div style="margin-top: 1.5rem; text-align: center; color: var(--fg-muted, #888); font-size: 0.88rem;">
-      💡 支持在 <code>.CodePapr/commands/&lt;name&gt;.md</code> 或项目配置中自定义斜杠命令，支持 <code>$ARGUMENTS</code> 参数、<code>@path</code> 文件嵌入与 <code>!`cmd`</code> 内联命令。<a href="tutorial.html#commands" style="color: var(--accent, #6366f1); margin-left: 0.5rem; text-decoration: none;">查看自定义教程 &rarr;</a>
+      💡 在 <code>.CodePapr/commands/&lt;name&gt;.md</code> 或项目配置中自定义斜杠命令，支持 <code>$ARGUMENTS</code> 参数、<code>@path</code> 文件嵌入与 <code>!`cmd`</code> 内联命令。<a href="tutorial.html#commands" style="color: var(--accent, #6366f1); margin-left: 0.5rem; text-decoration: none;">查看自定义教程 &rarr;</a>
     </div>
   </div>
 </section>
@@ -588,7 +588,7 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> 系统架构</div>
       <h2>本地宿主，多个客户端</h2>
-      <p>领域副作用走 codepapr-server 宿主；Agent 循环与提示词在 TypeScript 客户端。Tauri 是壳，不是 Agent。</p>
+      <p>文件读写、命令执行、Git 操作都走 codepapr-server 宿主；Agent 循环和提示词在 TypeScript 客户端。Tauri 只是外壳，不是 Agent。</p>
     </div>
         <div class="arch">
       <div class="arch-node reveal">
@@ -605,7 +605,7 @@
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg></div>
-        <h4>project.sqlite</h4><p>会话 · 记忆账本 · 插件 UI / 工作区权威库</p>
+        <h4>project.sqlite</h4><p>会话 · 检查点 · 插件 UI / 工作区唯一数据源</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/></svg></div>
@@ -618,7 +618,7 @@
 
 <section class="cta-section">
   <div class="container reveal">
-    <h2>本地运行与体验</h2>
+    <h2>本地运行</h2>
     <p>开源 · 本地优先 · 桌面工作台</p>
     <div class="cta-actions">
       <a href="#" onclick="showComingSoon(event)" class="btn btn-primary">

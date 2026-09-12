@@ -2251,7 +2251,7 @@ describe('useAgentStore.sendMessage', () => {
         ...state.settings,
         apiKey: 'sk-test',
         fastModelEnabled: true,
-        fastModel: 'deepseek-v4-flash',
+        fastModel: 'deepseek-flash',
       }),
       _agent: createMockAgent({ chat, logMessages: createExecutedCommandLogs }),
       _agentModel: 'deepseek-v4-pro',
@@ -3602,7 +3602,7 @@ describe('useAgentStore.setSettings onboarding 回归（N1）', () => {
         return { ...p, apiKey: 'sk-onboarding', model: 'deepseek-chat' };
       }
       if (p.id === before.fastProfileId) {
-        return { ...p, model: 'deepseek-v4-flash' };
+        return { ...p, model: 'deepseek-flash' };
       }
       return p;
     });
@@ -3611,10 +3611,10 @@ describe('useAgentStore.setSettings onboarding 回归（N1）', () => {
     const settings = useAgentStore.getState().settings;
     expect(settings.deepseek.apiKey).toBe('sk-onboarding');
     expect(settings.deepseek.model).toBe('deepseek-chat');
-    expect(settings.deepseek.fastModel).toBe('deepseek-v4-flash');
+    expect(settings.deepseek.fastModel).toBe('deepseek-flash');
     expect(settings.apiKey).toBe('sk-onboarding');
     expect(settings.model).toBe('deepseek-chat');
-    expect(settings.fastModel).toBe('deepseek-v4-flash');
+    expect(settings.fastModel).toBe('deepseek-flash');
     expect(getSettingsError(settings)).toBeNull();
   });
 });
@@ -4474,13 +4474,13 @@ describe('sendMessage /goal', () => {
       settings: normalizeSettings({
         apiKey: 'sk-test',
         fastModelEnabled: true,
-        fastModel: 'deepseek-v4-flash',
+        fastModel: 'deepseek-flash',
       }),
       workspacePath: '/tmp/goal-test-workspace',
       // 生产不变式：activeSessionId 必须存在于 sessions（sendMessage 的收尾
       // 写入会跳过已不存在的会话）。
       sessions: [
-        { id: 'session-1', name: 'goal', provider: 'deepseek', model: 'deepseek-v4-flash', createdAt: 1, updatedAt: 1 },
+        { id: 'session-1', name: 'goal', provider: 'deepseek', model: 'deepseek-flash', createdAt: 1, updatedAt: 1 },
       ],
       activeSessionId: 'session-1',
       messages: [],
@@ -4548,7 +4548,7 @@ describe('sendMessage /goal', () => {
 
     useAgentStore.setState((state) => ({
       ...state,
-      settings: normalizeSettings({ apiKey: 'sk-test', fastModelEnabled: true, fastModel: 'deepseek-v4-flash' }),
+      settings: normalizeSettings({ apiKey: 'sk-test', fastModelEnabled: true, fastModel: 'deepseek-flash' }),
       workspacePath: '/tmp/goal-test-workspace',
       activeSessionId: 'session-1',
       messages: [],
@@ -4711,7 +4711,7 @@ describe('sendMessage /goal', () => {
       settings: normalizeSettings({
         apiKey: 'sk-test',
         fastModelEnabled: true,
-        fastModel: 'deepseek-v4-flash',
+        fastModel: 'deepseek-flash',
         goalMaxIterations: 6,
       }),
       workspacePath: '/tmp/goal-test-workspace',

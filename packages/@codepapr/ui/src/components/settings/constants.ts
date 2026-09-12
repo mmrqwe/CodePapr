@@ -2,7 +2,7 @@ import type { ApiFormat, ApiMode, Settings } from '../../store/agentStore';
 import type { SettingsTab } from './types';
 
 export const MODEL_PRESETS: Record<ApiMode | ApiFormat, string[]> = {
-  deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
+  deepseek: ['deepseek-v4-pro', 'deepseek-flash', 'deepseek-chat', 'deepseek-reasoner'],
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3-mini'],
   response: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini', 'doubao-1.5-pro-32k'],
   claude: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest'],

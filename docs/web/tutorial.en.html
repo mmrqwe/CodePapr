@@ -414,7 +414,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
         <a href="tutorial.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:4px;font-weight:600" onclick="localStorage.setItem('codepapr-lang','zh')">中</a>
       </div>
       <h1><span class="gradient">CodePapr Tutorial</span></h1>
-      <p>Local coding agent workbench: read the project, edit files, run commands, preview results. Deeply adapted for LLM prefix caching.</p>
+      <p>Local coding agent workbench: read the project, edit files, run commands, preview results — with byte-level optimization for the LLM prefix cache.</p>
     </div>
 
     <!-- 1. Intro -->
@@ -553,7 +553,7 @@ https://api.deepseek.com/v1</code></pre>
               <h4>Routing Settings</h4>
               <ul>
                 <li>fast model switch — Whether to enable the fast model</li>
-                <li>fast model name — Fast model name (default <code>deepseek-v4-flash</code>)</li>
+                <li>fast model name — Fast model name (default <code>deepseek-flash</code>)</li>
                 <li>max tool rounds — Maximum tool rounds (default 500)</li>
                 <li>max context tokens — Model input context window (default 200K; applies uniformly to DeepSeek, OpenAI-compatible, and Claude providers — no per-provider clamping; usage reaching <strong>90%</strong> of it triggers auto-compaction)</li>
               </ul>
@@ -566,7 +566,7 @@ https://api.deepseek.com/v1</code></pre>
           <thead><tr><th>Scenario</th><th>Model Used</th><th>Temperature</th></tr></thead>
           <tbody>
             <tr><td>Main Agent conversation</td><td>Primary model (default <code>deepseek-v4-pro</code>)</td><td>Default</td></tr>
-            <tr><td>Context compression (internal Compactor agent)</td><td><code>compactionModel</code> tier (default fast model <code>deepseek-v4-flash</code>, switchable to primary)</td><td>0.1</td></tr>
+            <tr><td>Context compression (internal Compactor agent)</td><td><code>compactionModel</code> tier (default fast model <code>deepseek-flash</code>, switchable to primary)</td><td>0.1</td></tr>
             <tr><td>Sub-agent dispatch (heavy/execution type)</td><td>Primary model</td><td>User configured</td></tr>
             <tr><td>Sub-agent dispatch (Explore/Scout fast mode)</td><td>Fast model (switchable to primary)</td><td>User configured</td></tr>
             <tr><td>Slash commands declaring <code>model: fast</code> (e.g. <code>/search</code>, <code>/lint</code>, <code>/clean</code>, <code>/commit</code>, <code>/summary</code>)</td><td>Fast model (falls back to primary if not enabled)</td><td>0.3</td></tr>
@@ -638,7 +638,7 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
 
         <h3><span class="badge badge-plan">Plan</span> Planning Mode</h3>
-        <p><strong>Best for:</strong> Producing execution plans before large changes, confirming affected files and verification paths, breaking complex tasks into clear steps.</p>
+        <p><strong>Best for:</strong> Producing execution plans before large changes, confirming affected files and verification approach, breaking complex tasks into clear steps.</p>
         <p><strong>Characteristics:</strong></p>
         <ul>
           <li>Provides a task checklist and implementation strategy first</li>
@@ -1365,7 +1365,7 @@ Output Format:
           <tbody>
             <tr><td><code>/help</code></td><td>List all commands and descriptions</td><td>Local</td><td><code>/help</code></td></tr>
             <tr><td><code>/commands</code></td><td>Alias for <code>/help</code></td><td>Local</td><td><code>/commands</code></td></tr>
-            <tr><td><code>/compact</code></td><td>Force compress current session context — the internal Compactor agent generates the checkpoint (rule-based fallback on LLM failure)</td><td>Primary / Fast</td><td><code>/compact</code></td></tr>
+            <tr><td><code>/compact</code></td><td>Force-compress current session context — deterministic skeleton checkpoint (zero LLM; one second-level summary only if the skeleton still overflows)</td><td>Primary / Fast</td><td><code>/compact</code></td></tr>
             <tr><td><code>/undo</code></td><td>Undo the last conversation reset (restore truncated messages and code snapshot)</td><td>Local</td><td><code>/undo</code></td></tr>
             <tr><td><code>/goal</code></td><td>Autonomous loop: Worker executes + Verifier validates, until condition is met</td><td>Primary</td><td><code>/goal exec:npm test</code></td></tr>
             <tr><td><code>/review</code></td><td>Review current changes or specified scope</td><td>Primary</td><td><code>/review src/App.tsx</code></td></tr>
@@ -2187,7 +2187,7 @@ First locate the statistics aggregation logic, then make a minimal fix, and fina
         <table>
           <thead><tr><th>Model</th><th>Context</th><th>Max Output</th><th>Cache Hit Input</th><th>Cache Miss Input</th><th>Output</th><th>Concurrency</th></tr></thead>
           <tbody>
-            <tr><td><code>deepseek-v4-flash</code></td><td>1M</td><td>384K</td><td>0.02 CNY/M tokens</td><td>1 CNY/M tokens</td><td>2 CNY/M tokens</td><td>2500</td></tr>
+            <tr><td><code>deepseek-flash</code></td><td>1M</td><td>384K</td><td>0.02 CNY/M tokens</td><td>1 CNY/M tokens</td><td>2 CNY/M tokens</td><td>2500</td></tr>
             <tr><td><code>deepseek-v4-pro</code></td><td>1M</td><td>384K</td><td>0.025 CNY/M tokens</td><td>3 CNY/M tokens</td><td>6 CNY/M tokens</td><td>500</td></tr>
           </tbody>
         </table>
@@ -2199,7 +2199,7 @@ First locate the statistics aggregation logic, then make a minimal fix, and fina
         <h3>How to Choose in CodePapr</h3>
         <ul>
           <li>Primary model defaults to <code>deepseek-v4-pro</code> — used for Ask, Plan, Agent, and App main execution flow; App mode always uses the primary model for generation quality</li>
-          <li>Fast model defaults to <code>deepseek-v4-flash</code> — used for context compression, sub-task planning, read-only lightweight sub-agents</li>
+          <li>Fast model defaults to <code>deepseek-flash</code> — used for context compression, sub-task planning, read-only lightweight sub-agents</li>
           <li>Thinking effort (thinkingEffort) defaults to <code>max</code> (strongest reasoning); can be switched to <code>high</code> in the LLM settings tab</li>
         </ul>
 

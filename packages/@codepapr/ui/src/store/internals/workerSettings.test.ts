@@ -5,7 +5,7 @@ import { toWorkerAgentSettings } from './workerSettings';
 describe('toWorkerAgentSettings: fast profile 凭据映射', () => {
   it('默认档：fast 凭据来自默认 fast profile（deepseek，空 key 回退运行时的主 key）', () => {
     const worker = toWorkerAgentSettings(normalizeSettings({}));
-    expect(worker.fastModel).toBe('deepseek-v4-flash');
+    expect(worker.fastModel).toBe('deepseek-flash');
     expect(worker.fastApiMode).toBe('deepseek');
     expect(worker.fastApiFormat).toBe('openai');
     expect(worker.fastApiKey).toBe('');

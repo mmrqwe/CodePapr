@@ -169,14 +169,14 @@ describe('visionRouting', () => {
 
   it('honors an explicit fast-profile flag for a text-only-named model', () => {
     const s = settings({
-      fastModel: 'deepseek-v4-flash',
+      fastModel: 'deepseek-flash',
       modelProfiles: [
         profile({ id: 'p-primary', model: 'primary-model', multimodalEnabled: false }),
-        profile({ id: 'p-fast', model: 'deepseek-v4-flash', multimodalEnabled: true }),
+        profile({ id: 'p-fast', model: 'deepseek-flash', multimodalEnabled: true }),
       ],
     });
     expect(fastSlotSupportsVision(s)).toBe(true);
-    expect(modelSupportsVision(s, 'deepseek-v4-flash')).toBe(true);
+    expect(modelSupportsVision(s, 'deepseek-flash')).toBe(true);
   });
 
   it('falls back to the text-only heuristic when the profile flag is absent', () => {

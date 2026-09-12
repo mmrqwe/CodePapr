@@ -4,7 +4,7 @@
 
 **Local-first coding agent runtime. Tauri desktop workbench over a local `codepapr-server` host.**
 
-CodePapr is a local coding agent system built with LLM prefix cache optimization. The main agent orchestrates three built-in sub-agents — **Explore** (code analysis), **Scout** (web search), and **Mentor** (architecture guidance) — plus two runtime-internal agents (**Verifier** for goal acceptance, **Compactor** for context compaction), with support for custom extensions. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
+CodePapr is a local coding agent system built around LLM prefix-cache efficiency. The main agent dispatches three built-in sub-agents — **Explore** (code analysis), **Scout** (web search), and **Mentor** (architecture guidance) — plus three runtime-internal agents (**Verifier** for goal acceptance, **Compactor** for context compaction, **memory-curator** for `.CodePapr/MEMORY.md`); custom sub-agents are supported too. File I/O, command execution, Git operations, browser preview, and LSP diagnostics all run locally.
 
 ---
 
@@ -20,13 +20,13 @@ CodePapr is a local coding agent system built with LLM prefix cache optimization
 | **Host-client split** | Desktop, CLI, and future clients all speak JSON-RPC to the same local `codepapr-server` host |
 | **Multi-agent collaboration** | Main agent dispatches Explore/Scout/Mentor and custom sub-agents via the `task` tool |
 | **TodoList task planning** | Agents auto-create and track task lists with progress reporting and re-planning |
-| **Project memory (zero-review)** | Preferences, constraints, and verified facts save automatically. Short instructions go in every-session Bootstrap; procedures in per-turn Recall; web citations in search only. The memory panel is the only human surface over the SQLite ledger. |
+| **Project memory (auto-maintained)** | Preferences, constraints, and verified facts are curated into `.CodePapr/MEMORY.md`. It is readable, editable, and diffable; the panel is the file's editor, and saves take effect next turn. |
 | **Code intelligence (LSP + AST)** | `lsp` tool with 9 navigation actions (go-to-definition, references, hover, document/workspace symbols, implementations, call hierarchy) — LSP-first with automatic AST project-graph fallback tagged by source/confidence; `list` shows the directory tree with per-file lightweight symbols. The ProjectGraph (UI-facing) further supports dead code detection, circular dependency checks, and refactoring suggestions |
 | **LLM prefix cache** | Three-layer prompt injection strategy to maximize cache hits and reduce costs |
 | **SEARCH/REPLACE Diff** | Validate before writing, with atomic multi-file patch support |
 | **MCP protocol support** | Integrate external MCP tool servers (stdio / SSE / Streamable HTTP); built-in DuckDuckGo Search, Postgres, SQLite presets; MCP marketplace with one-click install from the official registry; per-server permission modes (read-only / read-write / dangerous) and mutating-tool confirmation flow |
 | **App / plugin marketplace** | Install .papr apps from the official registry into a **global** or **per-project** scope, each with its own origin, CSP, and SQLite storage |
-| **Deep Git integration** | 8 Git actions + diff panel + safe rollback with backup ref + undo |
+| **Git integration** | 8 Git actions + diff panel + safe rollback with backup ref + undo |
 | **Conversation reset** | One-click reset code and conversation to any point; restore plan preview shows affected files before execution |
 | **Conversation turn navigation** | Right-side turn indicator bar with hover-to-expand panel and click-to-jump |
 | **Global search** | Toolbar search with conversation and file search tabs, fully keyboard-operable |
@@ -34,7 +34,7 @@ CodePapr is a local coding agent system built with LLM prefix cache optimization
 
 ## Architecture
 
-CodePapr is **not** a monolithic Tauri app. Rust domain logic lives in a shared library crate, is served by a standalone host daemon, and every client is a thin JSON-RPC caller.
+CodePapr is **not** a monolithic Tauri app. Rust domain logic lives in a shared library crate and is served by a standalone host daemon; clients only call into it over JSON-RPC.
 
 ```
   ┌──────────────────────────┐        ┌──────────────────────────┐
@@ -156,7 +156,8 @@ Create a `.CodePapr/` directory at the project root:
 | File/Directory | Purpose |
 |----------------|---------|
 | `.CodePapr/AGENTS.md` | Project-wide rules injected into the system prompt of all agents and sub-agents |
-| `.CodePapr/project.sqlite` (`memory_entries`) | Cross-session project memory (panel is the only human surface; session bootstrap is rendered from the ledger) |
+| `.CodePapr/MEMORY.md` | Cross-session project memory, maintained by the memory curator; the panel is its editor, and it is injected into the session bootstrap every turn |
+| `.CodePapr/project.sqlite` | Project-level state: sessions, checkpoints, ProjectGraph cache |
 | `.CodePapr/agents/*.md` | Custom sub-agents (YAML frontmatter + Markdown body) |
 | `.CodePapr/skills/*/SKILL.md` | Reusable skills (search strategies, debugging workflows, release checklists); also supports flat layout `.CodePapr/skills/<name>.md`; skill marketplace with one-click install from GitHub |
 | `.CodePapr/commands/*.md` | Custom prompt templates (invoked with `/name`) |
@@ -186,7 +187,7 @@ Six tabs — `General / LLM / Search / Mentor / Advanced / App`:
 - **LLM**: Main model, fast model, temperature, topP, maxTokens, thinking mode, maxToolRounds
 - **Search**: Self-hosted SearXNG search (preferred, with automatic fallback to built-in Bing / Mojeek / Qwant / Wikipedia multi-source aggregation)
 - **Mentor**: Sub-agent selection, custom prompts, sub-agent parameters (temperature/topP/thinking/maxTokens/maxToolRounds/maxDepth), independent Mentor model configuration
-- **Advanced**: Context compaction (summarizer tier/temperature/output cap; trigger line is fixed at window × 90%), Goal loop, verifier, ProjectGraph depth/file limits
+- **Advanced**: Context compaction (second-level summary model/temperature/output cap; trigger line is fixed at window × 90%), Goal loop, verifier, ProjectGraph depth/file limits
 - **App**: .papr app permission management — global defaults (local access × network) and per-app two-axis overrides
 
 See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter reference.
@@ -199,11 +200,12 @@ See `packages/@codepapr/core/docs/CONFIGURATION.md` for the full parameter refer
 | **scout** | Web search + download | fast | websearch, webfetch, browser, read_image |
 | **mentor** | Architecture/algorithm guidance | Configurable model | None |
 | **verifier** *(internal)* | Goal acceptance — read-only audit of the work done by the Worker (`/goal`) | `verifierModelTier` (fast/primary/mentor) | read, grep, glob, list |
-| **compactor** *(internal)* | Context compaction — generates recoverable checkpoints | `compactionModel` tier (fast/primary) | None |
+| **compactor** *(internal)* | Context compaction — one second-level summary when the deterministic skeleton still overflows | `compactionModel` tier (fast/primary) | None |
+| **memory-curator** *(internal)* | Maintains `.CodePapr/MEMORY.md` at turn delivery / pre-compaction | `compactionModel` tier | None (pure reasoning) |
 
-The main agent dispatches sub-agents via the `task` tool. Each sub-agent has its own **isolated session and blank context**, receiving only the delegated task description — uncontaminated by the conversation history of the main agent. Sub-agents have a 5-minute overall timeout and a 90-second per-tool-call timeout.
+The main agent dispatches sub-agents via the `task` tool. Each sub-agent runs in its own **isolated session with a blank context** and only sees the delegated task description, so the main agent's history never leaks in. Sub-agents have a 5-minute overall timeout and a 90-second per-tool-call timeout.
 
-> **Verifier** and **Compactor** are runtime-controlled internal agents (`internal: true`) — never exposed via the `task` tool. Verifier is invoked by the GoalRunner acceptance loop; Compactor is invoked by the context-compaction pipeline (between-turn and mid-loop). Compactor runs with zero tools (pure reasoning over the transcript) and keeps the sub-agent default 20-minute wall-clock budget.
+> **Verifier**, **Compactor**, and **memory-curator** are runtime-controlled internal agents (`internal: true`) — never exposed via the `task` tool. Verifier is invoked by the GoalRunner acceptance loop; Compactor by the context-compaction pipeline (between-turn and mid-loop), as a single second-level summary once the deterministic skeleton still overflows; memory-curator by the memory pipeline at the delivery / pre-compaction checkpoints. Compactor and memory-curator run with zero tools (pure reasoning) and keep the sub-agent default 20-minute wall-clock budget.
 
 ## Verify
 

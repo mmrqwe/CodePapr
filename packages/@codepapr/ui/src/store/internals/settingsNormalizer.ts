@@ -236,7 +236,7 @@ function buildSynthesizedProfiles(
       apiFormat: 'openai',
       baseURL: deepseek.baseURL,
       apiKey: deepseek.apiKey,
-      model: deepseek.fastModel || 'deepseek-v4-flash',
+      model: deepseek.fastModel || 'deepseek-flash',
       maxTokens: deepseek.maxTokens || DEEPSEEK_DEFAULT_MAX_TOKENS,
       maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
       temperature: 0.7,

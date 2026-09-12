@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAgentStore } from '../store/agentStore';
 import { getTranslation } from '../utils/i18n';
 
-const DEEPSEEK_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'];
+const DEEPSEEK_MODELS = ['deepseek-v4-pro', 'deepseek-flash', 'deepseek-chat', 'deepseek-reasoner'];
 const DEEPSEEK_KEYS_URL = 'https://platform.deepseek.com/api_keys';
 
 interface OnboardingPanelProps {
@@ -40,7 +40,7 @@ export function OnboardingPanel({ onDismiss, onOpenFullSettings }: OnboardingPan
           ...p,
           apiMode: 'deepseek' as const,
           apiFormat: 'openai' as const,
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-flash',
         };
       }
       return p;

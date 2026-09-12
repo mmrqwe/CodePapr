@@ -414,7 +414,7 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0}
       <a href="tutorial.en.html" style="font-size:0.78rem;color:var(--accent);text-decoration:none;margin-left:8px" onclick="localStorage.setItem('codepapr-lang','en')">EN</a>
       </div>
       <h1><span class="gradient">CodePapr 教程</span></h1>
-      <p>本地编码 Agent 工作台：读项目、改文件、跑命令、预览结果。深度适配 LLM 前缀缓存。</p>
+      <p>本地编码 Agent 工作台：读项目、改文件、跑命令、预览结果。为 LLM 前缀缓存做逐字节优化。</p>
     </div>
 
     <!-- 1. Intro -->
@@ -553,7 +553,7 @@ https://api.deepseek.com/v1</code></pre>
               <h4>路由设置</h4>
               <ul>
                 <li>fast model 开关 — 是否启用快速模型</li>
-                <li>fast model name — 快速模型名称（默认 <code>deepseek-v4-flash</code>）</li>
+                <li>fast model name — 快速模型名称（默认 <code>deepseek-flash</code>）</li>
                 <li>max tool rounds — 最大工具轮次（默认 500）</li>
                 <li>max context tokens — 模型输入上下文窗口（默认 200K；对 DeepSeek / OpenAI 兼容 / Claude 统一生效，不再按服务商钳制；用量达到其 <strong>90%</strong> 自动触发压缩）</li>
               </ul>
@@ -566,7 +566,7 @@ https://api.deepseek.com/v1</code></pre>
           <thead><tr><th>场景</th><th>使用模型</th><th>温度</th></tr></thead>
           <tbody>
             <tr><td>主 Agent 对话</td><td>主模型（默认 <code>deepseek-v4-pro</code>）</td><td>默认</td></tr>
-            <tr><td>上下文压缩（Compactor 内部代理）</td><td><code>compactionModel</code> 档位（默认快速模型 <code>deepseek-v4-flash</code>，可切主模型）</td><td>0.1</td></tr>
+            <tr><td>上下文压缩（Compactor 内部代理）</td><td><code>compactionModel</code> 档位（默认快速模型 <code>deepseek-flash</code>，可切主模型）</td><td>0.1</td></tr>
             <tr><td>子代理派发（重型/执行类）</td><td>主模型</td><td>用户配置</td></tr>
             <tr><td>子代理派发（Explore/Scout 快速模式）</td><td>快速模型（可切换为主模型）</td><td>用户配置</td></tr>
             <tr><td>Slash 命令声明 <code>model: fast</code>（如 <code>/search</code>、<code>/lint</code>、<code>/clean</code>、<code>/commit</code>、<code>/summary</code>）</td><td>快速模型（未启用时回退主模型）</td><td>0.3</td></tr>
@@ -638,7 +638,7 @@ https://api.deepseek.com/v1</code></pre>
         </ul>
 
         <h3><span class="badge badge-plan">Plan</span> 规划模式</h3>
-        <p><strong>适合：</strong>大改动前先出执行方案、确认影响文件和验证路径、把复杂任务拆成清晰步骤。</p>
+        <p><strong>适合：</strong>大改动前先出执行方案、确认影响文件和验证方式、把复杂任务拆成清晰步骤。</p>
         <p><strong>特点：</strong></p>
         <ul>
           <li>优先给出任务清单与实施方案</li>
@@ -2188,7 +2188,7 @@ MEMORY.md 保存之后（或压缩之后）：
         <table>
           <thead><tr><th>模型</th><th>上下文</th><th>最大输出</th><th>缓存命中输入</th><th>缓存未命中输入</th><th>输出</th><th>并发</th></tr></thead>
           <tbody>
-            <tr><td><code>deepseek-v4-flash</code></td><td>1M</td><td>384K</td><td>0.02 元/M tokens</td><td>1 元/M tokens</td><td>2 元/M tokens</td><td>2500</td></tr>
+            <tr><td><code>deepseek-flash</code></td><td>1M</td><td>384K</td><td>0.02 元/M tokens</td><td>1 元/M tokens</td><td>2 元/M tokens</td><td>2500</td></tr>
             <tr><td><code>deepseek-v4-pro</code></td><td>1M</td><td>384K</td><td>0.025 元/M tokens</td><td>3 元/M tokens</td><td>6 元/M tokens</td><td>500</td></tr>
           </tbody>
         </table>
@@ -2200,7 +2200,7 @@ MEMORY.md 保存之后（或压缩之后）：
         <h3>在 CodePapr 里怎么选</h3>
         <ul>
           <li>主模型默认是 <code>deepseek-v4-pro</code>——用于 Ask、Plan、Agent、App 主执行流程；App 模式始终使用主模型以确保生成质量</li>
-          <li>快速模型默认是 <code>deepseek-v4-flash</code>——用于上下文压缩、子任务规划、只读轻型子代理</li>
+          <li>快速模型默认是 <code>deepseek-flash</code>——用于上下文压缩、子任务规划、只读轻型子代理</li>
           <li>思考强度（thinkingEffort）默认为 <code>max</code>（最强推理），可在 LLM 设置 tab 中切换为 <code>high</code></li>
         </ul>
 

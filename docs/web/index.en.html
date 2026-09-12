@@ -367,7 +367,7 @@
   <div class="container">
     <div class="status"><span class="live"></span>Open Source · Local-first · Tauri Desktop · codepapr-server Host · Plugin Market · MCP · Prefix Cache</div>
     <h1>CodePapr — <span class="gradient">Wuhan's Best Harness</span></h1>
-    <p>Desktop workbench + local codepapr-server host: search, edit, run, and verify on your machine. The main agent delegates Explore / Scout / Mentor, with deep LLM prefix-cache optimization.</p>
+    <p>A coding agent that runs on your machine: search, edit, run, and verify, all through the local codepapr-server host. The main agent coordinates Explore / Scout / Mentor, with byte-level optimization for the LLM prefix cache.</p>
     <div class="hero-actions">
       <a href="#" onclick="showComingSoon(event)" class="btn btn-primary">
         <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -403,13 +403,13 @@
       <div class="mode-card plan reveal">
         <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14h2M13 14h2M9 18h2M13 18h2"/></svg></div>
         <h3>Plan</h3>
-        <p>Before big changes, produce a plan, task list, and verification path; use question to clarify ambiguity, then execute after confirmation.</p>
+        <p>Before big changes, lay out a plan, a task list, and how you'll verify it; ask when something is ambiguous, then execute once you confirm.</p>
         <span class="tag">Plan · Decompose</span>
       </div>
       <div class="mode-card agent reveal">
         <div class="icon-wrap"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
         <h3>Agent</h3>
-        <p>Fully autonomous: search project, read/write files, run commands, verify. Fix bugs and implement features in one go.</p>
+        <p>Searches the project, reads and writes files, runs commands, verifies — then fixes bugs or ships features in one go.</p>
         <span class="tag">Execute · Read/Write</span>
       </div>
       <div class="mode-card app reveal">
@@ -440,11 +440,11 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
-        <div><h4>Agent Autonomous Execution</h4><p>Auto search + read/write + run commands + verify. The agent loop runs in desktop @codepapr/core; side effects go through the local host so the UI stays responsive.</p></div>
+        <div><h4>Agent Autonomous Execution</h4><p>Search, file edits, commands, and verification — all automatic. The agent loop runs in @codepapr/core on the desktop; file and command work goes through the local host so the UI stays responsive.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-cyan"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
-        <div><h4>Deep Git Integration</h4><p>Diff, commit, branch switch, safe rollback. Agent handles analysis; human gates high-risk operations.</p></div>
+        <div><h4>Git Integration</h4><p>Diff, commit, branch switch, safe rollback. Agent handles analysis; human gates high-risk operations.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
@@ -468,7 +468,7 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-amber"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4"/><path d="M9 3v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></div>
-        <div><h4>Project Memory (zero-review)</h4><p>Preferences, constraints, and verified facts write automatically to the SQLite ledger; the panel is the only human-facing surface. Short instructions go into Bootstrap, procedures Recall per turn, web citations into search only. <a href="context-architecture.en.html">How context is stacked</a>.</p></div>
+        <div><h4>Project Memory (auto-maintained)</h4><p>Preferences, constraints, and verified facts are curated into .CodePapr/MEMORY.md — readable, editable, diffable. The panel is the editor; saves take effect next turn. <a href="context-architecture.en.html">How context is stacked</a>.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
@@ -476,11 +476,11 @@
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-green"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
-        <div><h4>Multi-agent Collaboration</h4><p>Main agent schedules Explore (code), Scout (web), and Mentor (architecture) via task; plus Verifier / Compactor.</p></div>
+        <div><h4>Multi-agent Collaboration</h4><p>The main agent hands work to Explore (code), Scout (web), and Mentor (architecture) via task; Verifier, Compactor, and the memory curator run behind the scenes.</p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-indigo"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
-        <div><h4>Desktop + CLI Host</h4><p>Desktop and codepapr-cli share the local codepapr-server (JSON-RPC). Domain capability lives in codepapr-core; clients are thin callers. <a href="tutorial.en.html#cli-host">Tutorial</a></p></div>
+        <div><h4>Desktop + CLI Host</h4><p>Desktop and codepapr-cli share the same local codepapr-server (JSON-RPC). The capability lives in codepapr-core; clients only call into it. <a href="tutorial.en.html#cli-host">Tutorial</a></p></div>
       </div>
       <div class="feature reveal">
         <div class="ficon ficon-rose"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
@@ -554,7 +554,7 @@
         <thead><tr><th>Command</th><th>Purpose</th><th>Model</th></tr></thead>
         <tbody>
           <tr><td><code>/help</code> &nbsp; <code>/commands</code></td><td>List all available commands and descriptions</td><td><span class="badge-model badge-local">Local</span></td></tr>
-          <tr><td><code>/compact</code></td><td>Force-compress current session context; the internal Compactor agent generates the checkpoint (rule-based fallback on LLM failure)</td><td><span class="badge-model badge-primary">Primary / Fast</span></td></tr>
+          <tr><td><code>/compact</code></td><td>Force-compress current session context — deterministic skeleton checkpoint (zero LLM; one second-level summary only if the skeleton still overflows)</td><td><span class="badge-model badge-primary">Primary / Fast</span></td></tr>
           <tr><td><code>/undo</code></td><td>Undo the last conversation reset (restore truncated messages and code snapshot)</td><td><span class="badge-model badge-local">Local</span></td></tr>
           <tr><td><code>/goal</code></td><td>Autonomous loop: main Agent executes + Verifier audits, until the verification condition passes</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
           <tr><td><code>/review</code></td><td>Review changes or specified scope, prioritize bugs and regression risks</td><td><span class="badge-model badge-primary">Primary</span></td></tr>
@@ -586,7 +586,7 @@
     <div class="section-header reveal">
       <div class="section-label"><span class="dot"></span> System Architecture</div>
       <h2>Local host, many clients</h2>
-      <p>Domain side effects go through the codepapr-server host; the agent loop and prompts live in the TypeScript client. Tauri is the shell, not the Agent.</p>
+      <p>File I/O, commands, and Git go through the codepapr-server host; the agent loop and prompts live in the TypeScript client. Tauri is the shell, not the agent.</p>
     </div>
         <div class="arch">
       <div class="arch-node reveal">
@@ -603,7 +603,7 @@
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg></div>
-        <h4>project.sqlite</h4><p>Sessions · checkpoints · plugin UI / workspace authority</p>
+        <h4>project.sqlite</h4><p>Sessions · checkpoints · plugin UI / workspace source of truth</p>
       </div>
       <div class="arch-node reveal">
         <div class="aicon"><svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/></svg></div>

@@ -31,7 +31,7 @@ const settings = {
   model: 'deepseek-v4-pro',
   compactionModel: 'fast',
   fastModelEnabled: true,
-  fastModel: 'deepseek-v4-flash',
+  fastModel: 'deepseek-flash',
   compactionTemperature: 0.1,
   compactionMaxTokens: 8000,
 } as unknown as CompactionSettings;

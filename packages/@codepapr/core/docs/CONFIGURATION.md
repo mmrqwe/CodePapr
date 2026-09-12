@@ -11,7 +11,7 @@
 | `baseURL` | 字符串 | `''` | 任意 URL | 自定义 API 端点地址 |
 | `apiKey` | 字符串 | `''` | — | API 密钥 |
 | `model` | 字符串 | `deepseek-v4-pro` | — | 主模型名称 |
-| `fastModel` | 字符串 | `deepseek-v4-flash` | — | 快速模型名称（用于子代理和不需深度推理的任务） |
+| `fastModel` | 字符串 | `deepseek-flash` | — | 快速模型名称（用于子代理和不需深度推理的任务） |
 | `fastModelEnabled` | 布尔 | `true` | — | 启用快速模型 |
 | `thinkingEnabled` | 布尔 | `true` | — | 启用推理模式（仅 DeepSeek 官方 API 生效） |
 | `thinkingEffort` | 枚举 | `max` | `high` / `max` | 推理强度 |

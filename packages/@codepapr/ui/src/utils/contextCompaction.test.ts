@@ -96,7 +96,7 @@ describe('contextCompaction', () => {
       sourceMessageCount: 8,
       sourceChars: 1200,
       generatedAt: 100,
-      modelName: 'deepseek-v4-flash',
+      modelName: 'deepseek-flash',
       modelTier: 'fast',
         sections: {
           userGoal: ['修复预览闪退'],
@@ -142,7 +142,7 @@ describe('contextCompaction', () => {
       sourceMessageCount: 4,
       sourceChars: 200,
       generatedAt: 100,
-      modelName: 'deepseek-v4-flash',
+      modelName: 'deepseek-flash',
       modelTier: 'fast',
     };
     const messages: ContextMessageLike[] = [
@@ -409,7 +409,7 @@ describe('contextCompaction', () => {
       sourceMessageCount: 12,
       sourceChars: 3200,
       generatedAt: 100,
-      modelName: 'deepseek-v4-flash',
+      modelName: 'deepseek-flash',
       modelTier: 'fast',
       sections: priorSections,
     };
