@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  maybeApplySessionTitle,
   normalizeSessionMetaList,
   normalizeSessionProvider,
   sanitizeMessageForPersistence,
@@ -30,6 +31,51 @@ describe('touchSession', () => {
   it('returns the list unchanged when the session is missing', () => {
     const sessions = [session('a', 1)];
     expect(touchSession(sessions, 'missing', 5)).toBe(sessions);
+  });
+});
+
+describe('maybeApplySessionTitle', () => {
+  const target = session('s1', 1);
+
+  it('names the session from the first user message', () => {
+    const result = maybeApplySessionTitle([target], 's1', '请帮我修复 Rust 后端死锁', []);
+    expect(result[0]?.name).toBe('修复 Rust 后端死锁');
+  });
+
+  it('still names the session when a character greeting precedes the first user message', () => {
+    const greeting: UIMessage = {
+      id: 'character-greeting:s1:char-1:abc123',
+      role: 'assistant',
+      content: '你好呀，我是 Ada。',
+      timestamp: 1,
+    };
+    const result = maybeApplySessionTitle([target], 's1', '帮我写一个脚本', [greeting]);
+    expect(result[0]?.name).toBe('写一个脚本');
+  });
+
+  it('ignores synthetic and error messages when checking for a user turn', () => {
+    const messages: UIMessage[] = [
+      { id: 'i1', role: 'assistant', content: '/help 输出', timestamp: 1, synthetic: true },
+      { id: 'e1', role: 'error', content: '请求失败', timestamp: 2 },
+    ];
+    const result = maybeApplySessionTitle([target], 's1', '修复登录接口', messages);
+    expect(result[0]?.name).toBe('修复登录接口');
+  });
+
+  it('does not rename a session that already has a real user turn', () => {
+    const messages: UIMessage[] = [
+      { id: 'u1', role: 'user', content: '第一条消息', timestamp: 1 },
+    ];
+    const result = maybeApplySessionTitle([target], 's1', '第二条消息', messages);
+    expect(result[0]?.name).toBe('任务 s1');
+  });
+
+  it('does not rename when the only user turn is synthetic or hidden', () => {
+    const messages: UIMessage[] = [
+      { id: 'u1', role: 'user', content: '[Goal iteration]', timestamp: 1, synthetic: true, hidden: true },
+    ];
+    const result = maybeApplySessionTitle([target], 's1', '真正的第一条', messages);
+    expect(result[0]?.name).toBe('真正的第一条');
   });
 });
 

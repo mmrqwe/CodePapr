@@ -60,7 +60,12 @@ export function maybeApplySessionTitle(
   currentMessages: readonly UIMessage[],
   lang?: import('../../utils/i18n').Lang
 ): SessionMeta[] {
-  if (currentMessages.length > 0) {
+  // 首个真实用户回合才命名：角色开场白（character-greeting:*）、合成提示、
+  // 错误消息都可能先于用户输入出现，不能算作「已开始对话」。
+  const hasRealUserTurn = currentMessages.some(
+    (message) => message.role === 'user' && !message.synthetic && !message.hidden
+  );
+  if (hasRealUserTurn) {
     return sessions;
   }
 

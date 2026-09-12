@@ -33,6 +33,7 @@ import { snapshotCreateWithRetry, saveCheckpointRecord } from '../../utils/snaps
 import { buildCheckpointCommitMessage } from '../../utils/workspaceGitPanel';
 import type { WorkMode } from '../../utils/agentPrompts';
 import { getTranslation } from '../../utils/i18n';
+import { buildUserMessageTitleSource } from '../../utils/taskTitle';
 import { yieldToMainThread } from '../../utils/taskScheduling';
 import {
   buildPrimaryModelRoute,
@@ -1012,12 +1013,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             images: persistedImages && persistedImages.length ? persistedImages : undefined,
             attachedFiles: attachedFiles && attachedFiles.length ? attachedFiles : undefined,
           };
+          // 首条消息可能只有图片/附件（无文字），用兜底标题源，避免会话
+          // 停留在「＋ 新任务」占位名。
+          const titleSource = buildUserMessageTitleSource(
+            effectiveDisplay ?? effectiveInput,
+            userMsg.attachedFiles,
+            userMsg.images?.length ?? 0,
+            normalizedSettings.lang
+          );
           set((s) => {
             const currentMsgs = s.sessionMessages[optimisticSid!] ?? s.messages;
             const next = [...currentMsgs, userMsg!];
             const updatedSessions = touchSession(
               maybeApplySessionTitle(
-                s.sessions, optimisticSid!, effectiveDisplay ?? effectiveInput,
+                s.sessions, optimisticSid!, titleSource,
                 currentMsgs,
                 normalizedSettings.lang
               ),

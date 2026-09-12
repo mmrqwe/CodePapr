@@ -58,3 +58,38 @@ export function buildTaskTitle(input: string, lang?: import('./i18n').Lang): str
 
   return truncateTitle(concise || sentence || normalized) || getTranslation(lang).taskTitleFallback;
 }
+
+export interface TitleSourceAttachment {
+  name: string;
+}
+
+/**
+ * 首条消息可能没有文字（只发图片/附件），此时退回附件名或「图片 × N」，
+ * 避免会话一直停留在新建占位名。
+ */
+export function buildUserMessageTitleSource(
+  text: string | undefined,
+  attachedFiles: readonly TitleSourceAttachment[] | undefined,
+  imageCount: number,
+  lang?: import('./i18n').Lang
+): string {
+  const trimmedText = (text ?? '').trim();
+  if (trimmedText) {
+    return trimmedText;
+  }
+
+  const separator = lang === 'en' ? ', ' : '、';
+  const attachmentNames = (attachedFiles ?? [])
+    .map((file) => file.name.trim())
+    .filter(Boolean)
+    .join(separator);
+  if (attachmentNames) {
+    return attachmentNames;
+  }
+
+  if (imageCount > 0) {
+    return getTranslation(lang).taskTitleImageTask.replace('{{count}}', String(imageCount));
+  }
+
+  return '';
+}

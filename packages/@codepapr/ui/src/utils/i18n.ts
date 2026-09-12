@@ -1281,6 +1281,7 @@ export const I18N_DICTS = {
     slashMentorModelMissing: '该命令要求 mentor 模型，但当前未配置导师模型。',
     slashGoalAskMode: 'Ask 模式不能启动 /goal（会改代码）。请切到 Agent 模式后再试。',
     taskTitleFallback: '新任务',
+    taskTitleImageTask: '图片 × {{count}}',
     ensureDefaultWorkspaceFailed: '无法创建默认项目，请手动打开一个项目文件夹后重试。',
     sessionHistoryLoadFailed: '会话历史加载失败，为避免覆盖已有消息已暂停发送。请重新打开项目或切换会话后重试。',
   },
@@ -2564,6 +2565,7 @@ export const I18N_DICTS = {
     slashMentorModelMissing: '該命令要求 mentor 模型，但目前未配置導師模型。',
     slashGoalAskMode: 'Ask 模式不能啟動 /goal（會改程式碼）。請切到 Agent 模式後再試。',
     taskTitleFallback: '新任務',
+    taskTitleImageTask: '圖片 × {{count}}',
     ensureDefaultWorkspaceFailed: '無法建立預設專案，請手動開啟一個專案資料夾後重試。',
     sessionHistoryLoadFailed: '會話歷史載入失敗，為避免覆蓋已有訊息已暫停傳送。請重新開啟專案或切換會話後重試。',
   },
@@ -3847,6 +3849,7 @@ export const I18N_DICTS = {
     slashMentorModelMissing: 'This command requires the mentor model, which is not configured.',
     slashGoalAskMode: 'Ask mode cannot start /goal (it would change code). Switch to Agent mode and retry.',
     taskTitleFallback: 'New task',
+    taskTitleImageTask: 'Image × {{count}}',
     ensureDefaultWorkspaceFailed: 'Failed to create the default project. Please open a project folder manually and retry.',
     sessionHistoryLoadFailed: 'Session history failed to load. Sending has been paused to avoid overwriting existing messages. Please reopen the project or switch sessions and retry.',
   }
