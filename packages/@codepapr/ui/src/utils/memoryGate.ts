@@ -44,8 +44,11 @@ export interface TurnMemorySignals {
   agentProposal: boolean;
 }
 
+/** 显式记忆意图。`always use` / `must use` 不在其中：它们是英文任务指令的
+ *  高频词组（"you must use the --force flag"），纳入即每回合误触；持久禁令
+ *  由 CONSTRAINT 与 Agent「记忆候选」通道覆盖。 */
 const CUE_PATTERN =
-  /记住|请记住|记得|以后都|往后都|下次请|都统一|一律|please remember|remember (that|this|to)|from now on|always use|never use|must use/i;
+  /记住|请记住|记得|以后都|往后都|下次请|都统一|一律|please remember|remember (that|this|to)|from now on|never use/i;
 /** 持久禁令（行为约定）。普通模态词（必须/务必/不得/只能/不准/must/forbidden/
  *  always）故意不在此列：日常任务指令高频命中 = 每回合误触 curator（费 token
  *  + 前缀缓存抖动）。兜底由压缩前卡点（无条件）承担。 */

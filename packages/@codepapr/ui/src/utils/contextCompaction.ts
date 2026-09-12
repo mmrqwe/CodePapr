@@ -15,10 +15,6 @@ import type { UIToolInvocation } from '../store/internals/types';
 export const TOOL_RESULT_MISSING_PLACEHOLDER = '[tool result missing: interrupted before completion]';
 export const TOOL_RESULT_MISSING_ERROR = '工具执行中断，结果缺失';
 
-/** 软预算比例：v4 压缩触发线改用 core 的 COMPACT_TRIGGER_RATIO；该比例目前
- *  仅剩每回合 Recall 预算（sendMessage）使用。 */
-export const CONTEXT_COMPACTION_SOFT_BUDGET_RATIO = 0.7;
-
 export interface ContextCheckpointSections {
   userGoal: string[];
   constraints: string[];

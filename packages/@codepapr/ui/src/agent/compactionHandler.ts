@@ -112,6 +112,20 @@ export function buildSessionBootstrapMessage(bootstrap: string): IMessage {
   };
 }
 
+/** fail-closed 的最小占位 Bootstrap：极端路径（日志从未有 bootstrap 且刷新失败）
+ *  下保证 epoch 仍以 bootstrap 消息开头，并显式标注「本 epoch 记忆不可用」，
+ *  避免无前缀 epoch 静默生成。 */
+export function buildMinimalBootstrapFallback(lang: CompactionSettings['lang']): string {
+  switch (lang) {
+    case 'en':
+      return '[Session bootstrap unavailable] This compaction could not refresh memory/project guidance; the compacted context below is still valid.';
+    case 'zh-TW':
+      return '【會話引導暫不可用】本次壓縮未能重新整理記憶與專案引導，以下為壓縮後的上下文。';
+    default:
+      return '【会话引导暂不可用】本次压缩未能刷新记忆与项目引导，以下为压缩后的上下文。';
+  }
+}
+
 /**
  * Build the mid-loop context-compaction config injected into the Agent.
  *
@@ -256,26 +270,31 @@ async function runCompactionHandler(
   }
 
   const compacted = buildEffectiveContextMessages(withCheckpoint);
+
+  // v4/v5：绝不允许「无 Bootstrap 的 epoch」。fallback 链（不依赖是否接线
+  // refresher——旧实现无 refresher 时会连日志里已有的冻结 bootstrap 一起丢掉）：
+  //   1. 刷新成功 → 全新 Bootstrap（记忆最新）；
+  //   2. 刷新失败/为空 → 沿用压缩前日志里的冻结 bootstrap（记忆陈旧一帧，
+  //      但前缀结构不蒸发）；
+  //   3. 日志里从来没有 bootstrap（极端旧日志 / 空引导会话）→ 最小占位，
+  //      fail-closed 保证 epoch 始终以 bootstrap 消息开头且显式标注降级。
+  let freshBootstrap: string | null = null;
   if (refreshBootstrap) {
     try {
-      const freshBootstrap = await refreshBootstrap();
-      if (freshBootstrap && freshBootstrap.trim()) {
-        return {
-          messages: [buildSessionBootstrapMessage(freshBootstrap.trim()), ...compacted],
-          cacheStats: checkpoint.cacheStats,
-        };
-      }
+      const fresh = await refreshBootstrap();
+      if (fresh && fresh.trim()) freshBootstrap = fresh.trim();
     } catch {
       // refresh 失败继续走下方兜底（非致命）
     }
-    // v4：绝不允许「无 Bootstrap 的 epoch」——刷新拿不到新版时，沿用压缩前
-    // 冻结的 bootstrap 消息（记忆段可能陈旧一帧，但整体前缀不会蒸发）。
-    const frozenBootstrap = coreMessages.find(
-      (m) => m.metadata?.sessionBootstrap === true || m.id === SESSION_BOOTSTRAP_MESSAGE_ID
-    );
-    if (frozenBootstrap && compacted[0]?.id !== frozenBootstrap.id) {
-      return { messages: [frozenBootstrap, ...compacted], cacheStats: checkpoint.cacheStats };
-    }
+  }
+  const frozenBootstrap = coreMessages.find(
+    (m) => m.metadata?.sessionBootstrap === true || m.id === SESSION_BOOTSTRAP_MESSAGE_ID
+  );
+  const prefix = freshBootstrap
+    ? buildSessionBootstrapMessage(freshBootstrap)
+    : (frozenBootstrap ?? buildSessionBootstrapMessage(buildMinimalBootstrapFallback(settings.lang)));
+  if (compacted[0]?.id !== prefix.id) {
+    return { messages: [prefix, ...compacted], cacheStats: checkpoint.cacheStats };
   }
   return { messages: compacted, cacheStats: checkpoint.cacheStats };
 }

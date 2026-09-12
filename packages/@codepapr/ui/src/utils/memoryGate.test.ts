@@ -29,19 +29,21 @@ function bash(
 }
 
 describe('detectTurnMemorySignals', () => {
-  it('线索词：记住/以后都 命中；普通模态词「必须/禁止/always」不再触发', () => {
+  it('线索词：记住/以后都 命中；普通模态词「必须/禁止/always use/must use」不再触发', () => {
     expect(detectTurnMemorySignals([user('u1', '记住以后都用 pnpm')]).cue).toBe(true);
     expect(detectTurnMemorySignals([user('u1', '以后都用 pnpm')]).cue).toBe(true);
     expect(detectTurnMemorySignals([user('u1', '这个项目必须用中文注释')]).cue).toBe(false);
     expect(detectTurnMemorySignals([user('u1', '这个项目必须用中文注释')]).constraint).toBe(false);
     expect(detectTurnMemorySignals([user('u1', '禁止提交 .env')]).cue).toBe(false);
+    expect(detectTurnMemorySignals([user('u1', 'you must use the --force flag')]).cue).toBe(false);
+    expect(detectTurnMemorySignals([user('u1', 'always use the cache here')]).cue).toBe(false);
     expect(detectTurnMemorySignals([user('u1', '接下来改按钮样式')]).cue).toBe(false);
   });
 
-  it('持久禁令：不要再用 / never … again 命中', () => {
+  it('持久禁令：不要再用 / never … again 命中；never use 仍视为强信号', () => {
     expect(detectTurnMemorySignals([user('u1', '不要再用 npm 安装依赖')]).constraint).toBe(true);
     expect(detectTurnMemorySignals([user('u1', 'never use npm again')]).constraint).toBe(true);
-    expect(detectTurnMemorySignals([user('u1', 'must use pnpm')]).cue).toBe(true);
+    expect(detectTurnMemorySignals([user('u1', 'never use npm')]).cue).toBe(true);
   });
 
   it('线索词忽略合成/隐藏消息（goal 锚点、checkpoint）', () => {

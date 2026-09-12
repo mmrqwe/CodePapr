@@ -131,13 +131,15 @@ describe('createContextCompactionHandler (mid-loop retained tail)', () => {
     const result = await config.handler(coreMessages);
 
     expect(result).not.toBeNull();
-    // checkpoint (user turn) + retained tail (u3, a3). If the checkpoint had been
-    // appended at the end, the tail would be empty and only the checkpoint remains.
-    expect(result!.messages).toHaveLength(3);
-    expect(result!.messages[0]?.role).toBe('user');
-    expect(result!.messages[0]?.content).toContain('检查点摘要');
-    expect(result!.messages[1]?.content).toBe('用户消息 3');
-    expect(result!.messages[2]?.content).toBe('助手回复 3');
+    // fail-closed 占位 bootstrap + checkpoint (user turn) + retained tail (u3, a3).
+    // If the checkpoint had been appended at the end, the tail would be empty and
+    // only the checkpoint remains.
+    expect(result!.messages).toHaveLength(4);
+    expect(result!.messages[0]?.metadata?.sessionBootstrap).toBe(true);
+    expect(result!.messages[1]?.role).toBe('user');
+    expect(result!.messages[1]?.content).toContain('检查点摘要');
+    expect(result!.messages[2]?.content).toBe('用户消息 3');
+    expect(result!.messages[3]?.content).toBe('助手回复 3');
   });
 
   it('returns null when no checkpoint is generated', async () => {
@@ -329,7 +331,7 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     expect(result!.messages[1]?.content).toContain('检查点摘要');
   });
 
-  it('does not prefix a bootstrap when refreshBootstrap returns null', async () => {
+  it('refresh 返回 null 且日志无冻结 bootstrap → 最小占位（fail-closed，绝不无前缀）', async () => {
     vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
       message: checkpointMessage,
       modelTier: 'fast',
@@ -341,13 +343,15 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     const result = await config.handler(fourRounds());
 
     expect(result).not.toBeNull();
-    // checkpoint + tail only, no bootstrap
-    expect(result!.messages).toHaveLength(3);
-    expect(result!.messages[0]?.role).toBe('user');
-    expect(result!.messages[0]?.content).toContain('检查点摘要');
+    // placeholder + checkpoint + retained tail (u3, a3)
+    expect(result!.messages).toHaveLength(4);
+    expect(result!.messages[0]?.role).toBe('assistant');
+    expect(result!.messages[0]?.metadata?.sessionBootstrap).toBe(true);
+    expect(result!.messages[0]?.content).toContain('会话引导暂不可用');
+    expect(result!.messages[1]?.content).toContain('检查点摘要');
   });
 
-  it('does not prefix a bootstrap when refreshBootstrap returns an empty string', async () => {
+  it('refresh 返回空串 → 同样走最小占位兜底', async () => {
     vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
       message: checkpointMessage,
       modelTier: 'fast',
@@ -358,11 +362,12 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     const config = createContextCompactionHandler(settings, 'deepseek', 'session-test', refreshBootstrap);
     const result = await config.handler(fourRounds());
 
-    expect(result!.messages).toHaveLength(3);
-    expect(result!.messages[0]?.content).toContain('检查点摘要');
+    expect(result!.messages).toHaveLength(4);
+    expect(result!.messages[0]?.metadata?.sessionBootstrap).toBe(true);
+    expect(result!.messages[0]?.content).toContain('会话引导暂不可用');
   });
 
-  it('falls back to a bootstrap-less epoch when refreshBootstrap throws', async () => {
+  it('refresh 抛错且日志无冻结 bootstrap → 最小占位（不产出无前缀 epoch）', async () => {
     vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
       message: checkpointMessage,
       modelTier: 'fast',
@@ -374,8 +379,10 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     const result = await config.handler(fourRounds());
 
     expect(result).not.toBeNull();
-    expect(result!.messages).toHaveLength(3);
-    expect(result!.messages[0]?.content).toContain('检查点摘要');
+    expect(result!.messages).toHaveLength(4);
+    expect(result!.messages[0]?.metadata?.sessionBootstrap).toBe(true);
+    expect(result!.messages[0]?.content).toContain('会话引导暂不可用');
+    expect(result!.messages[1]?.content).toContain('检查点摘要');
   });
 
   it('v4：刷新失败时沿用压缩前冻结的 bootstrap——绝不产出无记忆前缀的 epoch', async () => {
@@ -404,7 +411,7 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     expect(result!.messages[1]?.content).toContain('检查点摘要');
   });
 
-  it('keeps backward compatibility when no refreshBootstrap is provided', async () => {
+  it('无 refresher 且日志无 bootstrap → 最小占位（同样 fail-closed）', async () => {
     vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
       message: checkpointMessage,
       modelTier: 'fast',
@@ -414,8 +421,35 @@ describe('createContextCompactionHandler (bootstrap refresh)', () => {
     const config = createContextCompactionHandler(settings, 'deepseek', 'session-test');
     const result = await config.handler(fourRounds());
 
-    expect(result!.messages).toHaveLength(3);
-    expect(result!.messages[0]?.content).toContain('检查点摘要');
+    expect(result!.messages).toHaveLength(4);
+    expect(result!.messages[0]?.metadata?.sessionBootstrap).toBe(true);
+    expect(result!.messages[0]?.content).toContain('会话引导暂不可用');
+    expect(result!.messages[1]?.content).toContain('检查点摘要');
+  });
+
+  it('无 refresher 时日志里的冻结 bootstrap 不再被丢掉（旧实现回归）', async () => {
+    vi.mocked(maybeGenerateContextCheckpoint).mockResolvedValue({
+      message: checkpointMessage,
+      modelTier: 'fast',
+      insertIndex: 6,
+    });
+    const logWithBootstrap: IMessage[] = [
+      {
+        id: 'session-bootstrap',
+        role: 'assistant',
+        content: '旧冻结记忆前缀',
+        timestamp: 0,
+        metadata: { sessionBootstrap: true, isPrefixSystem: true },
+      } as IMessage,
+      ...fourRounds(),
+    ];
+
+    const config = createContextCompactionHandler(settings, 'deepseek', 'session-test');
+    const result = await config.handler(logWithBootstrap);
+
+    expect(result!.messages[0]?.metadata?.sessionBootstrap).toBe(true);
+    expect(result!.messages[0]?.content).toContain('旧冻结记忆前缀');
+    expect(result!.messages[1]?.content).toContain('检查点摘要');
   });
 
   it('returns null when onCheckpoint rejects so the agent does not replaceLog', async () => {

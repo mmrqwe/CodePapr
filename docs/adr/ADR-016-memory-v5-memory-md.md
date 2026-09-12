@@ -27,7 +27,7 @@
 ## 架构与业务已知事实
 ```
 
-硬上限 `MEMORY_MD_MAX_LINES = 60` 行 / `MEMORY_MD_MAX_TOKENS = 2000`（约 8 KB）——写入端（管家 + 面板保存）与注入端共用同一常量，注入永远全量、不截断。这是 Recall 消失后「全量注入」可控的代价边界。
+硬上限 `MEMORY_MD_MAX_LINES = 120` 行 / `MEMORY_MD_MAX_TOKENS = 4000`（约 16 KB）——写入端（管家 + 面板保存）与注入端共用同一常量，注入永远全量、不截断。这是 Recall 消失后「全量注入」可控的代价边界。
 
 ### 2. 管家维护：内置 `memory-curator` 子代理
 
