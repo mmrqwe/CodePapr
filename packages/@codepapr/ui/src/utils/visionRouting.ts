@@ -22,9 +22,10 @@ function legacySlotVision(settings: Settings, slot: 'primary' | 'fast'): boolean
 }
 
 /**
- * Known pure-text models that do not accept multimodal/vision inputs in their API.
- * Even if multimodal is accidentally toggled on in profiles/settings, they should
- * not receive raw image payloads directly.
+ * Known pure-text models that historically did not accept multimodal inputs.
+ * Used only as a conservative default when the user has NOT configured an
+ * explicit `multimodalEnabled` flag for the slot/profile; an explicit
+ * profile flag always wins (e.g. DeepSeek gaining vision in a newer API).
  */
 export function isKnownTextOnlyModel(modelName: string | undefined): boolean {
   if (!modelName) return false;
@@ -59,37 +60,37 @@ export function fastSlotSupportsVision(settings: Settings): boolean {
   const fastModel = settings.modelProfiles?.length
     ? findProfile(settings, settings.fastProfileId)?.model || settings.fastModel
     : settings.fastModel;
-  if (isKnownTextOnlyModel(fastModel)) return false;
   if (settings.modelProfiles?.length) {
     const fast = findProfile(settings, settings.fastProfileId);
-    return profileVision(fast) === true;
+    const flagged = profileVision(fast);
+    if (flagged !== undefined) return flagged;
   }
+  if (isKnownTextOnlyModel(fastModel)) return false;
   return legacySlotVision(settings, 'fast');
 }
 
 export function primarySlotSupportsVision(settings: Settings): boolean {
+  const primary = settings.modelProfiles?.length
+    ? findProfile(settings, settings.primaryProfileId) || settings.modelProfiles[0]
+    : undefined;
   const primaryModel = settings.modelProfiles?.length
-    ? (findProfile(settings, settings.primaryProfileId) || settings.modelProfiles[0])?.model || settings.model
+    ? primary?.model || settings.model
     : settings.model;
+  const flagged = profileVision(primary);
+  if (flagged !== undefined) return flagged;
   if (isKnownTextOnlyModel(primaryModel)) return false;
-  if (settings.modelProfiles?.length) {
-    const primary =
-      findProfile(settings, settings.primaryProfileId) || settings.modelProfiles[0];
-    const flagged = profileVision(primary);
-    if (flagged !== undefined) return flagged;
-  }
   return legacySlotVision(settings, 'primary');
 }
 
 export function mentorSlotSupportsVision(settings: Settings): boolean {
   if (!settings.mentorEnabled || !trim(settings.mentorModel)) return false;
-  const mentorModel = settings.modelProfiles?.length
-    ? findProfile(settings, settings.mentorProfileId)?.model || settings.mentorModel
-    : settings.mentorModel;
+  const mentor = settings.modelProfiles?.length
+    ? findProfile(settings, settings.mentorProfileId)
+    : undefined;
+  const mentorModel = mentor?.model || settings.mentorModel;
+  const flagged = profileVision(mentor);
+  if (flagged !== undefined) return flagged;
   if (isKnownTextOnlyModel(mentorModel)) return false;
-  if (settings.modelProfiles?.length) {
-    return profileVision(findProfile(settings, settings.mentorProfileId)) === true;
-  }
   return false;
 }
 
@@ -118,7 +119,9 @@ export function slotSupportsVision(settings: Settings, slot: VisionSlot): boolea
 
 /** The running model itself can take image inputs. */
 export function modelSupportsVision(settings: Settings, currentModel: string): boolean {
-  if (isKnownTextOnlyModel(currentModel)) return false;
+  // Slot resolution already honors an explicit profile `multimodalEnabled` flag
+  // first and only falls back to the known-text-only heuristic when the user
+  // left the slot unconfigured — do not re-veto here.
   return slotSupportsVision(settings, inferVisionSlot(settings, currentModel));
 }
 

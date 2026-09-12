@@ -368,7 +368,7 @@
             <div class="name">read_image <small>workspace_read_image</small><span class="cchip c-mm">多模态</span><span class="exp"></span></div>
           </div>
           <div class="desc">读取本地图片（PNG/JPEG/WebP/GIF）并转为 Base64 供视觉模型解析（大小上限 5MB）。仅在多模态配置开启时对模型可见。</div>
-          <div class="more"><div class="mbox">调用链路：<code>read_image</code> → <code>workspace_read_image</code>（Tauri 命令）→ JSON-RPC <code>fs/readFile</code> → <code>codepapr-server</code> → <code>codepapr-core</code> 原生读取。非多模态模型自动从可见工具集中剥离。</div></div>
+          <div class="more"><div class="mbox">调用链路：<code>read_image</code> → <code>workspace_read_image</code>（Tauri 命令）→ JSON-RPC <code>fs/readFile</code> → <code>codepapr-server</code> → <code>codepapr-core</code> 原生读取。当前槽位未启用多模态时自动从可见工具集中剥离（显式 profile 配置优先，未配置的已知纯文本模型默认关闭；快速档具备视觉能力时按需回退）。</div></div>
         </div>
       </section>
 

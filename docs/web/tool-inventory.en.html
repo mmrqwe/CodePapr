@@ -368,7 +368,7 @@
             <div class="name">read_image <small>workspace_read_image</small><span class="cchip c-mm">Multimodal</span><span class="exp"></span></div>
           </div>
           <div class="desc">Reads local image files (PNG/JPEG/WebP/GIF) into Base64 strings for vision models (5MB max). Dynamically hidden from the model when multimodal capabilities are disabled.</div>
-          <div class="more"><div class="mbox">Route: <code>read_image</code> → <code>workspace_read_image</code> (Tauri command) → JSON-RPC <code>fs/readFile</code> → <code>codepapr-server</code> → <code>codepapr-core</code> native I/O. Automatically stripped from toolsets if the current model tier is text-only.</div></div>
+          <div class="more"><div class="mbox">Route: <code>read_image</code> → <code>workspace_read_image</code> (Tauri command) → JSON-RPC <code>fs/readFile</code> → <code>codepapr-server</code> → <code>codepapr-core</code> native I/O. Stripped from toolsets unless the current slot has vision enabled (explicit profile setting wins; unconfigured known text-only models default off; a vision-capable fast slot is used as fallback).</div></div>
         </div>
       </section>
 

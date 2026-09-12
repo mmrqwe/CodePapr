@@ -138,7 +138,7 @@ describe('visionRouting', () => {
     expect(shouldExposeReadImage(s, 'fast-model')).toBe(false);
   });
 
-  it('correctly identifies known text-only models and prevents raw vision payload', () => {
+  it('correctly identifies known text-only models', () => {
     expect(isKnownTextOnlyModel('deepseek-v4-pro')).toBe(true);
     expect(isKnownTextOnlyModel('deepseek-chat')).toBe(true);
     expect(isKnownTextOnlyModel('deepseek-reasoner')).toBe(true);
@@ -149,7 +149,9 @@ describe('visionRouting', () => {
     expect(isKnownTextOnlyModel('qwen-2.5-vl-72b')).toBe(false);
     expect(isKnownTextOnlyModel('claude-3-7-sonnet')).toBe(false);
     expect(isKnownTextOnlyModel('gpt-4o')).toBe(false);
+  });
 
+  it('honors an explicit profile multimodal flag over the text-only heuristic', () => {
     const s = settings({
       model: 'deepseek-v4-pro',
       fastModel: 'claude-3-7-sonnet',
@@ -158,12 +160,38 @@ describe('visionRouting', () => {
         profile({ id: 'p-fast', model: 'claude-3-7-sonnet', multimodalEnabled: true }),
       ],
     });
-    // Even if multimodalEnabled was true in profile, DeepSeek is recognized as text-only
-    expect(modelSupportsVision(s, 'deepseek-v4-pro')).toBe(false);
-    // Fast vision is available via Claude
+    // User configured vision on this profile: the heuristic must not veto it.
+    expect(modelSupportsVision(s, 'deepseek-v4-pro')).toBe(true);
+    expect(shouldExposeReadImage(s, 'deepseek-v4-pro')).toBe(true);
+    expect(shouldOffloadVision(s, 'deepseek-v4-pro')).toBe(false);
+    expect(resolveVisionInputAction(s, 'deepseek-v4-pro')).toBe('native');
+  });
+
+  it('honors an explicit fast-profile flag for a text-only-named model', () => {
+    const s = settings({
+      fastModel: 'deepseek-v4-flash',
+      modelProfiles: [
+        profile({ id: 'p-primary', model: 'primary-model', multimodalEnabled: false }),
+        profile({ id: 'p-fast', model: 'deepseek-v4-flash', multimodalEnabled: true }),
+      ],
+    });
     expect(fastSlotSupportsVision(s)).toBe(true);
-    // Should offload to fast model rather than sending raw image to DeepSeek
+    expect(modelSupportsVision(s, 'deepseek-v4-flash')).toBe(true);
+  });
+
+  it('falls back to the text-only heuristic when the profile flag is absent', () => {
+    const s = settings({
+      model: 'deepseek-v4-pro',
+      fastModel: 'claude-3-7-sonnet',
+      modelProfiles: [
+        profile({ id: 'p-primary', model: 'deepseek-v4-pro', multimodalEnabled: undefined }),
+        profile({ id: 'p-fast', model: 'claude-3-7-sonnet', multimodalEnabled: true }),
+      ],
+    });
+    // No explicit flag: keep the conservative text-only default and offload.
+    expect(modelSupportsVision(s, 'deepseek-v4-pro')).toBe(false);
     expect(shouldOffloadVision(s, 'deepseek-v4-pro')).toBe(true);
     expect(resolveVisionInputAction(s, 'deepseek-v4-pro')).toBe('offload');
+    expect(shouldExposeReadImage(s, 'deepseek-v4-pro')).toBe(true);
   });
 });
