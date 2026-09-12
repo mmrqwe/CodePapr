@@ -32,3 +32,34 @@ describe('toWorkerAgentSettings: fast profile 凭据映射', () => {
     expect(worker.fastBaseURL).toBe('https://fast.example.com/v1');
   });
 });
+
+describe('toWorkerAgentSettings: mentor profile 凭据映射', () => {
+  it('导师槽位为 deepseek profile 时，apiMode/端点/密钥/附加头随槽位下发', () => {
+    const base = normalizeSettings({});
+    const mentor = base.modelProfiles.find((p) => p.id === 'profile-custom')!;
+    const settings = normalizeSettings({
+      ...base,
+      mentorProfileId: mentor.id,
+      modelProfiles: base.modelProfiles.map((p) =>
+        p.id === mentor.id
+          ? {
+              ...p,
+              apiMode: 'deepseek',
+              apiFormat: 'openai',
+              baseURL: '',
+              apiKey: 'sk-mentor',
+              extraHeaders: { 'X-Mentor': '1' },
+            }
+          : p
+      ),
+    });
+
+    const worker = toWorkerAgentSettings(settings);
+    expect(worker.mentorEnabled).toBe(base.mentorEnabled);
+    expect(worker.mentorApiMode).toBe('deepseek');
+    expect(worker.mentorApiFormat).toBe('openai');
+    expect(worker.mentorApiKey).toBe('sk-mentor');
+    expect(worker.mentorBaseURL).toBe('');
+    expect(worker.mentorExtraHeaders).toEqual({ 'X-Mentor': '1' });
+  });
+});

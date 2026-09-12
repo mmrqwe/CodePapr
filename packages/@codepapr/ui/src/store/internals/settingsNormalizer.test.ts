@@ -391,8 +391,64 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     expect(settings.mentorApiKey).toBe('sk-ant-mentor');
     expect(settings.mentorBaseURL).toBe('https://api.anthropic.com/v1');
     expect(settings.mentorApiFormat).toBe('claude');
+    expect(settings.mentorApiMode).toBe('custom');
     expect(settings.mentorThinkingEnabled).toBe(true);
     expect(settings.mentorThinkingBudgetTokens).toBe(8192);
+  });
+
+  it('导师槽位与主/快速同构：mentorApiMode / mentorExtraHeaders 随 profile 派生', () => {
+    const deepseekMentor: ModelProfile = {
+      id: 'prof-deepseek-mentor',
+      name: 'DeepSeek 导师',
+      apiMode: 'deepseek',
+      apiFormat: 'openai',
+      baseURL: '',
+      apiKey: 'sk-mentor',
+      model: 'deepseek-v4-pro',
+      maxTokens: 32000,
+    };
+    const settings = normalizeSettings({
+      modelProfiles: [
+        deepseekMentor,
+        {
+          ...deepseekMentor,
+          id: 'prof-primary',
+          name: '主档',
+          apiKey: 'sk-primary',
+        },
+      ],
+      primaryProfileId: 'prof-primary',
+      mentorProfileId: 'prof-deepseek-mentor',
+    });
+
+    expect(settings.mentorApiMode).toBe('deepseek');
+    expect(settings.mentorApiFormat).toBe('openai');
+    expect(settings.mentorApiKey).toBe('sk-mentor');
+
+    const withHeaders = normalizeSettings({
+      modelProfiles: [
+        { ...deepseekMentor, extraHeaders: { 'X-Tenant-Id': 'acme', Host: 'evil' } },
+        {
+          ...deepseekMentor,
+          id: 'prof-primary',
+          name: '主档',
+          apiKey: 'sk-primary',
+        },
+      ],
+      primaryProfileId: 'prof-primary',
+      mentorProfileId: 'prof-deepseek-mentor',
+    });
+    expect(withHeaders.mentorExtraHeaders).toEqual({ 'X-Tenant-Id': 'acme' });
+  });
+
+  it('legacy 平铺配置的 mentorApiMode 合成进 profile-mentor', () => {
+    const settings = normalizeSettings({
+      mentorModel: 'deepseek-v4-pro',
+      mentorApiKey: 'sk-mentor',
+      mentorApiMode: 'deepseek',
+    });
+    expect(settings.mentorApiMode).toBe('deepseek');
+    expect(findProfileById(settings, 'profile-mentor')?.apiMode).toBe('deepseek');
   });
 
   it('当指定的插槽 profileId 不存在时，自动优雅回退', () => {

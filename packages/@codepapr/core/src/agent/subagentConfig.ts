@@ -68,6 +68,10 @@ export interface SubagentMentorSettings {
   apiKey: string;
   baseURL: string;
   apiFormat: 'openai' | 'claude' | 'response';
+  /** 与主/快速档一致的完整 profile 语义；缺省视为 'custom'（旧行为）。 */
+  apiMode?: 'deepseek' | 'custom' | 'local';
+  /** 模型配置档的自定义附加请求头。 */
+  extraHeaders?: Record<string, string>;
   maxTokens: number;
   thinkingEnabled: boolean;
   thinkingEffort?: string;
@@ -115,6 +119,8 @@ export interface ResolvedSubagentMentor {
   apiKey: string;
   baseURL?: string;
   apiFormat: 'openai' | 'claude' | 'response';
+  apiMode: 'deepseek' | 'custom' | 'local';
+  extraHeaders?: Record<string, string>;
 }
 
 export interface ResolvedSubagentExecution {
@@ -154,7 +160,14 @@ export function resolveSubagentExecution(
         m.baseURL.trim().replace(/\/+$/, '') ||
         input.fallbackBaseURL.trim().replace(/\/+$/, '') ||
         undefined;
-      mentor = { model: resolvedModel, apiKey, baseURL, apiFormat: m.apiFormat };
+      mentor = {
+        model: resolvedModel,
+        apiKey,
+        baseURL,
+        apiFormat: m.apiFormat,
+        apiMode: m.apiMode ?? 'custom',
+        ...(m.extraHeaders ? { extraHeaders: m.extraHeaders } : {}),
+      };
       usingMentor = true;
     } else {
       resolvedModel = input.baseModel;

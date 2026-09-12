@@ -88,4 +88,24 @@ describe('providerFactory: OpenCode Go wiring', () => {
     expect(init.headers['x-opencode-session']).toBe('conv-7');
     expect(init.headers['X-Trace']).toBe('on');
   });
+
+  it('deepseek apiMode 构建 DeepSeekProvider（导师档不再落到 OpenAI 默认端点）', () => {
+    const provider = buildProviderInstance({
+      apiMode: 'deepseek',
+      apiFormat: 'openai',
+      apiKey: 'sk-deepseek',
+      baseURL: '',
+    });
+    expect(provider?.name).toBe('deepseek');
+  });
+
+  it('local apiMode 构建 LocalProvider', () => {
+    const provider = buildProviderInstance({
+      apiMode: 'local',
+      apiFormat: 'openai',
+      apiKey: '',
+      baseURL: '',
+    });
+    expect(provider?.name).toBe('local');
+  });
 });

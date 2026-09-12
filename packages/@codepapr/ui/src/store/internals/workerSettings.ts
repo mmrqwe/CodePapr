@@ -36,6 +36,8 @@ export function toWorkerAgentSettings(settings: Settings): WorkerAgentSettings {
     mentorBaseURL: settings.mentorBaseURL,
     mentorApiKey: settings.mentorApiKey,
     mentorApiFormat: settings.mentorApiFormat,
+    mentorApiMode: settings.mentorApiMode,
+    ...(settings.mentorExtraHeaders ? { mentorExtraHeaders: settings.mentorExtraHeaders } : {}),
     mentorMaxTokens: settings.mentorMaxTokens,
     mentorThinkingEnabled: settings.mentorThinkingEnabled,
     mentorThinkingEffort: settings.mentorThinkingEffort,

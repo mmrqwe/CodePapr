@@ -99,6 +99,10 @@ export function useSettingsForm() {
         mentorBaseURL: mentorProfile ? mentorProfile.baseURL : merged.mentorBaseURL,
         mentorApiKey: mentorProfile ? mentorProfile.apiKey : merged.mentorApiKey,
         mentorApiFormat: mentorProfile ? mentorProfile.apiFormat : merged.mentorApiFormat,
+        mentorApiMode: mentorProfile ? mentorProfile.apiMode : merged.mentorApiMode,
+        mentorExtraHeaders: mentorProfile
+          ? mentorProfile.extraHeaders
+          : merged.mentorExtraHeaders,
         mentorThinkingPayload: mentorProfile
           ? resolveThinkingPayload(mentorProfile.thinkingPayload, mentorProfile.apiMode)
           : merged.mentorThinkingPayload,

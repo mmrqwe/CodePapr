@@ -197,6 +197,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mentorBaseURL: '',
   mentorApiKey: '',
   mentorApiFormat: 'openai',
+  mentorApiMode: 'custom',
   mentorMaxTokens: 100_000,
   maxMentorConsultations: 2,
   mentorThinkingEnabled: false,

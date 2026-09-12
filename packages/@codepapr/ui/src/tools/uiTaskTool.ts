@@ -21,9 +21,11 @@ import {
   type ToolOutputTruncationOptions,
   withTaskSlot,
 } from '@codepapr/core';
-import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator, OpenAIProvider, ClaudeProvider, ResponseProvider } from '@codepapr/api';
+import { DEFAULT_MAX_TOKENS, RequestBuilder, CacheValidator } from '@codepapr/api';
 import type { ICacheStatistics, ILLMProvider, IToolDefinition, MentorConfig, ThinkingPayload } from '@codepapr/types';
 import { registerWorkspaceTools } from '../tools/workspaceTools';
+import { buildProviderInstance } from '../store/internals/providerFactory';
+import { resolveProviderName } from '../store/internals/settingsNormalizer';
 import { startSubagentProgress, pushSubagentStep, completeSubagentProgress } from '../utils/subagentProgress';
 
 export interface UiTaskToolContext {
@@ -72,6 +74,8 @@ export interface UiTaskToolContext {
   scoutMaxDepth?: number;
   subagentCacheStats?: Array<{ tier: 'primary' | 'fast' | 'mentor'; stats: ICacheStatistics }>;
   graphToolTimeoutMs: number;
+  /** 流空闲超时（与主/快速 provider 同源；mentor 档按 profile 重建 provider 时使用）。 */
+  streamIdleTimeoutMs?: number;
   multimodalEnabled: boolean;
   readImageEnabledForModel?: (model: string) => boolean;
   transformToolResultForModel?: (result: unknown, model: string) => Promise<unknown>;
@@ -173,21 +177,23 @@ export async function runSubagent(
     }
     if (exec.mentor) {
       const mentorSessionId = context.sessionId ? `${context.sessionId}:mentor` : undefined;
-      const config = {
-        apiKey: exec.mentor.apiKey,
-        ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}),
-        ...(mentorSessionId ? { sessionId: mentorSessionId } : {}),
-      };
-      if (exec.mentor.apiFormat === 'claude') {
-        provider = new ClaudeProvider(config);
-        providerName = 'claude';
-      } else if (exec.mentor.apiFormat === 'response') {
-        provider = new ResponseProvider(config);
-        providerName = 'response';
-      } else {
-        provider = new OpenAIProvider(config);
-        providerName = 'openai';
-      }
+      // mentor 与主/快速档同构：完整 profile 语义交给共享构建器，
+      // apiMode 决定默认端点（deepseek/local/custom），extraHeaders 一并透传。
+      provider = buildProviderInstance(
+        {
+          apiMode: exec.mentor.apiMode,
+          apiFormat: exec.mentor.apiFormat,
+          apiKey: exec.mentor.apiKey,
+          baseURL: exec.mentor.baseURL ?? '',
+          streamIdleTimeoutMs: context.streamIdleTimeoutMs,
+          ...(exec.mentor.extraHeaders ? { extraHeaders: exec.mentor.extraHeaders } : {}),
+        },
+        mentorSessionId
+      );
+      providerName = resolveProviderName({
+        apiMode: exec.mentor.apiMode,
+        apiFormat: exec.mentor.apiFormat,
+      });
     }
 
     const result = await runSubagentSession({

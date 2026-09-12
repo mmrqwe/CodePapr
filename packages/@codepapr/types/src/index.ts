@@ -264,6 +264,10 @@ export interface MentorConfig {
   baseURL: string;
   apiKey: string;
   apiFormat: 'openai' | 'claude' | 'response';
+  /** 与主/快速档一致的 API 类型：deepseek 用官方默认端点，local 走本地协议。 */
+  apiMode?: 'deepseek' | 'custom' | 'local';
+  /** 模型配置档的自定义附加请求头。 */
+  extraHeaders?: Record<string, string>;
   maxTokens: number;
   maxConsultations: number;
   thinkingEnabled: boolean;

@@ -366,7 +366,7 @@ export function buildUiTaskToolContext(
     lang: runtime.lang ?? settings.lang,
     skillDefinitions: runtime.skillDefinitions ?? [],
     agents: availableAgents,
-    mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled, thinkingEffort: settings.mentorThinkingEffort, thinkingBudgetTokens: settings.mentorThinkingBudgetTokens, thinkingPayload: settings.mentorThinkingPayload },
+    mentor: { enabled: settings.mentorEnabled, model: settings.mentorModel, baseURL: settings.mentorBaseURL, apiKey: settings.mentorApiKey, apiFormat: settings.mentorApiFormat as ApiFormat, apiMode: settings.mentorApiMode, extraHeaders: settings.mentorExtraHeaders, maxTokens: settings.mentorMaxTokens, maxConsultations: settings.maxMentorConsultations, thinkingEnabled: settings.mentorThinkingEnabled, thinkingEffort: settings.mentorThinkingEffort, thinkingBudgetTokens: settings.mentorThinkingBudgetTokens, thinkingPayload: settings.mentorThinkingPayload },
     baseURL: settings.baseURL,
     apiKey: settings.apiKey,
     multimodalEnabled: shouldExposeReadImage(settings, baseModel),
@@ -392,6 +392,7 @@ export function buildUiTaskToolContext(
     scoutMaxToolRounds: settings.scoutMaxToolRounds,
     scoutMaxDepth: settings.scoutMaxDepth,
     graphToolTimeoutMs: settings.graphToolTimeoutMs,
+    streamIdleTimeoutMs: settings.streamIdleTimeoutMs,
     mode,
     // v4：task 子代理与主会话同一压缩引擎（headless：无 surface/archive）。
     subagentCompaction: {

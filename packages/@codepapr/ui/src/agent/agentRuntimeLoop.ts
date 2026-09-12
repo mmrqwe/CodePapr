@@ -45,6 +45,7 @@ import {
   type WorkerAgentSettings,
   type WorkerAgentRuntimeConfig,
   type WorkerApiFormat,
+  type WorkerApiMode,
   type AppAgentPayload,
 } from './agentWorkerProtocol';
 import { parseMcpToolName, sanitizeMcpToolPart } from '../utils/mcpTypes';
@@ -573,12 +574,17 @@ function buildProvider(settings: WorkerAgentSettings, sessionId?: string) {
   );
 }
 
-function resolveFastProviderKind(settings: WorkerAgentSettings): WorkerProviderKind {
-  const apiMode = settings.fastApiMode ?? settings.apiMode;
-  const apiFormat = settings.fastApiFormat ?? settings.apiFormat;
+function resolveProviderKind(apiMode: WorkerApiMode, apiFormat: WorkerApiFormat): WorkerProviderKind {
   if (apiMode === 'deepseek') return 'deepseek';
   if (apiMode === 'local') return 'openai';
   return apiFormat;
+}
+
+function resolveFastProviderKind(settings: WorkerAgentSettings): WorkerProviderKind {
+  return resolveProviderKind(
+    settings.fastApiMode ?? settings.apiMode,
+    settings.fastApiFormat ?? settings.apiFormat
+  );
 }
 
 /** 快速档 provider：与 providerFactory.buildFastProviderInstance 同语义——
@@ -952,6 +958,8 @@ async function runSubagent(
       apiKey: s.mentorApiKey,
       baseURL: s.mentorBaseURL,
       apiFormat: s.mentorApiFormat,
+      apiMode: s.mentorApiMode ?? 'custom',
+      ...(s.mentorExtraHeaders ? { extraHeaders: s.mentorExtraHeaders } : {}),
       maxTokens: s.mentorMaxTokens,
       thinkingEnabled: s.mentorThinkingEnabled,
       thinkingEffort: s.mentorThinkingEffort ?? '',
@@ -978,21 +986,22 @@ async function runSubagent(
   let subagentProviderName: 'deepseek' | 'openai' | 'claude' | 'response' =
     exec.tier === 'fast' ? resolveFastProviderKind(payload.settings) : payload.providerName;
   if (exec.mentor) {
-    const config = {
-      apiKey: exec.mentor.apiKey,
-      ...(exec.mentor.baseURL ? { baseURL: exec.mentor.baseURL } : {}),
-      sessionId: `${payload.sessionId}:subagent:${runId}:mentor`,
-    };
-    if (exec.mentor.apiFormat === 'claude') {
-      subagentProvider = new ClaudeProvider(config);
-      subagentProviderName = 'claude';
-    } else if (exec.mentor.apiFormat === 'response') {
-      subagentProvider = new ResponseProvider(config);
-      subagentProviderName = 'response';
-    } else {
-      subagentProvider = new OpenAIProvider(config);
-      subagentProviderName = 'openai';
-    }
+    // mentor 与主/快速档同构：apiMode 决定 provider 类型与默认端点，
+    // extraHeaders/profile baseURL 全量透传，不再只按 apiFormat 猜协议。
+    const mentorApiMode = exec.mentor.apiMode;
+    const mentorApiFormat = exec.mentor.apiFormat;
+    subagentProvider = buildProviderFrom(
+      {
+        apiMode: mentorApiMode,
+        provider: resolveProviderKind(mentorApiMode, mentorApiFormat),
+        apiKey: exec.mentor.apiKey,
+        baseURL: exec.mentor.baseURL ?? '',
+        extraHeaders: exec.mentor.extraHeaders,
+        streamIdleTimeoutMs: payload.settings.streamIdleTimeoutMs,
+      },
+      `${payload.sessionId}:subagent:${runId}:mentor`
+    );
+    subagentProviderName = resolveProviderKind(mentorApiMode, mentorApiFormat);
   }
 
   postMessageToMain({
@@ -1367,22 +1376,21 @@ async function handleRunAppAgent(
       model = s.mentorModel.trim();
       const apiKey = s.mentorApiKey.trim() || s.apiKey.trim();
       const mentorBaseURL = s.mentorBaseURL.trim().replace(/\/+$/, '');
-      const baseURL = mentorBaseURL || s.baseURL.trim().replace(/\/+$/, '') || undefined;
-      const config = {
-        apiKey,
-        ...(baseURL ? { baseURL } : {}),
-        sessionId: `${appAgentSessionId}:mentor`,
-      };
-      if (s.mentorApiFormat === 'claude') {
-        agentProvider = new ClaudeProvider(config);
-        agentProviderName = 'claude';
-      } else if (s.mentorApiFormat === 'response') {
-        agentProvider = new ResponseProvider(config);
-        agentProviderName = 'response';
-      } else {
-        agentProvider = new OpenAIProvider(config);
-        agentProviderName = 'openai';
-      }
+      const baseURL = mentorBaseURL || s.baseURL.trim().replace(/\/+$/, '');
+      const mentorApiMode = s.mentorApiMode ?? 'custom';
+      const mentorApiFormat = s.mentorApiFormat;
+      agentProvider = buildProviderFrom(
+        {
+          apiMode: mentorApiMode,
+          provider: resolveProviderKind(mentorApiMode, mentorApiFormat),
+          apiKey,
+          baseURL,
+          extraHeaders: s.mentorExtraHeaders,
+          streamIdleTimeoutMs: s.streamIdleTimeoutMs,
+        },
+        `${appAgentSessionId}:mentor`
+      );
+      agentProviderName = resolveProviderKind(mentorApiMode, mentorApiFormat);
     } else {
       console.warn('[App Agent] Mentor model not set, falling back to main provider');
       model = cachedSettings.model;

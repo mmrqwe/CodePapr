@@ -134,6 +134,10 @@ export interface Settings {
   mentorBaseURL: string;
   mentorApiKey: string;
   mentorApiFormat: ApiFormat;
+  /** 导师档 API 类型（派生自 active mentor profile；决定请求协议与默认端点）。 */
+  mentorApiMode: ApiMode;
+  /** 导师档自定义附加请求头（派生自 active mentor profile）。 */
+  mentorExtraHeaders?: Record<string, string>;
   mentorMaxTokens: number;
   maxMentorConsultations: number;
   mentorThinkingEnabled: boolean;

@@ -63,6 +63,8 @@ describe('resolveSubagentExecution - 模型路由', () => {
           apiKey: 'mentor-key',
           baseURL: 'https://mentor.example.com/',
           apiFormat: 'claude',
+          apiMode: 'custom',
+          extraHeaders: { 'X-Tenant-Id': 'acme' },
           maxTokens: 10000,
           thinkingEnabled: true,
         },
@@ -74,8 +76,31 @@ describe('resolveSubagentExecution - 模型路由', () => {
     expect(exec.mentor?.apiKey).toBe('mentor-key');
     expect(exec.mentor?.baseURL).toBe('https://mentor.example.com');
     expect(exec.mentor?.apiFormat).toBe('claude');
+    expect(exec.mentor?.apiMode).toBe('custom');
+    expect(exec.mentor?.extraHeaders).toEqual({ 'X-Tenant-Id': 'acme' });
     expect(exec.parameters.maxTokens).toBe(10000);
     expect(exec.parameters.thinkingEnabled).toBe(true);
+  });
+
+  it('mentor apiMode 透传（deepseek 档不再被压成 apiFormat）', () => {
+    const definition: AgentDefinition = { name: 'mentor', description: 'm', mode: 'subagent', model: 'mentor', prompt: 'p' };
+    const exec = resolveSubagentExecution(
+      makeInput({
+        definition,
+        mentor: {
+          enabled: true,
+          model: 'deepseek-v4-pro',
+          apiKey: 'sk-deepseek',
+          baseURL: '',
+          apiFormat: 'openai',
+          apiMode: 'deepseek',
+          maxTokens: 10000,
+          thinkingEnabled: false,
+        },
+      })
+    );
+    expect(exec.mentor?.apiMode).toBe('deepseek');
+    expect(exec.mentor?.apiFormat).toBe('openai');
   });
 
   it('mentor apiKey 为空时回退到主 apiKey', () => {
@@ -96,6 +121,7 @@ describe('resolveSubagentExecution - 模型路由', () => {
     );
     expect(exec.mentor?.apiKey).toBe('main-key');
     expect(exec.mentor?.baseURL).toBe('https://main.example.com');
+    expect(exec.mentor?.apiMode).toBe('custom');
   });
 
   it('mentor 未配置 model 时回退到主模型', () => {

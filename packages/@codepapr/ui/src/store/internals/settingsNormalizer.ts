@@ -204,6 +204,7 @@ function buildSynthesizedProfiles(
   mentorBaseURL: string,
   mentorApiKey: string,
   mentorApiFormat: ApiFormat,
+  mentorApiMode: ApiMode,
   mentorMaxTokens: number,
   mentorThinkingEnabled: boolean,
   mentorThinkingEffort: string,
@@ -288,7 +289,7 @@ function buildSynthesizedProfiles(
     profiles.push({
       id: 'profile-mentor',
       name: '导师模型 (Mentor)',
-      apiMode: 'custom',
+      apiMode: mentorApiMode,
       apiFormat: mentorApiFormat,
       baseURL: mentorBaseURL,
       apiKey: mentorApiKey,
@@ -594,6 +595,12 @@ export function normalizeSettings(
       : input.mentorApiFormat === 'response'
       ? 'response'
       : 'openai';
+  const mentorApiMode: ApiMode =
+    input.mentorApiMode === 'deepseek'
+      ? 'deepseek'
+      : input.mentorApiMode === 'local'
+      ? 'local'
+      : 'custom';
   // 迁移：旧默认值为 10000，过小会导致 mentor 思考/长回复被 max_tokens 截断。
   // 持久化值恰为旧默认时升级到新默认（100k）；用户显式设置的其他值保持不变。
   const LEGACY_MENTOR_MAX_TOKENS = 10000;
@@ -818,6 +825,7 @@ export function normalizeSettings(
       typeof input.mentorBaseURL === 'string' ? input.mentorBaseURL.trim() : '',
       typeof input.mentorApiKey === 'string' ? input.mentorApiKey.trim() : '',
       mentorApiFormat,
+      mentorApiMode,
       mentorMaxTokens,
       mentorThinkingEnabled,
       mentorThinkingEffort,
@@ -940,6 +948,10 @@ export function normalizeSettings(
     ? activeMentorProfile.apiKey
     : (typeof input.mentorApiKey === 'string' ? input.mentorApiKey.trim() : DEFAULT_SETTINGS.mentorApiKey);
   const effectiveMentorApiFormat = hasExplicitProfiles ? activeMentorProfile.apiFormat : mentorApiFormat;
+  const effectiveMentorApiMode = hasExplicitProfiles ? activeMentorProfile.apiMode : mentorApiMode;
+  const effectiveMentorExtraHeaders = hasExplicitProfiles
+    ? activeMentorProfile.extraHeaders
+    : sanitizeExtraHeaders(input.mentorExtraHeaders);
   const effectiveMentorThinkingEnabled = hasExplicitProfiles
     ? (activeMentorProfile.thinkingEnabled ?? false)
     : mentorThinkingEnabled;
@@ -1065,6 +1077,10 @@ export function normalizeSettings(
     mentorBaseURL: effectiveMentorBaseURL,
     mentorApiKey: effectiveMentorApiKey,
     mentorApiFormat: effectiveMentorApiFormat,
+    mentorApiMode: effectiveMentorApiMode,
+    ...(effectiveMentorExtraHeaders !== undefined
+      ? { mentorExtraHeaders: effectiveMentorExtraHeaders }
+      : {}),
     mentorMaxTokens: effectiveMentorMaxTokens,
     maxMentorConsultations,
     mentorThinkingEnabled: effectiveMentorThinkingEnabled,

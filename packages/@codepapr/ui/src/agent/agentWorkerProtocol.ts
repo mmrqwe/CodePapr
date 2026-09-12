@@ -50,6 +50,9 @@ export interface WorkerAgentSettings {
   mentorBaseURL: string;
   mentorApiKey: string;
   mentorApiFormat: WorkerApiFormat;
+  /** 导师档完整 profile 语义（apiMode 决定默认端点/协议；缺省视为 custom）。 */
+  mentorApiMode?: WorkerApiMode;
+  mentorExtraHeaders?: Record<string, string>;
   mentorMaxTokens: number;
   mentorThinkingEnabled: boolean;
   mentorThinkingEffort: string;
