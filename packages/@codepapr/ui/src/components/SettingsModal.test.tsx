@@ -106,7 +106,7 @@ describe('SettingsModal', () => {
     });
 
     const advancedTab = container.querySelector(
-      'button[title="配置上下文压缩、子任务规划的 token 上限和模型选择。"]'
+      'button[title="配置上下文压缩、Goal 循环、ProjectGraph 与性能参数。"]'
     );
     expect(advancedTab).not.toBeNull();
 
@@ -313,7 +313,7 @@ describe('SettingsModal', () => {
     expect(container.textContent).not.toContain('导师 API Key');
   });
 
-  it('advanced tab allows modifying maxContextTokens with default 200000', async () => {
+  it('advanced tab keeps only compaction params, without window or render-round fields', async () => {
     await act(async () => {
       root.render(<SettingsModal />);
     });
@@ -324,6 +324,65 @@ describe('SettingsModal', () => {
     expect(advancedTab).toBeDefined();
     await act(async () => {
       advancedTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('上下文压缩');
+    expect(container.textContent).toContain('90%');
+    expect(container.querySelector('input[title="模型输入上下文窗口"]')).toBeNull();
+    expect(container.querySelector('input[title="对话渲染分批轮数"]')).toBeNull();
+  });
+
+  it('appearance tab exposes chat render batch rounds and persists the edit', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+
+    const appearanceTab = container.querySelector(
+      'button[title="选择主题、强调色，导入自定义主题。"]'
+    );
+    expect(appearanceTab).not.toBeNull();
+    await act(async () => {
+      appearanceTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const input = container.querySelector('input[title="对话渲染分批轮数"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(input.value).toBe('6');
+
+    await act(async () => {
+      setInputValue(input, '10');
+    });
+    expect(input.value).toBe('10');
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '保存'
+    );
+    expect(saveButton).toBeDefined();
+    await act(async () => {
+      saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(useAgentStore.getState().settings.chatRenderBatchRounds).toBe(10);
+  });
+
+  it('context window is edited in the LLM profile editor and syncs to the primary profile', async () => {
+    await act(async () => {
+      root.render(<SettingsModal />);
+    });
+
+    const llmTab = container.querySelector(
+      'button[title="配置主模型、快速模型、导师模型、API 接入方式和采样参数。"]'
+    );
+    expect(llmTab).not.toBeNull();
+    await act(async () => {
+      llmTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const editButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '编辑配置'
+    );
+    expect(editButton).toBeDefined();
+    await act(async () => {
+      editButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     const maxContextInput = container.querySelector(
@@ -337,7 +396,15 @@ describe('SettingsModal', () => {
     });
     expect(maxContextInput.value).toBe('150000');
 
-    // Clicking save saves 150000 to settings and syncs to primary profile
+    const saveProfileButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '保存配置'
+    );
+    expect(saveProfileButton).toBeDefined();
+    await act(async () => {
+      saveProfileButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Saving settings mirrors the profile window onto the flat maxContextTokens
     const saveButton = Array.from(container.querySelectorAll('button')).find(
       (b) => b.textContent?.trim() === '保存'
     );

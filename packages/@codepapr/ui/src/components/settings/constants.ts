@@ -45,12 +45,12 @@ export const DEFAULT_THINKING_BUDGET_TOKENS = 4096;
 export function tabResetKeys(apiMode: ApiMode): Record<SettingsTab, (keyof Settings)[]> {
   return {
     general: ['lang', 'experimentalCharacters', 'experimentalVoice'],
-    appearance: ['lightTheme', 'darkTheme', 'followSystem', 'chatBordersEnabled', 'accent', 'customThemes'],
+    appearance: ['lightTheme', 'darkTheme', 'followSystem', 'chatBordersEnabled', 'chatRenderBatchRounds', 'accent', 'customThemes'],
     llm: ['modelProfiles', 'primaryProfileId', 'fastProfileId', 'mentorProfileId', 'apiMode', 'apiFormat', 'fastModelEnabled', 'mentorEnabled', 'thinkingEnabled', 'thinkingEffort', 'thinkingBudgetTokens', 'thinkingPayload', 'temperature', 'topP', 'maxToolRounds', apiMode],
     search: ['searxngEnabled', 'searxngBaseUrl', 'searxngCategories', 'searxngTimeRange', 'searxngLanguage', 'searxngSafeSearch'],
     mcp: ['mcp'],
     mentor: ['maxMentorConsultations', 'explorePrompt', 'scoutPrompt', 'mentorPrompt', 'exploreTemperature', 'exploreMaxToolRounds', 'exploreMaxTokens', 'exploreTopP', 'exploreMaxDepth', 'exploreThinkingEnabled', 'scoutTemperature', 'scoutMaxToolRounds', 'scoutMaxTokens', 'scoutTopP', 'scoutMaxDepth', 'scoutThinkingEnabled'],
-    advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'maxContextTokens', 'chatRenderBatchRounds', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries', 'streamIdleTimeoutMs', 'browserEngine', 'folderAccessYolo'],
+    advanced: ['compactionModel', 'compactionMaxTokens', 'compactionTemperature', 'goalMaxIterations', 'goalMaxWallClockMs', 'goalRequireGitClean', 'verifierModelTier', 'verifierMaxTokens', 'verifierTemperature', 'projectGraphMaxDepth', 'projectGraphMaxFiles', 'projectGraphMaxEdges', 'projectGraphMaxSymbolsPerFile', 'projectGraphMaxFileBytes', 'projectGraphMaxTreeEntries', 'streamIdleTimeoutMs', 'browserEngine', 'folderAccessYolo'],
     lsp: ['lspDisabledFamilies'],
     app: [],
   };

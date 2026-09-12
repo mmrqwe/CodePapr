@@ -186,7 +186,7 @@ CLI 子命令：`ping`、`doctor`、`status`、`git`、`fs`、`shell`、`lsp`、
 - **LLM**：主模型、快速模型、temperature、topP、maxTokens、thinking 模式、maxToolRounds
 - **Search**：自部署 SearXNG 搜索（优先使用，失败自动降级到内置 Bing / Mojeek / Qwant / Wikipedia 等多源聚合）
 - **Mentor**：子代理选择、自定义提示词、子代理参数（temperature/topP/thinking/maxTokens/maxToolRounds/maxDepth）、独立 Mentor 模型配置
-- **高级**：上下文压缩（模型/温度/token/上下文上限/对话轮数）、TodoList 最大重试、ProjectGraph 深度/文件数限制
+- **高级**：上下文压缩（二级摘要模型/温度/输出上限；触发线固定为窗口 × 90%）、Goal 循环、Verifier、ProjectGraph 深度/文件数限制
 - **App**：.papr 应用权限管理——全局默认（本地访问 × 网络）与逐应用两轴覆盖
 
 详见 `packages/@codepapr/core/docs/CONFIGURATION.md` 完整参数参考。

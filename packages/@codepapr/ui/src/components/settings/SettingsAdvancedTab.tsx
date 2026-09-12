@@ -1,4 +1,3 @@
-import { DEFAULT_MAX_CONTEXT_TOKENS } from '@codepapr/api';
 import { FieldCard, SelectField, TextField } from '../forms';
 import type { SettingsTabProps } from './types';
 
@@ -19,9 +18,10 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
       </div>
 
       <FieldCard padding="loose">
-        <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
           {t.contextCompactionSettings}
         </label>
+        <p className="mb-4 text-[11px] leading-relaxed text-fg-soft">{t.contextCompactionDesc}</p>
         <div className="grid gap-5 md:grid-cols-3">
           <SelectField
             label={t.compactionModelLabel}
@@ -44,6 +44,7 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
               update({ compactionMaxTokens: Number.isFinite(parsed) ? parsed : local.compactionMaxTokens });
             }}
             title={t.compactionMaxTokensLabel}
+            hint={t.compactionMaxTokensHint}
           />
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
@@ -60,49 +61,6 @@ export function SettingsAdvancedTab({ local, update, t, currentLang }: SettingsT
             className="mt-3 w-full cursor-pointer accent-accent"
           />
         </div>
-        </div>
-        <div className="mt-4 grid gap-5 md:grid-cols-2">
-          <TextField
-            label={t.maxContextTokens}
-            type="number"
-            min="1000"
-            max="1000000"
-            step="10000"
-            value={local.maxContextTokens ?? ''}
-            placeholder={String(DEFAULT_MAX_CONTEXT_TOKENS)}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw === '') {
-                update({ maxContextTokens: '' as unknown as number });
-                return;
-              }
-              const parsed = parseInt(raw, 10);
-              update({ maxContextTokens: Number.isFinite(parsed) ? parsed : local.maxContextTokens });
-            }}
-            onBlur={() => {
-              if (
-                typeof local.maxContextTokens !== 'number' ||
-                !Number.isFinite(local.maxContextTokens) ||
-                local.maxContextTokens <= 0
-              ) {
-                update({ maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS });
-              }
-            }}
-            title={t.maxContextTokens}
-          />
-          <TextField
-            label={t.chatRenderBatchRounds}
-            type="number"
-            min="1"
-            max="50"
-            step="1"
-            value={local.chatRenderBatchRounds}
-            onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
-              update({ chatRenderBatchRounds: Number.isFinite(parsed) ? parsed : local.chatRenderBatchRounds });
-            }}
-            title={t.chatRenderBatchRounds}
-          />
         </div>
       </FieldCard>
 

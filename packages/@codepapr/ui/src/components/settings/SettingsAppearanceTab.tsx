@@ -7,7 +7,7 @@ import type { CustomThemeRecord, ThemeMode } from '../../theme/types';
 import { useThemeStore } from '../../store/themeStore';
 import { useAgentStore } from '../../store/agentStore';
 import { toast } from '../../store/toastStore';
-import { FieldCard, FieldLabel, ToggleField } from '../forms';
+import { FieldCard, FieldLabel, TextField, ToggleField } from '../forms';
 import type { SettingsTabProps } from './types';
 
 const ACCENT_PRESETS = [
@@ -275,6 +275,23 @@ export function SettingsAppearanceTab({ local, update, t, currentLang }: Setting
           label={t.chatBorders}
           desc={t.chatBordersDesc}
           title={t.chatBordersDesc}
+        />
+      </FieldCard>
+
+      <FieldCard>
+        <TextField
+          label={t.chatRenderBatchRounds}
+          type="number"
+          min="1"
+          max="50"
+          step="1"
+          value={local.chatRenderBatchRounds}
+          onChange={(e) => {
+            const parsed = parseInt(e.target.value, 10);
+            update({ chatRenderBatchRounds: Number.isFinite(parsed) ? parsed : local.chatRenderBatchRounds });
+          }}
+          title={t.chatRenderBatchRounds}
+          hint={t.chatRenderBatchRoundsHint}
         />
       </FieldCard>
 

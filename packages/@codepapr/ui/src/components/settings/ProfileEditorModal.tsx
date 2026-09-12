@@ -759,6 +759,8 @@ export function ProfileEditorModal({
                 }
               }}
               placeholder={String(DEFAULT_MAX_CONTEXT_TOKENS)}
+              title={t.maxContextTokens}
+              hint={t.maxContextTokensHint}
             />
 
             <TextField
