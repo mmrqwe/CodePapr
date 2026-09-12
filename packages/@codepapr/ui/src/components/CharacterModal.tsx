@@ -81,11 +81,14 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   const [generateError, setGenerateError] = useState('');
   const [voiceStorage, setVoiceStorage] = useState<{ totalBytes: number; orphanBytes: number } | null>(null);
   const [voiceStorageBusy, setVoiceStorageBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const voiceSampleInputRef = useRef<HTMLInputElement | null>(null);
   const savedSnapshotRef = useRef('');
+  const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const snapshotCharacter = (character: CharacterProfile) => JSON.stringify(character);
   const isDirty = (character: CharacterProfile | null) =>
@@ -104,6 +107,13 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   useEffect(() => {
     void loadCharacters();
   }, [loadCharacters]);
+
+  useEffect(
+    () => () => {
+      if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current);
+    },
+    []
+  );
 
   useEffect(() => {
     if (!loaded) return;
@@ -151,7 +161,11 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
     setImportError('');
     try {
       const character = await importCharacterCardFromFile(file);
-      await upsertCharacter(character);
+      const persisted = await upsertCharacter(character);
+      if (!persisted) {
+        setImportError(t.characterSaveFailed);
+        return;
+      }
       setEditing(character);
       savedSnapshotRef.current = snapshotCharacter(character);
     } catch (err) {
@@ -172,6 +186,15 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
       });
   };
 
+  const showSavedFlash = () => {
+    setSavedFlash(true);
+    if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current);
+    savedFlashTimerRef.current = setTimeout(() => {
+      savedFlashTimerRef.current = null;
+      setSavedFlash(false);
+    }, 1600);
+  };
+
   const handleSave = async (): Promise<boolean> => {
     if (!editing) return false;
     if (!editing.name.trim()) {
@@ -181,15 +204,30 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
     const next: CharacterProfile = {
       ...editing,
       name: editing.name.trim(),
-      tags: editing.tags
+      tags: (editing.tags ?? [])
         .map((tag) => tag.trim())
         .filter((tag, idx, arr) => tag && arr.indexOf(tag) === idx),
       updatedAt: new Date().toISOString(),
     };
-    await upsertCharacter(next);
-    setEditing(next);
-    savedSnapshotRef.current = snapshotCharacter(next);
-    return true;
+    setSaving(true);
+    try {
+      const persisted = await upsertCharacter(next);
+      if (!persisted) {
+        // The store already surfaced the specific reason (not loaded / save
+        // failed); avoid stacking a second, vaguer toast on top of it.
+        return false;
+      }
+      setEditing(next);
+      savedSnapshotRef.current = snapshotCharacter(next);
+      toast.success(t.characterSaved);
+      showSavedFlash();
+      return true;
+    } catch (err) {
+      toast.error(`${t.characterSaveFailed}: ${errorMessage(err)}`);
+      return false;
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -1585,10 +1623,10 @@ Requirements:
           <button
             type="button"
             onClick={handleSave}
-            disabled={!editing || !editing.name.trim()}
+            disabled={!editing || !editing.name.trim() || saving}
             className="rounded-xl border border-accent-soft bg-accent-soft px-4 py-2 text-sm font-medium text-accent-text transition-colors hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {t.characterSave}
+            {saving ? t.characterSaving : savedFlash ? t.characterSavedState : t.characterSave}
           </button>
         </div>
       </div>

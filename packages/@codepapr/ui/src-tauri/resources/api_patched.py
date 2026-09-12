@@ -1,4 +1,4 @@
-# [codepapr-api-version] 4
+# [codepapr-api-version] 5
 # [codepapr-ws] endpoint
 
 import os, warnings
@@ -378,6 +378,15 @@ class Speaker:
 
 speaker_list = {}
 
+# [codepapr-model-track] Paths of the weights currently resident in memory.
+# Fresh WebSocket connections must not blindly reload the same model: on
+# Apple Silicon each reload re-runs Metal warmup and throws away the cached
+# reference embeddings, which produced multi-second gaps between TTS chunks.
+# `change_gpt_sovits_weights` records what it actually loaded; the WS handler
+# compares against these before reloading.
+_loaded_gpt_path = None
+_loaded_sovits_path = None
+
 
 class Sovits:
     def __init__(self, vq_model, hps):
@@ -506,6 +515,7 @@ def change_gpt_sovits_weights(gpt_path, sovits_path):
     # sovits_path is None/empty, keep the currently loaded model for
     # that component. This supports fine-tuned models where only the
     # SoVITS weights are updated (gpt_path=None).
+    global _loaded_gpt_path, _loaded_sovits_path
     try:
         current = speaker_list.get("default")
         if gpt_path and gpt_path != "":
@@ -537,6 +547,15 @@ def change_gpt_sovits_weights(gpt_path, sovits_path):
         entry.pop('ge', None)
 
     speaker_list["default"] = Speaker(name="default", gpt=gpt, sovits=sovits)
+
+    # [codepapr-model-track] Record what is now resident so the WS handler
+    # can skip redundant reloads on fresh connections. Explicit /set_model
+    # calls always land here, so retraining a model at the same path still
+    # reloads (the caller asked for it).
+    if gpt_path and gpt_path != "":
+        _loaded_gpt_path = gpt_path
+    if sovits_path and sovits_path != "":
+        _loaded_sovits_path = sovits_path
 
     # [codepapr-gpu-warmup] Prime the Metal/CUDA kernel cache after model
     # switch. A dummy forward pass through the v4 CFM + decode_encp
@@ -1603,7 +1622,6 @@ app = FastAPI()
 @app.websocket("/ws/synthesize")
 async def ws_synthesize(websocket: WebSocket):
     await websocket.accept()
-    last_model: str = None
     try:
         while True:
             data = await websocket.receive_json()
@@ -1618,10 +1636,13 @@ async def ws_synthesize(websocket: WebSocket):
             top_p = float(data.get("top_p", 0.6))
             temperature = float(data.get("temperature", 0.6))
 
+            # [codepapr-model-track] Compare against the process-wide loaded
+            # path instead of a per-connection variable: the client opens a
+            # fresh connection per chunk, and the old per-connection check
+            # made every chunk reload the fine-tuned model (multi-second gap).
             model_name = data.get("model_name", None)
-            if model_name and model_name != last_model:
+            if model_name and model_name != _loaded_sovits_path:
                 change_gpt_sovits_weights(gpt_path=None, sovits_path=model_name)
-                last_model = model_name
 
             # Resolve reference audio params once.
             ref_wav_path = ref.get("refer_wav_path", None)

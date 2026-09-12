@@ -24,7 +24,7 @@ interface CharacterState {
 
 interface CharacterActions {
   loadCharacters: () => Promise<void>;
-  upsertCharacter: (character: CharacterProfile) => Promise<void>;
+  upsertCharacter: (character: CharacterProfile) => Promise<boolean>;
   deleteCharacter: (characterId: string) => Promise<void>;
   setActiveCharacter: (characterId: string | null) => Promise<void>;
 }
@@ -42,27 +42,54 @@ function buildStateFile(state: CharacterState): CharactersStateFile {
 // the chain guarantees the latest (most complete) snapshot is the final thing
 // written to disk. A failed save is surfaced to the user rather than letting
 // in-memory state silently diverge from what is persisted.
-let saveChain: Promise<void> = Promise.resolve();
+//
+// Every link resolves to a boolean (persisted / not persisted) and never
+// rejects: a rejected chain would be "poisoned" — all later `.then()` links
+// would skip their callback and saving would stop silently forever.
+let saveChain: Promise<boolean> = Promise.resolve(true);
 let loadInFlight: Promise<void> | null = null;
 
-function persistState(state: CharacterState): Promise<void> {
+/** A hung IPC call must not block the save chain forever. */
+const SAVE_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label}超时`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+function persistState(state: CharacterState): Promise<boolean> {
   if (!state.loaded) {
     toast.error('角色数据尚未加载成功，已跳过保存以免覆盖已有角色卡。');
-    return Promise.resolve();
+    return Promise.resolve(false);
   }
   const file = buildStateFile(state);
-  saveChain = saveChain.then(() =>
-    saveCharactersState(file).catch((err) => {
+  saveChain = saveChain.then(async () => {
+    try {
+      await withTimeout(saveCharactersState(file), SAVE_TIMEOUT_MS, '角色数据保存');
+      return true;
+    } catch (err) {
       console.warn('Failed to persist characters state:', err);
       toast.error('角色数据保存失败，最近的更改可能未被持久化。');
-    }),
-  );
+      return false;
+    }
+  });
   return saveChain;
 }
 
 /** 等待角色卡保存链全部落库（退出前 flush 用）。 */
 export function flushCharactersState(): Promise<void> {
-  return saveChain;
+  return saveChain.then(() => undefined);
 }
 
 export const useCharactersStore = create<CharacterState & CharacterActions>((set, get) => ({
@@ -103,7 +130,7 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
     if (!get().loaded) {
       await get().loadCharacters();
     }
-    if (!get().loaded) return;
+    if (!get().loaded) return false;
     const next = await persistCharacterAvatar(character);
     if (character.avatarDataUrl && !next.avatarPath) {
       toast.warning('角色头像未能写入磁盘，已随角色数据暂存，下次启动会自动重试。');
@@ -116,7 +143,7 @@ export const useCharactersStore = create<CharacterState & CharacterActions>((set
           : state.characters.map((c) => (c.id === next.id ? next : c));
       return { characters };
     });
-    await persistState(get());
+    return persistState(get());
   },
   deleteCharacter: async (characterId) => {
     if (!get().loaded) {

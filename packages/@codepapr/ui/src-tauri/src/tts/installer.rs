@@ -1062,7 +1062,11 @@ fn nltk_data_present() -> bool {
 /// skipped deployment once the marker existed, so fixes to top_p/temperature
 /// defaults and the v4 ref-strip bug never reached users who already had
 /// an older patched api.py deployed.
-fn deploy_patched_api_py(app: &AppHandle, target_path: &Path) {
+///
+/// Returns true when the deployed file was (re)written by this call. Also
+/// called from `tts_server_start` so existing installations pick up fixes
+/// without going through the full install wizard again.
+pub(crate) fn deploy_patched_api_py(app: &AppHandle, target_path: &Path) -> bool {
     let api_path = target_path.join("api.py");
     let bundled = include_str!("../../resources/api_patched.py");
 
@@ -1081,41 +1085,48 @@ fn deploy_patched_api_py(app: &AppHandle, target_path: &Path) {
         Err(_) => true,
     };
 
-    if needs_write {
-        // Back up the original api.py before overwriting so user modifications
-        // (custom endpoints, model tweaks, etc.) are not silently destroyed.
-        if api_path.exists() {
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let bak_path = target_path.join(format!("api.py.{ts}.bak"));
-            match std::fs::copy(&api_path, &bak_path) {
-                Ok(_) => {
-                    let _ = app.emit("tts-install-progress", InstallProgress::running(
-                        "install-deps", "Installing Python packages",
-                        &format!("Backed up original api.py → api.py.{ts}.bak"),
-                    ));
-                }
-                Err(e) => {
-                    let _ = app.emit("tts-install-progress", InstallProgress::running(
-                        "install-deps", "Installing Python packages",
-                        &format!("Warning: could not back up api.py before overwrite: {e}"),
-                    ));
-                }
+    if !needs_write {
+        return false;
+    }
+
+    // Back up the original api.py before overwriting so user modifications
+    // (custom endpoints, model tweaks, etc.) are not silently destroyed.
+    if api_path.exists() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let bak_path = target_path.join(format!("api.py.{ts}.bak"));
+        match std::fs::copy(&api_path, &bak_path) {
+            Ok(_) => {
+                let _ = app.emit("tts-install-progress", InstallProgress::running(
+                    "install-deps", "Installing Python packages",
+                    &format!("Backed up original api.py → api.py.{ts}.bak"),
+                ));
+            }
+            Err(e) => {
+                let _ = app.emit("tts-install-progress", InstallProgress::running(
+                    "install-deps", "Installing Python packages",
+                    &format!("Warning: could not back up api.py before overwrite: {e}"),
+                ));
             }
         }
+    }
 
-        if let Err(e) = std::fs::write(&api_path, bundled) {
+    match std::fs::write(&api_path, bundled) {
+        Err(e) => {
             let _ = app.emit("tts-install-progress", InstallProgress::running(
                 "install-deps", "Installing Python packages",
                 &format!("Warning: could not deploy api.py: {e}"),
             ));
-        } else {
+            false
+        }
+        Ok(_) => {
             let _ = app.emit("tts-install-progress", InstallProgress::running(
                 "install-deps", "Installing Python packages",
                 "Deployed api.py with WebSocket batch synthesis, soundfile, and bug fixes",
             ));
+            true
         }
     }
 }

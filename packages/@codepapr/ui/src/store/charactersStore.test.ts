@@ -29,6 +29,28 @@ vi.mock('./internals/projectSnapshot', () => ({
 }));
 
 import { useCharactersStore, applySessionCharacterMap, sessionActiveCharacterMap } from './charactersStore';
+import type { CharacterProfile } from '../utils/characterTypes';
+
+function character(id: string, name: string): CharacterProfile {
+  return {
+    id,
+    name,
+    avatarDataUrl: null,
+    description: '',
+    personality: '',
+    scenario: '',
+    firstMessage: '',
+    exampleMessages: '',
+    systemPrompt: '',
+    postHistoryInstructions: '',
+    tags: [],
+    creator: '',
+    characterVersion: '',
+    source: 'manual',
+    createdAt: '',
+    updatedAt: '',
+  };
+}
 
 describe('useCharactersStore persist guard', () => {
   beforeEach(() => {
@@ -58,7 +80,7 @@ describe('useCharactersStore persist guard', () => {
     await useCharactersStore.getState().loadCharacters();
     expect(useCharactersStore.getState().loaded).toBe(false);
 
-    await useCharactersStore.getState().upsertCharacter({
+    const saved = await useCharactersStore.getState().upsertCharacter({
       id: 'char_new',
       name: 'Ada',
       avatarDataUrl: null,
@@ -77,6 +99,7 @@ describe('useCharactersStore persist guard', () => {
       updatedAt: '',
     });
 
+    expect(saved).toBe(false);
     expect(saveCharactersStateMock).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalled();
   });
@@ -90,7 +113,7 @@ describe('useCharactersStore persist guard', () => {
     await useCharactersStore.getState().loadCharacters();
     expect(useCharactersStore.getState().loaded).toBe(true);
 
-    await useCharactersStore.getState().upsertCharacter({
+    const saved = await useCharactersStore.getState().upsertCharacter({
       id: 'char_new',
       name: 'Ada',
       avatarDataUrl: null,
@@ -109,11 +132,56 @@ describe('useCharactersStore persist guard', () => {
       updatedAt: '',
     });
 
+    expect(saved).toBe(true);
     expect(saveCharactersStateMock).toHaveBeenCalledTimes(1);
     expect(saveCharactersStateMock.mock.calls[0]?.[0].characters).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'char_new', name: 'Ada' })])
     );
     expect(saveCharactersStateMock.mock.calls[0]?.[0].activeCharacterId).toBeNull();
+  });
+
+  it('reports failure and keeps the chain usable when a save rejects', async () => {
+    loadCharactersStateMock.mockResolvedValueOnce({
+      version: 1,
+      activeCharacterId: null,
+      characters: [],
+    });
+    await useCharactersStore.getState().loadCharacters();
+
+    saveCharactersStateMock.mockRejectedValueOnce(new Error('db locked'));
+    const failed = await useCharactersStore.getState().upsertCharacter(character('char_a', 'Ada'));
+    expect(failed).toBe(false);
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+
+    saveCharactersStateMock.mockResolvedValueOnce(undefined);
+    const recovered = await useCharactersStore.getState().upsertCharacter(character('char_b', 'Grace'));
+    expect(recovered).toBe(true);
+    expect(saveCharactersStateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('times out a hung save and lets later saves proceed', async () => {
+    vi.useFakeTimers();
+    try {
+      loadCharactersStateMock.mockResolvedValueOnce({
+        version: 1,
+        activeCharacterId: null,
+        characters: [],
+      });
+      await useCharactersStore.getState().loadCharacters();
+
+      saveCharactersStateMock.mockImplementationOnce(() => new Promise(() => {}));
+      const hung = useCharactersStore.getState().upsertCharacter(character('char_hang', 'Ada'));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await hung).toBe(false);
+
+      vi.useRealTimers();
+      saveCharactersStateMock.mockResolvedValueOnce(undefined);
+      const next = await useCharactersStore.getState().upsertCharacter(character('char_next', 'Grace'));
+      expect(next).toBe(true);
+      expect(saveCharactersStateMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('strips avatar data URLs from the persisted blob', async () => {

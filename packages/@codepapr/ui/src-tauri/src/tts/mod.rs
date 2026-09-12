@@ -477,6 +477,20 @@ pub fn tts_server_start(
             },
         );
 
+            // Deploy the bundled patched api.py before launching. The full
+            // installer is the only other writer, so without this check an
+            // existing installation would keep running its old api.py forever
+            // (the WebSocket/model-reload fixes would never reach it).
+            if installer::deploy_patched_api_py(&app_handle_for_thread, &path) {
+                let _ = app_handle_for_thread.emit(
+                    "tts-server-log",
+                    ServerLogEvent {
+                        stream: "system",
+                        line: "Updated TTS api.py to the bundled version (model reload + streaming fixes).".to_string(),
+                    },
+                );
+            }
+
             // Store the default v4 SoVITS path BEFORE path is consumed by start_with_retry.
             // Used later by tts_set_model to reset from fine-tuned back to default.
             let default_v4 = path.join("GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth");
