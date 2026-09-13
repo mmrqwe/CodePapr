@@ -161,6 +161,44 @@ describe('sanitizeMessageForPersistence', () => {
     expect(invocation?.output).toBe('done');
   });
 
+  it('keeps subagentToolInvocations so task details survive a reload', () => {
+    const message: UIMessage = {
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      toolInvocations: [
+        {
+          id: 'task-1',
+          name: 'task',
+          arguments: { agent: 'explore', prompt: 'p' },
+          status: 'success',
+          output: '{}',
+          subagentToolInvocations: [
+            {
+              id: 'sub-1',
+              name: 'websearch',
+              arguments: { query: 'react 19' },
+              status: 'success',
+              output: 'results',
+            },
+          ],
+        },
+      ],
+    };
+
+    const sanitized = sanitizeMessageForPersistence(message);
+    expect(sanitized.toolInvocations?.[0]?.subagentToolInvocations).toEqual([
+      {
+        id: 'sub-1',
+        name: 'websearch',
+        arguments: { query: 'react 19' },
+        status: 'success',
+        output: 'results',
+      },
+    ]);
+  });
+
   it('strips assistant promptContent while keeping user promptContent', () => {
     const assistant: UIMessage = {
       id: 'a1',

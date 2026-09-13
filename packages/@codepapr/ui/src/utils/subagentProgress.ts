@@ -69,7 +69,7 @@ export function startSubagentProgress(
     // 重复 start 帧（重放/双监听）：复用在飞条目，避免第二条永远无人结算。
     return id;
   }
-  runs.push({ id, agent, prompt, steps: [], collapsed: false, sessionId, requestId });
+  runs.push({ id, agent, prompt, steps: [], collapsed: true, sessionId, requestId });
   notify();
   return id;
 }

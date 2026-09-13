@@ -8,6 +8,7 @@ import {
   getSubagentRuns,
   getSubagentRunsForSession,
   pushSubagentStep,
+  toggleSubagentCollapse,
 } from './subagentProgress';
 
 beforeEach(() => {
@@ -35,6 +36,20 @@ describe('subagentProgress 完成即移除', () => {
 
     completeSubagentProgress('dup-id');
     expect(getSubagentRuns()).toHaveLength(0);
+  });
+});
+
+describe('subagentProgress 默认折叠', () => {
+  it('新建 run 默认折叠，toggle 后才展开', () => {
+    const runId = startSubagentProgress('explore', '查找入口', undefined, 's1');
+
+    expect(getSubagentRuns()[0]?.collapsed).toBe(true);
+
+    toggleSubagentCollapse(runId);
+    expect(getSubagentRuns()[0]?.collapsed).toBe(false);
+
+    toggleSubagentCollapse(runId);
+    expect(getSubagentRuns()[0]?.collapsed).toBe(true);
   });
 });
 

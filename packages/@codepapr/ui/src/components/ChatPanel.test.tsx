@@ -34,6 +34,7 @@ import {
   completeSubagentProgress,
   resetSubagentProgress,
   startSubagentProgress,
+  pushSubagentStep,
 } from '../utils/subagentProgress';
 import type { CharacterProfile } from '../utils/characterTypes';
 import type { WorkMode } from '../utils/agentPrompts';
@@ -1744,6 +1745,134 @@ describe('ChatPanel', () => {
     expect(userAt).toBeGreaterThan(-1);
     expect(exploreAt).toBeGreaterThan(userAt);
     expect(container.querySelector('[data-subagent-run="explore"]')).not.toBeNull();
+  });
+
+  it('keeps a live subagent progress card collapsed until the user expands it', async () => {
+    const runId = startSubagentProgress('explore', '查找入口', undefined, 'session-1');
+    pushSubagentStep(runId, { name: 'websearch', status: 'success', summary: '搜索 React 19' });
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    expect(container.textContent).toContain('Explore 正在分析代码');
+    expect(container.textContent).not.toContain('搜索 React 19');
+
+    const header = container.querySelector('[data-subagent-run="explore"] button');
+    await act(async () => {
+      (header as HTMLButtonElement).click();
+    });
+
+    expect(container.textContent).toContain('websearch');
+    expect(container.textContent).toContain('搜索 React 19');
+  });
+
+  it('renders subagent internal tool calls inside the completed task card', async () => {
+    const messages: UIMessage[] = [
+      {
+        id: 'assistant-task',
+        role: 'assistant',
+        content: '已让 Explore 调研文档',
+        timestamp: 21,
+        toolInvocations: [
+          {
+            id: 'task-1',
+            name: 'task',
+            arguments: { agent: 'explore', prompt: '查 React 19 use 文档' },
+            status: 'success',
+            output: JSON.stringify({ agent: 'explore', content: 'done', steps: [] }),
+            subagentToolInvocations: [
+              {
+                id: 'sub-1',
+                name: 'websearch',
+                arguments: { query: 'React 19 use hook' },
+                status: 'success',
+                output: 'search results body',
+              },
+              {
+                id: 'sub-2',
+                name: 'webfetch',
+                arguments: { url: 'https://react.dev/reference/react/use' },
+                status: 'success',
+                output: 'page body',
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    useAgentStore.setState((state) => ({
+      ...state,
+      messages,
+      sessionMessages: { 'session-1': messages },
+      isLoading: false,
+      loadingSessionId: null,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const toolPanel = container.querySelector('[data-tool-panel-state]');
+    expect(toolPanel?.getAttribute('data-tool-panel-state')).toBe('closed');
+    expect(container.textContent).not.toContain('网页搜索: React 19 use hook');
+
+    await act(async () => {
+      (toolPanel?.querySelector('button') as HTMLButtonElement).click();
+    });
+
+    expect(container.querySelector('[data-subagent-tool-calls="2"]')).not.toBeNull();
+    expect(container.querySelector('[data-subagent-tool-call="websearch"]')).not.toBeNull();
+    expect(container.querySelector('[data-subagent-tool-call="webfetch"]')).not.toBeNull();
+    expect(container.textContent).toContain('网页搜索: React 19 use hook');
+    expect(container.textContent).toContain('抓取网页: https://react.dev/reference/react/use');
+  });
+
+  it('falls back to legacy step names when a task has no subagentToolInvocations', async () => {
+    const messages: UIMessage[] = [
+      {
+        id: 'assistant-task-legacy',
+        role: 'assistant',
+        content: '',
+        timestamp: 22,
+        toolInvocations: [
+          {
+            id: 'task-legacy',
+            name: 'task',
+            arguments: { agent: 'explore', prompt: 'p' },
+            status: 'success',
+            output: JSON.stringify({
+              agent: 'explore',
+              content: 'done',
+              steps: [
+                { name: 'graph', status: 'success', summary: 'graph' },
+                { name: 'read', status: 'success', summary: 'read' },
+              ],
+            }),
+          },
+        ],
+      },
+    ];
+    useAgentStore.setState((state) => ({
+      ...state,
+      messages,
+      sessionMessages: { 'session-1': messages },
+      isLoading: false,
+      loadingSessionId: null,
+    }));
+
+    await act(async () => {
+      root.render(<ChatPanel />);
+    });
+
+    const toolPanel = container.querySelector('[data-tool-panel-state]');
+    await act(async () => {
+      (toolPanel?.querySelector('button') as HTMLButtonElement).click();
+    });
+
+    expect(container.querySelector('[data-subagent-tool-calls]')).toBeNull();
+    expect(container.textContent).toContain('graph');
+    expect(container.textContent).toContain('read');
   });
 
   describe('QuestionCard (plan mode question tool)', () => {
