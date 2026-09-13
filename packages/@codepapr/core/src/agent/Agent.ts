@@ -1393,8 +1393,11 @@ export class Agent {
         cursor = next;
       }
 
-      // 按原始调用顺序落账：tool 消息 + end 事件 + __images 提取。顺序与
-      // 串行执行一致，日志字节、缓存哈希与下游管线不受影响。
+      // 按原始调用顺序落账：tool 消息 + end 事件。工具 `__images` 生成的 user
+      // 消息必须等本批全部 tool 消息落完后再落账：OpenAI/DeepSeek 要求
+      // assistant tool_calls 之后紧跟每个 tool_call_id 的 tool 消息，中间插入
+      // user 消息会被 400 拒绝（insufficient tool messages following tool_calls）。
+      const deferredToolImageMessages: IMessage[] = [];
       for (const record of records) {
         const { call, result, success, errorMessage, toolDurationMs } = record;
         const consumed = this.consumeToolResultSideChannels(result);
@@ -1423,11 +1426,12 @@ export class Agent {
         if (result && typeof result === 'object' && '__images' in result) {
           const images = (result as Record<string, unknown>).__images as IImageContent[] | undefined;
           if (images && images.length > 0) {
-            const imageMsg = MessageFactory.user(
-              `[Image from tool ${call.name}]`,
-              images
+            deferredToolImageMessages.push(
+              MessageFactory.user(
+                `[Image from tool ${call.name}]`,
+                images
+              )
             );
-            await this.session.logStore.append(imageMsg);
           }
         }
       }
@@ -1466,6 +1470,13 @@ export class Agent {
                 : undefined,
           });
         }
+      }
+
+      // 图片按调用顺序跟在全部 tool 消息（含补占位）之后：合法 wire 形状为
+      // assistant(tool_calls) → tool* → user(images)，图片仍会在下一轮请求
+      // 作为「最后一条未消费图片」上线。
+      for (const imageMsg of deferredToolImageMessages) {
+        await this.session.logStore.append(imageMsg);
       }
 
       if (question) {

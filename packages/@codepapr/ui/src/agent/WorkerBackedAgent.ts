@@ -169,6 +169,10 @@ export interface AgentRuntimeHandle {
   /** 是否仍有主线程在飞的工具执行（含静默长工具）。空闲看门狗据此
    *  暂停：工具自身的 IPC 超时负责兜底，不能被 5.5 分钟的看门狗误杀（N6）。 */
   hasInflightToolExecutions?(): boolean;
+  /** 是否仍有在飞的 chat 请求（模型回合，含 mid-loop 压缩）。空闲看门狗据此
+   *  暂停：模型静默由 worker 层 chatIdle / streamIdle / 重连负责，不能被
+   *  5.5 分钟的看门狗误杀（N6）。 */
+  hasInflightChatRequests?(): boolean;
   /** Sidecar 不在 WKWebView 里跑：隐藏页面 / 解冻宽限对它无效。 */
   isolatedFromWebKit?(): boolean;
 }
@@ -350,6 +354,11 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   private crashInfo: { message: string; detail?: string } | null = null;
   private heartbeatTimerId: ReturnType<typeof setInterval> | null = null;
   private lastPongAt = 0;
+  /** Last time a ping was actually posted / the heartbeat tick ran. Distinguishes
+   *  "worker didn't answer a delivered ping" from "the timer itself was delayed
+   *  by page suspension" (see startHeartbeat). */
+  private lastPingAt = 0;
+  private lastTickAt = 0;
   /** False until the first pong arrives; switches the heartbeat from the
    *  initial grace window to the normal timeout. */
   private hasReceivedPong = false;
@@ -439,34 +448,73 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
   }
 
   /** Detects a silently dead worker (no 'error' event, e.g. OS memory kill):
-   *  while requests are pending, a ping must be answered within the timeout. */
+   *  while requests are pending, a ping must be answered within the timeout.
+   *
+   *  Suspension-safe: WKWebView freezes/throttles the page when the window is
+   *  occluded or the display sleeps — interval callbacks can be delayed for
+   *  minutes while the worker is perfectly healthy. A delayed tick therefore
+   *  proves nothing: refresh the baseline and re-probe. Likewise, while the
+   *  page is hidden the worker may be frozen with it and cannot answer; only a
+   *  ping that was actually delivered and went unanswered past the timeout
+   *  declares the worker dead. Sidecar runs in its own process: it keeps
+   *  normal detection regardless of page visibility and throttling. */
   private startHeartbeat(): void {
     if (this.heartbeatTimerId !== null) return;
     this.lastPongAt = Date.now();
+    this.lastTickAt = this.lastPongAt;
     this.heartbeatTimerId = setInterval(() => {
       if (this.crashed) return;
+      const now = Date.now();
+      const sinceLastTick = now - this.lastTickAt;
+      this.lastTickAt = now;
       if (this.pendingRequests.size === 0 && this.appAgentRequests.size === 0) {
         // Idle: nothing to protect; keep the baseline fresh so a request that
         // starts right after doesn't trip on a stale timestamp.
-        this.lastPongAt = Date.now();
+        this.lastPongAt = now;
+        return;
+      }
+      // Timer throttling / suspension: previous ticks did not run, so the age
+      // of the last pong says nothing about the worker. Re-arm and probe again.
+      if (sinceLastTick > WORKER_HEARTBEAT_INTERVAL_MS * 2) {
+        this.lastPongAt = now;
+        this.sendHeartbeatPing();
+        return;
+      }
+      // Hidden page: the WKWebView worker is (or just was) frozen with it; an
+      // unanswered ping is not evidence of death. handleVisibilityChange
+      // refreshes the baseline on thaw and normal detection resumes.
+      if (!this.isolatedFromWebKit() && this.isPageHidden()) {
+        this.lastPongAt = now;
+        this.sendHeartbeatPing();
         return;
       }
       const timeout = this.hasReceivedPong || this.isolatedFromWebKit()
         ? WORKER_HEARTBEAT_TIMEOUT_MS
         : WORKER_HEARTBEAT_INITIAL_GRACE_MS;
-      if (Date.now() - this.lastPongAt > timeout) {
+      // Only a delivered ping can prove death: require a ping sent after the
+      // last pong before declaring a crash.
+      if (this.lastPingAt > this.lastPongAt && now - this.lastPongAt > timeout) {
         this.handleCrash(
           `Agent worker unresponsive (no heartbeat for ${Math.round(timeout / 1000)}s)`,
         );
         return;
       }
-      try {
-        this.postToWorker({ type: 'ping' } satisfies MainToAgentWorkerMessage);
-      } catch {
-        // posting to a dead runtime can throw in some engines — treat as crash
-        this.handleCrash('Agent worker unresponsive (heartbeat post failed)');
-      }
+      this.sendHeartbeatPing();
     }, WORKER_HEARTBEAT_INTERVAL_MS);
+  }
+
+  private sendHeartbeatPing(): void {
+    try {
+      this.lastPingAt = Date.now();
+      this.postToWorker({ type: 'ping' } satisfies MainToAgentWorkerMessage);
+    } catch {
+      // posting to a dead runtime can throw in some engines — treat as crash
+      this.handleCrash('Agent worker unresponsive (heartbeat post failed)');
+    }
+  }
+
+  private isPageHidden(): boolean {
+    return typeof document !== 'undefined' && document.visibilityState === 'hidden';
   }
 
   private clearHeartbeat(): void {
@@ -607,6 +655,13 @@ export class WorkerBackedAgent implements AgentRuntimeHandle {
 
   hasActiveAppAgentRequests(): boolean {
     return this.appAgentRequests.size > 0;
+  }
+
+  /** 是否有在飞的 chat 请求（模型回合）。Store 空闲看门狗据此推迟：模型
+   *  静默由 worker 层 chatIdle / streamIdle / 重连负责，看门狗不得把正常的
+   *  长模型等待（大上下文 TTFB、keepalive 保活、mid-loop 压缩）误杀（N6）。 */
+  hasInflightChatRequests(): boolean {
+    return this.pendingRequests.size > 0 && !this.crashed;
   }
 
   hasInflightToolExecutions(): boolean {

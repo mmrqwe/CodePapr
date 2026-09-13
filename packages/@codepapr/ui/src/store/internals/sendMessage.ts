@@ -244,19 +244,34 @@ function buildModeSwitchMessage(mode: WorkMode): UIMessage {
   };
 }
 
-/** N6：空闲看门狗不得误杀三类合法等待：
+/** N6：空闲看门狗不得误杀五类合法等待：
  *  1. 权限确认弹窗——permissionStore 设计为无限期等待用户决策（与 worker 层
  *     的「权限等待不限时」一致），弹窗停留超过看门狗阈值时必须推迟触发；
  *  2. 静默长工具执行——无流事件输出的工具由工具自身的 IPC 超时兜底
  *     （toolIpcTimeoutMs / graph / task），看门狗在工具在飞时必须推迟触发；
  *  3. 页面不可见——仅 Worker 回退路径：WKWebView 后台会冻结 JS。Sidecar
  *     是独立 Node 进程，隐藏页面不得推迟看门狗。
+ *  4. 在飞 chat 请求——模型静默由 worker 层 chatIdle / streamIdle / 重连负责。
+ *     大上下文 TTFB 长、keepalive 保活、mid-loop 压缩期间都可能长时间没有
+ *     事件，凭「无事件」强杀会把正常的长模型等待误杀。
+ *  5. 在飞 app-agent 请求——嵌套子代理运行同样只在运行时层结算。
  *  上述情况返回 true，调用方应重新武装看门狗而不是强制恢复。 */
 export function shouldDeferIdleWatchdog(
-  agent: Pick<AgentRuntimeHandle, 'hasInflightToolExecutions' | 'isolatedFromWebKit'> | null | undefined,
+  agent:
+    | Pick<
+        AgentRuntimeHandle,
+        | 'hasInflightToolExecutions'
+        | 'hasInflightChatRequests'
+        | 'hasActiveAppAgentRequests'
+        | 'isolatedFromWebKit'
+      >
+    | null
+    | undefined,
 ): boolean {
   if (isPermissionWaitActive()) return true;
   if (agent?.hasInflightToolExecutions?.()) return true;
+  if (agent?.hasInflightChatRequests?.()) return true;
+  if (agent?.hasActiveAppAgentRequests?.()) return true;
   const hiddenPageBlocksWorker =
     typeof document !== 'undefined' && document.visibilityState === 'hidden';
   if (hiddenPageBlocksWorker && !agent?.isolatedFromWebKit?.() && !shouldUseSidecarAgentRuntime()) {

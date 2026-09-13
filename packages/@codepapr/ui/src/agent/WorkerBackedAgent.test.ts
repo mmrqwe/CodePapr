@@ -795,6 +795,58 @@ describe('WorkerBackedAgent', () => {
     await rejection;
   });
 
+  it('does not declare a crash when the page is hidden (WKWebView freezes the worker)', async () => {
+    const visibility = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockReturnValue('hidden');
+    try {
+      const agent = createAgent();
+      const chatPromise = agent.chat('hello');
+      const worker = MockWorker.instances[0];
+      const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+
+      // Answer one ping so the 15s window applies, then stay silent while the
+      // page is hidden: the frozen worker cannot answer, which is not a crash.
+      await vi.advanceTimersByTimeAsync(5_000);
+      worker?.emit({ type: 'pong' });
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(agent.isCrashed()).toBe(false);
+
+      // Thaw: baseline refreshes; a genuine silence window now crashes again.
+      visibility.mockReturnValue('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(21_000);
+      expect(agent.isCrashed()).toBe(true);
+      await rejection;
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it('does not declare a crash when heartbeat ticks are delayed by suspension', async () => {
+    const agent = createAgent();
+    const chatPromise = agent.chat('hello');
+    const worker = MockWorker.instances[0];
+    const rejection = expect(chatPromise).rejects.toBeInstanceOf(WorkerCrashError);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    worker?.emit({ type: 'pong' });
+
+    // Display sleep / page suspension: wall clock jumps ~61s while no interval
+    // callback ran. The stale baseline must not be read as a dead worker.
+    vi.setSystemTime(Date.now() + 61_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(agent.isCrashed()).toBe(false);
+
+    // Detection still works after the suspension: real silence past the
+    // timeout (baseline was refreshed on the suspension tick) crashes.
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(agent.isCrashed()).toBe(false);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(agent.isCrashed()).toBe(true);
+    await rejection;
+  });
+
   it('keeps the worker alive while heartbeats are answered', async () => {
     const agent = createAgent();
     const chatPromise = agent.chat('hello');

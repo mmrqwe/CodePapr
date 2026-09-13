@@ -8,12 +8,15 @@ import {
   describeLogWireMeta,
   measureLogWireFootprint,
   TOOL_SUMMARY_METADATA_KEY,
+  TOOL_RESULT_MISSING_PLACEHOLDER,
+  TOOL_RESULT_MISSING_ERROR,
 } from '@codepapr/core';
 import type { Lang } from './i18n';
 import type { UIToolInvocation } from '../store/internals/types';
 
-export const TOOL_RESULT_MISSING_PLACEHOLDER = '[tool result missing: interrupted before completion]';
-export const TOOL_RESULT_MISSING_ERROR = '工具执行中断，结果缺失';
+/** 与请求侧 normalizeToolCallRuns / RequestBuilder 共用同一份常量，
+ *  保证 live 与 rebuild 生成的占位字节一致。 */
+export { TOOL_RESULT_MISSING_PLACEHOLDER, TOOL_RESULT_MISSING_ERROR };
 
 export interface ContextCheckpointSections {
   userGoal: string[];

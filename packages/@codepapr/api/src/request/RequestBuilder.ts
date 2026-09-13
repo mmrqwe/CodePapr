@@ -22,7 +22,7 @@ import {
   CacheConsistencyError,
 } from '@codepapr/types';
 import { Logger, sha256, estimateTokens } from '@codepapr/common';
-import { Serializer, applyHistoryToolSummaries, stripConsumedImages } from '@codepapr/core';
+import { Serializer, applyHistoryToolSummaries, normalizeToolCallRuns, stripConsumedImages } from '@codepapr/core';
 import { DEFAULT_MAX_TOKENS, sanitizeMaxTokens, getProviderContextLimit } from '../tokenLimits';
 
 const log = new Logger('RequestBuilder');
@@ -87,6 +87,13 @@ export class RequestBuilder {
     const prefixMessages = opts.prefix.toMessageArray();
     const logMessages = opts.appendLog.toMessageArray();
     let messages = [...prefixMessages, ...logMessages, ...(opts.suffixMessages ?? [])];
+
+    // Tool-call continuity guard: legacy/interrupted histories can contain a
+    // non-tool message between an assistant's tool_calls and its tool results
+    // (e.g. the synthesized `[Image from tool ...]` user message) or a missing
+    // result. OpenAI/DeepSeek reject those with HTTP 400. Deterministic repair
+    // on the request copy only; live and rebuild paths share this function.
+    messages = normalizeToolCallRuns(messages);
 
     // Strip images from consumed user messages
     // Only the LAST user message with images keeps them; all earlier ones are stripped.

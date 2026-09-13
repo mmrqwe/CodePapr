@@ -344,6 +344,105 @@ describe('RequestBuilder - tool context mode (history summaries)', () => {
   });
 });
 
+describe('RequestBuilder - tool-call continuity guard', () => {
+  function assistantWithTools(id: string, callIds: string[]): IMessage {
+    return {
+      id,
+      role: 'assistant',
+      content: '',
+      toolCalls: callIds.map((cid) => ({ id: cid, name: 'read', arguments: {} })),
+      timestamp: 1,
+    } as IMessage;
+  }
+
+  function toolResult(id: string, callId: string, content = 'ok'): IMessage {
+    return {
+      id,
+      role: 'tool',
+      content,
+      toolResult: { toolCallId: callId, success: true, result: content },
+      timestamp: 2,
+    } as IMessage;
+  }
+
+  function userWithImage(id: string): IMessage {
+    return {
+      id,
+      role: 'user',
+      content: '[Image from tool read]',
+      images: [{ mediaType: 'image/png', data: 'AAAA' }],
+      timestamp: 2,
+    } as IMessage;
+  }
+
+  async function buildRequest(messages: IMessage[]) {
+    const log = new AppendOnlyLog('tool-call-continuity');
+    for (const msg of messages) {
+      await log.append(msg);
+    }
+    return new RequestBuilder().build({
+      prefix: createPrefix(),
+      appendLog: log,
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+    });
+  }
+
+  it('moves an interleaved tool-image user message after the full tool batch', async () => {
+    // 旧版本 Agent 会把 `__images` 生成的 user 消息插在 tool 结果之间：
+    // assistant(tc: c1,c2) → tool(c1) → user(image) → tool(c2)。
+    const req = await buildRequest([
+      assistantWithTools('a1', ['c1', 'c2']),
+      toolResult('t1', 'c1'),
+      userWithImage('img1'),
+      toolResult('t2', 'c2'),
+      assistantWithTools('a2', ['c3']),
+      toolResult('t3', 'c3'),
+    ]);
+
+    // messages[0] 是 system prefix，日志从 index 1 开始。
+    const roles = req.messages.slice(1).map((msg) => msg.role);
+    expect(roles).toEqual(['assistant', 'tool', 'tool', 'user', 'assistant', 'tool']);
+    expect(req.messages[2]?.toolResult?.toolCallId).toBe('c1');
+    expect(req.messages[3]?.toolResult?.toolCallId).toBe('c2');
+    expect(req.messages[4]?.content).toBe('[Image from tool read]');
+  });
+
+  it('inserts a failure placeholder for a missing tool result', async () => {
+    // 中断的回合可能留下 assistant(tc: c1,c2) 只跟了 c1 的结果。
+    const req = await buildRequest([
+      assistantWithTools('a1', ['c1', 'c2']),
+      toolResult('t1', 'c1'),
+      { id: 'a2', role: 'assistant', content: 'continue', timestamp: 3 } as IMessage,
+    ]);
+
+    const log = req.messages.slice(1);
+    expect(log.map((msg) => msg.role)).toEqual(['assistant', 'tool', 'tool', 'assistant']);
+    expect(log[1]?.toolResult?.toolCallId).toBe('c1');
+    expect(log[2]?.toolResult?.toolCallId).toBe('c2');
+    expect(log[2]?.toolResult?.success).toBe(false);
+    expect(log[2]?.content).toContain('tool result missing');
+  });
+
+  it('leaves well-formed history untouched (order preserved, byte parity)', async () => {
+    const messages = [
+      assistantWithTools('a1', ['c1', 'c2']),
+      toolResult('t1', 'c1'),
+      toolResult('t2', 'c2'),
+      { id: 'a2', role: 'assistant', content: 'done', timestamp: 3 } as IMessage,
+    ];
+    const req = await buildRequest(messages);
+    expect(req.messages.slice(1).map((msg) => msg.role)).toEqual([
+      'assistant',
+      'tool',
+      'tool',
+      'assistant',
+    ]);
+    expect(req.messages[2]?.toolResult?.toolCallId).toBe('c1');
+    expect(req.messages[3]?.toolResult?.toolCallId).toBe('c2');
+  });
+});
+
 describe('stripConsumedImages', () => {
   function user(content: string, images?: IMessage['images']): IMessage {
     return { id: `u-${content}`, role: 'user', content, images, timestamp: 1 } as IMessage;

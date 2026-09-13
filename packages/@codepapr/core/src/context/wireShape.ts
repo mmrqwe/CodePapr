@@ -24,7 +24,7 @@
  * （仅 path 骨架，provider 侧会被过滤）不计费。
  */
 
-import { IMessage } from '@codepapr/types';
+import { IMessage, IToolCall } from '@codepapr/types';
 import { Serializer } from '../cache/Serializer';
 import { TOOL_SUMMARY_METADATA_KEY } from '../tool/toolOutputSummary';
 
@@ -260,4 +260,83 @@ export function clearConsumedImageData(messages: IMessage[]): IMessage[] {
     };
   });
   return changed ? result : messages;
+}
+
+/** 缺失工具结果的占位文案。与 UI 重建路径 repairOrphanedToolCalls 共用同一份
+ *  常量，保证 live 与 rebuild 两条路径生成的请求字节一致。 */
+export const TOOL_RESULT_MISSING_PLACEHOLDER = '[tool result missing: interrupted before completion]';
+export const TOOL_RESULT_MISSING_ERROR = '工具执行中断，结果缺失';
+
+/**
+ * 保证每个 assistant `toolCalls` 消息后面紧跟每个 tool_call_id 的 tool 消息。
+ *
+ * 旧版本或中断路径可能在工具结果之间插入过非 tool 消息（典型：工具返回
+ * `__images` 生成的 `[Image from tool ...]` user 消息），或工具结果缺失；
+ * OpenAI/DeepSeek 会以 400「An assistant message with 'tool_calls' must be
+ * followed by tool messages responding to each 'tool_call_id'」拒绝整个请求。
+ *
+ * 保守修复（纯函数、确定性，只作用于请求副本，不写回 AppendOnlyLog）：
+ *  - 在 assistant 消息之后、下一条 assistant 消息之前的区段里，按调用顺序
+ *    收拢配对的 tool 消息；
+ *  - 缺失的结果补失败占位；
+ *  - 被打断的非 tool 消息（如工具图片 user 消息）原序移到本批 tool 消息之后。
+ * 已经合法的历史原样返回（保持引用，不产生额外拷贝）。
+ */
+export function normalizeToolCallRuns(messages: IMessage[]): IMessage[] {
+  const consumed = new Set<number>();
+  const output: IMessage[] = [];
+
+  for (let i = 0; i < messages.length; i += 1) {
+    if (consumed.has(i)) continue;
+    const message = messages[i]!;
+    output.push(message);
+    if (message.role !== 'assistant' || !message.toolCalls || message.toolCalls.length === 0) {
+      continue;
+    }
+
+    const pending = new Set(message.toolCalls.map((call) => call.id));
+    const results = new Map<string, { message: IMessage; index: number }>();
+    for (let j = i + 1; j < messages.length; j += 1) {
+      if (consumed.has(j)) continue;
+      const candidate = messages[j]!;
+      if (candidate.role === 'assistant') break;
+      const toolCallId = candidate.role === 'tool' ? candidate.toolResult?.toolCallId : undefined;
+      if (toolCallId && pending.has(toolCallId) && !results.has(toolCallId)) {
+        results.set(toolCallId, { message: candidate, index: j });
+      }
+    }
+
+    for (const call of message.toolCalls) {
+      const found = results.get(call.id);
+      if (found) {
+        output.push(found.message);
+        consumed.add(found.index);
+      } else {
+        output.push(buildMissingToolResult(call, message));
+      }
+    }
+  }
+
+  if (
+    output.length === messages.length &&
+    output.every((message, index) => message === messages[index])
+  ) {
+    return messages;
+  }
+  return output;
+}
+
+function buildMissingToolResult(call: IToolCall, assistantMessage: IMessage): IMessage {
+  return {
+    id: `${assistantMessage.id}-tool-${call.id}-placeholder`,
+    role: 'tool',
+    content: TOOL_RESULT_MISSING_PLACEHOLDER,
+    timestamp: assistantMessage.timestamp,
+    toolResult: {
+      toolCallId: call.id,
+      success: false,
+      result: TOOL_RESULT_MISSING_PLACEHOLDER,
+      error: TOOL_RESULT_MISSING_ERROR,
+    },
+  };
 }

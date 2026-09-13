@@ -3642,6 +3642,21 @@ describe('shouldDeferIdleWatchdog（N6）', () => {
     ).toBe(true);
   });
 
+  it('在飞 chat 请求时返回 true（模型静默由 worker 层负责，看门狗不得误杀）', () => {
+    expect(
+      shouldDeferIdleWatchdog({ hasInflightChatRequests: () => true })
+    ).toBe(true);
+    expect(
+      shouldDeferIdleWatchdog({ hasInflightChatRequests: () => false })
+    ).toBe(false);
+  });
+
+  it('在飞 app-agent 请求时返回 true（嵌套子代理结算前不得误杀）', () => {
+    expect(
+      shouldDeferIdleWatchdog({ hasActiveAppAgentRequests: () => true })
+    ).toBe(true);
+  });
+
   it('页面不可见时返回 true（WKWebView 冻结期间看门狗不得误杀）', () => {
     vi.stubGlobal('document', { visibilityState: 'hidden' });
     try {

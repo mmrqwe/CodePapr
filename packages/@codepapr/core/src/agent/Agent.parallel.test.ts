@@ -497,4 +497,125 @@ describe('Agent parallel tool execution', () => {
     expect(result.question?.question).toBe('继续吗？');
     expect(tailTaskExecuted).toBe(false);
   });
+
+  it('appends tool image messages after every tool result so the wire shape stays valid', async () => {
+    const providerRequests: IChatRequest[] = [];
+    let calls = 0;
+    const provider: ILLMProvider = {
+      name: 'mock',
+      models: ['test-model'],
+      validate: () => true,
+      chat: vi.fn(async (request: IChatRequest): Promise<IChatResponse> => {
+        providerRequests.push(request);
+        calls += 1;
+        return calls === 1
+          ? responseWithToolCalls([
+              { id: 'call-img', name: 'read', arguments: { relativePath: 'shot.png' } },
+              { id: 'call-w', name: 'write', arguments: { relativePath: 'w.txt', content: 'x' } },
+            ])
+          : FINAL_RESPONSE;
+      }),
+    };
+    const { agent, log } = buildAgent({
+      provider,
+      tools: [
+        {
+          def: makeToolDefinition('read'),
+          handler: () => ({
+            __images: [{ data: 'AAAA', mediaType: 'image/png' }],
+            path: 'shot.png',
+          }),
+        },
+        {
+          def: makeToolDefinition('write'),
+          handler: () => ({ ok: true }),
+        },
+      ],
+    });
+
+    await agent.chat('用户输入');
+
+    // 日志顺序必须是 assistant(tool_calls) → tool → tool → user(images)：
+    // 图片消息插在 tool 结果之间会让 OpenAI/DeepSeek 以
+    // 「insufficient tool messages following tool_calls message」400 拒绝。
+    const messages = log.getAllMessages();
+    expect(messages.map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'tool',
+      'user',
+      'assistant',
+    ]);
+    const imageMsg = messages[4];
+    expect(imageMsg.content).toContain('Image from tool read');
+    expect(imageMsg.images?.length).toBe(1);
+
+    // 下一轮请求：assistant tool_calls 后必须紧跟全部配对 tool 消息，
+    // 图片 user 消息只能排在其后。
+    const secondRequest = providerRequests[1];
+    const assistantIndex = secondRequest.messages.findIndex(
+      (m) => m.toolCalls && m.toolCalls.length > 0
+    );
+    expect(assistantIndex).toBeGreaterThanOrEqual(0);
+    const toolCallIds = secondRequest.messages[assistantIndex].toolCalls!.map((tc) => tc.id);
+    const after = secondRequest.messages.slice(assistantIndex + 1);
+    expect(after[0]?.role).toBe('tool');
+    expect(after[1]?.role).toBe('tool');
+    expect(after[0]?.toolResult?.toolCallId).toBe(toolCallIds[0]);
+    expect(after[1]?.toolResult?.toolCallId).toBe(toolCallIds[1]);
+    expect(after[2]?.role).toBe('user');
+    expect(after[2]?.images?.length).toBe(1);
+  });
+
+  it('keeps images after the tool batch and skipped-call placeholders on the question path', async () => {
+    let tailReadExecuted = false;
+    const provider = providerWithOneToolRound([
+      { id: 'call-img', name: 'read', arguments: { relativePath: 'shot.png' } },
+      { id: 'call-q', name: 'question', arguments: { question: '继续吗？', header: '确认' } },
+      { id: 'call-tail', name: 'read', arguments: { relativePath: 'tail.txt' } },
+    ]);
+    const { agent, log } = buildAgent({
+      provider,
+      tools: [
+        {
+          def: makeToolDefinition('read'),
+          handler: (args) => {
+            if (args.relativePath === 'tail.txt') {
+              tailReadExecuted = true;
+              return { content: 'tail' };
+            }
+            return {
+              __images: [{ data: 'AAAA', mediaType: 'image/png' }],
+              path: 'shot.png',
+            };
+          },
+        },
+        {
+          def: makeToolDefinition('question'),
+          handler: () => ({ __question: true, question: '继续吗？', header: '确认' }),
+        },
+      ],
+    });
+
+    const result = await agent.chat('用户输入');
+    expect(result.question?.question).toBe('继续吗？');
+    expect(tailReadExecuted).toBe(false);
+
+    // tool_calls 后必须紧跟全部 tool 消息（含被跳过调用的占位），图片排最后。
+    expect(log.getAllMessages().map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'tool',
+      'tool',
+      'user',
+    ]);
+    const messages = log.getAllMessages();
+    expect(messages[2]?.toolResult?.toolCallId).toBe('call-img');
+    expect(messages[3]?.toolResult?.toolCallId).toBe('call-q');
+    expect(messages[4]?.toolResult?.toolCallId).toBe('call-tail');
+    expect(messages[4]?.toolResult?.success).toBe(false);
+    expect(messages[5]?.images?.length).toBe(1);
+  });
 });

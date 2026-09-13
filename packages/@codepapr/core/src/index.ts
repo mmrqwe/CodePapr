@@ -492,6 +492,9 @@ export {
   stripConsumedImages,
   clearConsumedImageData,
   findLastUnconsumedImageIndex,
+  normalizeToolCallRuns,
+  TOOL_RESULT_MISSING_PLACEHOLDER,
+  TOOL_RESULT_MISSING_ERROR,
 } from "./context/wireShape";
 export type { LogWireMeta, LogWireFootprint } from "./context/wireShape";
 
