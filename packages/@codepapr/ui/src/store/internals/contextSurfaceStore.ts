@@ -184,14 +184,21 @@ export async function maintainContextSurface(
       return;
     }
 
-    await saveContextSurface(workspacePath, {
+    const updated: PersistedContextSurface = {
       sessionId,
       generation: surface.generation,
       parentGeneration: surface.parentGeneration,
       compactionId: surface.compactionId,
       renderParamsJson: surface.renderParamsJson,
+      createdAt: surface.createdAt,
       nodes,
-    });
+    };
+    await saveContextSurface(workspacePath, updated);
+    // 缓存必须镜像刚落库的节点：hydrateSessionContext 视缓存为权威
+    // （getContextSurfaceCached 命中不回源 DB）。不刷新的话，重建会拿到
+    // 「本进程内首次加载/创建时」的旧节点子集，静默截掉之后新增的消息
+    // （典型：取消回合后 agent 失效重建 → 被取消回合从模型上下文消失）。
+    rememberContextSurface(workspacePath, updated);
   } catch (err) {
     console.warn('[surface] 维护 surface 失败:', err instanceof Error ? err.message : err);
   }

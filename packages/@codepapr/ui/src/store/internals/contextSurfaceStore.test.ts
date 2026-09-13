@@ -115,6 +115,20 @@ describe('maintainContextSurface', () => {
     }
   });
 
+  it('refreshes the in-memory cache so a later hydrate sees the latest nodes', async () => {
+    const sid = freshSession();
+    vi.mocked(loadContextSurface).mockResolvedValue(null);
+    await maintainContextSurface('/ws', sid, [user('u1')]);
+    // 第二次维护时缓存还是创建时冻结的 [u1]：更新分支必须把落库后的节点
+    // 同步回缓存，否则取消回合后的重建（hydrate 以缓存为权威）会拿到旧
+    // 节点子集，静默截掉被取消回合（UI 显示、模型上下文没有）。
+    await maintainContextSurface('/ws', sid, [user('u1'), assistant('a1')]);
+
+    const result = await hydrateSessionContext('/ws', sid, [user('u1'), assistant('a1')]);
+    expect(result.degraded).toBe(false);
+    expect(result.messages.map((m) => m.id)).toEqual(['u1', 'a1']);
+  });
+
   it('excludes a mid-loop orphan whose generation is still undefined', async () => {
     const sid = freshSession();
     vi.mocked(loadContextSurface).mockResolvedValue(surface({ sessionId: sid, generation: 2 }));

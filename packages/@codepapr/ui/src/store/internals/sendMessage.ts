@@ -1347,6 +1347,37 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // 已崩溃的 agent（worker 死亡）绝不复用：直接重建，避免向死 worker 发消息。
           // agent 与创建它的会话绑定（logStore/上下文），切换会话后绝不复用，
           // 否则会把新会话的消息写进旧会话的上下文。
+          //
+          // N3/N24：先算好本回合的 surface 权威基座（回合前历史，剔除本回合
+          // 用户消息）。无论复用还是重建 agent 都用同一基座——崩溃恢复/降级
+          // 重建不得绕过 surface 权威回退到未裁剪的原始快照（ADR-003）。
+          let turnBaseMessages: UIMessage[] = [];
+          let hasSessionBase = false;
+          if (activeSessionId) {
+            // 读前排空挂起保存队列：取消/出错收尾的保存走异步队列，尚未落库
+            // 时 surface 缓存的节点列表缺少最近消息——取消后 agent 失效重建
+            // （N3）会静默截掉被取消回合，UI 显示而模型上下文没有。
+            await waitForPendingProjectStateSave(workspacePath);
+            ensureNotStopped();
+            hasSessionBase = true;
+            // 用实时数组水合：surface 维护自实时数组（含本回合用户消息），
+            // 用回合前快照会因「节点比快照新」被误判为节点缺失 → degraded。
+            const liveMessages =
+              get().sessionMessages[activeSessionId] ?? sessionMessages[activeSessionId] ?? [];
+            try {
+              const hydrated = await hydrateSessionContext(
+                workspacePath,
+                activeSessionId,
+                liveMessages
+              );
+              turnBaseMessages = (hydrated.messages as UIMessage[]).filter(
+                (m) => m.id !== userMsg?.id
+              );
+            } catch {
+              // surface 读取失败 → 沿用实时数组（legacy 行为），同样剔除本回合输入。
+              turnBaseMessages = liveMessages.filter((m) => m.id !== userMsg?.id);
+            }
+          }
           const agentSessionId = get()._agentSessionId;
           if (!agent || agent.isCrashed() || (agentSessionId !== null && agentSessionId !== activeSessionId) || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
             if (agent) {
@@ -1365,21 +1396,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               }
             }
             if (activeSessionId) {
-              let contextMessages = sessionMessages[activeSessionId] ?? [];
-              // PR1（ADR-002/003）：存在 persisted surface 时，重建上下文以
-              // surface 节点为选择权威。节点 ID 缺失 → degraded，回退 parent
-              // generation，无 parent 则重建 generation 0（禁止把全量数组
-              // 写回同一 compacted generation）。
-              try {
-                const hydrated = await hydrateSessionContext(
-                  workspacePath,
-                  activeSessionId,
-                  contextMessages
-                );
-                contextMessages = hydrated.messages as UIMessage[];
-              } catch {
-                // surface 读取失败 → 沿用全量数组（legacy 行为）。
-              }
+              // PR1（ADR-002/003）：persisted surface 是选择权威——
+              // turnBaseMessages 已在其上水合（含节点缺失的 degraded 兜底）。
+              let contextMessages = turnBaseMessages;
               if (mode !== 'ask' && contextMessages.some((m) => m.role === 'assistant' && m.workMode === 'ask')) {
                 contextMessages = [...contextMessages, buildModeSwitchMessage(mode)];
               }
@@ -1511,7 +1530,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // initialMessages，崩溃重建/降级重建后的上下文中会出现两条重复
           // 用户消息（重建前的首轮也是如此：初始 agent 用回合同前的
           // sessionMessages 快照创建）。
-          let retryBaseMessages = [...(sessionMessages[activeSessionId!] ?? [])];
+          // N3：与初始 createAgent 同源（surface 水合后的回合前历史），不得
+          // 回退到未裁剪的原始快照——那会让崩溃重建绕过 surface 权威，把已
+          // 压缩内容复活（ADR-003）。
+          let retryBaseMessages = hasSessionBase
+            ? [...turnBaseMessages]
+            : [...(sessionMessages[activeSessionId!] ?? [])];
           if (mode !== 'ask' && retryBaseMessages.some((m) => m.role === 'assistant' && m.workMode === 'ask')) {
             retryBaseMessages = [...retryBaseMessages, buildModeSwitchMessage(mode)];
           }

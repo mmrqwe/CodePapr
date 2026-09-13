@@ -2075,6 +2075,9 @@ describe('useAgentStore.sendMessage', () => {
 
     useAgentStore.setState((state) => ({
       ...state,
+      // surface 缓存是模块级状态：用独立 workspace 保证本用例从空 surface
+      // 起步，验证「按实时消息重建」而不是命中其他用例留下的节点子集。
+      workspacePath: '/tmp/codepapr-canvas-inspector',
       sessionMessages: {
         'session-1': [
           { id: 'u1', role: 'user', content: '精简一点，参考 canvas', timestamp: 1 },
@@ -3308,6 +3311,63 @@ describe('useAgentStore.sendMessage', () => {
       expect(useAgentStore.getState()._agent).toBeNull();
       expect(destroy).toHaveBeenCalledTimes(1);
       expect(useAgentStore.getState().isLoading).toBe(false);
+    });
+
+    it('keeps the cancelled turn in the rebuilt context base (N3 surface hydration)', async () => {
+      const cancelChat = vi.fn(
+        async (_input: string, onEvent?: (event: IChatStreamEvent) => void): Promise<never> => {
+          onEvent?.({ type: 'content-delta', delta: '被取消的半截回复' });
+          throw new DOMException('Session was cancelled', 'AbortError');
+        },
+      );
+      useAgentStore.setState((state) => ({
+        ...state,
+        workspacePath: '/tmp/codepapr-cancel-context',
+        sessions: [
+          {
+            id: 'session-1',
+            name: '任务 1',
+            provider: 'deepseek' as const,
+            model: 'deepseek-v4-pro',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        activeSessionId: 'session-1',
+        messages: [],
+        sessionMessages: { 'session-1': [] },
+        isLoading: false,
+        loadingSessionId: null,
+        _agent: createMockAgent({ chat: cancelChat }),
+        _agentModel: 'deepseek-v4-pro',
+        _agentPromptKey: null,
+        _agentSessionId: 'session-1',
+      }));
+
+      await useAgentStore.getState().sendMessage('第一问', '第一问', 'agent');
+
+      // 取消回合已走 N3 失效：下一条消息必然重建 agent。
+      expect(useAgentStore.getState()._agent).toBeNull();
+
+      const secondChat = vi.fn(async (_input: string) => createAgentResponse('第二答'));
+      createAgentMock.mockClear();
+      createAgentMock.mockReturnValue(createMockAgent({ chat: secondChat }));
+
+      await useAgentStore.getState().sendMessage('第二问', '第二问', 'agent');
+
+      // 回归：重建基座来自 surface 水合（persisted surface 是选择权威），
+      // 必须含被取消回合的用户消息与部分回复；本回合输入只经 chat(passInput)
+      // 注入（N24），不得出现在 initialMessages。
+      expect(createAgentMock).toHaveBeenCalled();
+      const rebuiltInitialMessages = createAgentMock.mock.calls.at(-1)?.[3] as
+        | Array<{ role: string; content?: string }>
+        | undefined;
+      expect(rebuiltInitialMessages).toBeDefined();
+      const contents = rebuiltInitialMessages!.map((message) => message.content ?? '');
+      expect(contents).toContain('第一问');
+      expect(contents.join('\n')).toContain('被取消的半截回复');
+      expect(contents).not.toContain('第二问');
+      expect(secondChat.mock.calls[0]?.[0]).toContain('第二问');
     });
 
     it('idle watchdog cancels a silently stuck turn and surfaces a synthetic notice', async () => {

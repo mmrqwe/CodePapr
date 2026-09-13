@@ -1097,6 +1097,9 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       computeContextSnapshot: async () => {
         const { workspacePath, activeSessionId, sessionMessages, settings } = get();
         if (!activeSessionId || !workspacePath) return;
+        // 读前排空挂起保存：surface 缓存由保存流程（maintainContextSurface）
+        // 维护，未落库时水合会拿到过期节点，Inspector 与实际重建上下文不一致。
+        await waitForPendingProjectStateSave(workspacePath);
         const normalizedSettings = normalizeSettings(settings);
         const messages = sessionMessages[activeSessionId] ?? [];
         const rulesSection = get()._projectRulesSection;
