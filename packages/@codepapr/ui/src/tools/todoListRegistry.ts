@@ -36,6 +36,7 @@ export function todoContextToChecklist(
     title: ctx.goal,
     items,
     status: ctx.status,
+    currentTaskId: ctx.currentTaskId,
     createdAt: ctx.createdAt,
     updatedAt: ctx.updatedAt,
   };

@@ -104,7 +104,11 @@ export function TaskChecklist({ checklist, lang, isLoading }: TaskChecklistProps
         {checklist.items.map((item) => {
           const isDone = item.status === 'completed';
           const isFailed = item.status === 'failed';
-          const isRunning = item.status === 'running';
+          // 模型经常不显式标 running，清单看起来像停在原地；回合进行中时把系统
+          // 推导的 currentTaskId 视作「执行中」，回合结束自动回落 pending。
+          const isRunning =
+            item.status === 'running' ||
+            (isLoading === true && item.status === 'pending' && item.id === checklist.currentTaskId);
 
           return (
             <div

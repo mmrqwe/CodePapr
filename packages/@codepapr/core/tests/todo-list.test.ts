@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   TODO_CREATE_REJECTED_NOTICE,
   applyTodoToolRequest,
@@ -54,13 +54,13 @@ describe('writeTodoList（创建路径，窗口纪律由 applyTodoToolRequest �
     expect(second.createdAt).toBe(first.createdAt);
   });
 
-  it('同 id 任务保留状态与 summary（续用计划时不丢进度证据）', () => {
+  it('同目标续用：同 id 任务保留状态与 summary（不丢进度证据）', () => {
     const first = writeTodoList(null, '初始计划', [
       { id: 'task-a', title: '任务 A', description: 'desc A' },
     ]);
     const advanced = updateTodoList(first, [{ id: 'task-a', status: 'completed', summary: '做完了' }]);
 
-    const recreated = writeTodoList(advanced, '新目标', [
+    const recreated = writeTodoList(advanced, '初始计划', [
       { id: 'task-a', title: '任务 A 更新', description: '新 desc' },
       { id: 'task-c', title: '新任务 C', description: 'desc C' },
     ]);
@@ -69,6 +69,66 @@ describe('writeTodoList（创建路径，窗口纪律由 applyTodoToolRequest �
     expect(recreated.tasks.find((t) => t.id === 'task-a')!.summary).toBe('做完了');
     expect(recreated.tasks.find((t) => t.id === 'task-a')!.title).toBe('任务 A 更新');
     expect(recreated.tasks.find((t) => t.id === 'task-c')!.status).toBe('pending');
+  });
+
+  it('新目标创建：同 id 任务不继承状态/摘要（verify 不得开局即勾选）', () => {
+    const first = writeTodoList(null, '播客目标', [
+      { id: 'verify', title: '验证', description: '' },
+    ]);
+    const done = updateTodoList(first, [
+      { id: 'verify', status: 'completed', summary: '上一轮验证完成' },
+    ]);
+
+    const recreated = writeTodoList(done, '歌词 + 灵动岛新目标', [
+      { id: 'verify', title: '验证', description: '' },
+    ]);
+
+    const verify = recreated.tasks[0]!;
+    expect(verify.status).toBe('pending');
+    expect(verify.summary).toBeUndefined();
+    expect(verify.errorLog).toBeUndefined();
+    expect(recreated.currentTaskId).toBe('verify');
+  });
+
+  it('新目标创建：显式传入的 status 仍被采用（确实延续的已完成任务）', () => {
+    const first = writeTodoList(null, '旧目标', [
+      { id: 'verify', title: '验证', description: '' },
+    ]);
+    const done = updateTodoList(first, [
+      { id: 'verify', status: 'completed', summary: '旧验证' },
+    ]);
+
+    const recreated = writeTodoList(done, '新目标', [
+      { id: 'verify', title: '验证', description: '', status: 'completed' },
+    ]);
+
+    expect(recreated.tasks[0]!.status).toBe('completed');
+    // 显式状态只带走状态本身：新目标不继承上一版的进度摘要
+    expect(recreated.tasks[0]!.summary).toBeUndefined();
+  });
+
+  it('新目标创建重置 createdAt；同目标续用保留', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const first = writeTodoList(null, '旧目标', [
+        { id: 'task-a', title: 'A', description: '' },
+      ]);
+      vi.setSystemTime(2_000);
+      const fresh = writeTodoList(first, '新目标', [
+        { id: 'task-a', title: 'A', description: '' },
+      ]);
+      expect(first.createdAt).toBe(1_000);
+      expect(fresh.createdAt).toBe(2_000);
+
+      vi.setSystemTime(3_000);
+      const continued = writeTodoList(fresh, '新目标', [
+        { id: 'task-a', title: 'A', description: '' },
+      ]);
+      expect(continued.createdAt).toBe(2_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('应正确处理依赖和预期产出', () => {
@@ -327,6 +387,44 @@ describe('applyTodoToolRequest（创建窗口闸门——本回合一次创建�
     expect(noop.ctx).toBe(created.ctx);
     expect(noop.created).toBe(false);
     expect(noop.rejected).toBe(false);
+  });
+});
+
+describe('新目标创建不继承旧进度（iPod 会话 verify 事故回放）', () => {
+  it('新用户消息 + 复用 verify id：不得继承上一轮的 completed', () => {
+    const oldPlan = applyTodoToolRequest(
+      null,
+      {
+        tasks: [
+          { id: 'podcast-ui', title: '播客菜单', description: '' },
+          { id: 'verify', title: '编译与实跑验证', description: '' },
+        ],
+      },
+      { creationOpen: true, defaultGoal: '主界面当前播放 + 播客' }
+    ).ctx;
+    const oldDone = updateTodoList(oldPlan, [
+      { id: 'podcast-ui', status: 'completed' },
+      { id: 'verify', status: 'completed', summary: '上一轮完成' },
+    ]);
+
+    // 下一条用户消息（新目标）开启新的创建窗口
+    const next = applyTodoToolRequest(
+      oldDone,
+      {
+        tasks: [
+          { id: 'island-row', title: '灵动岛那一行纳入显示屏', description: '' },
+          { id: 'lyrics-core', title: '歌词解析核心', description: '' },
+          { id: 'verify', title: '验证', description: '' },
+        ],
+      },
+      { creationOpen: true, defaultGoal: '1、能不能显示歌词？\n2、灵动岛那一行纳入显示屏？' }
+    );
+
+    expect(next.created).toBe(true);
+    expect(next.ctx.tasks.find((t) => t.id === 'verify')!.status).toBe('pending');
+    const digest = renderTodoListDigest(next.ctx);
+    expect(digest).toContain('○ verify');
+    expect(digest).not.toContain('✓ verify');
   });
 });
 

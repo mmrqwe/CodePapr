@@ -21,6 +21,8 @@ export interface TaskChecklist {
   title: string;
   items: TaskChecklistItem[];
   status: TaskChecklistStatus;
+  /** 系统推导的当前任务（core inferCurrentTaskId：running 优先，否则第一个可跑的 pending）。 */
+  currentTaskId: string | null;
   createdAt: number;
   updatedAt: number;
 }

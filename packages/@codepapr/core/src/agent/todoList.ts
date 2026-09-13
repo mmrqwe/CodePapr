@@ -147,25 +147,33 @@ export function createEmptyTodoListContext(goal: string): TodoListContext {
 /**
  * 用一组完整的任务定义覆盖 / 初始化 TodoList。
  * 仅由 applyTodoToolRequest 在创建窗口开启时调用（每个用户回合至多一次）。
+ *
+ * 继承边界：只有**目标未变**（同一计划的续用 / 重排）才沿用同 id 任务的
+ * 状态与 summary；目标已变（新用户消息带来新目标）＝ 全新清单，全部从
+ * pending 起步、createdAt 重算。否则上一轮的 `✓ verify` 会原样出现在新
+ * 目标的清单里（iPod 会话事故：新目标创建时末项验证已打勾，模型数分钟后
+ * 才手动改回 pending）。新目标下确需保留完成态的任务，显式传 status。
  */
 export function writeTodoList(
   previous: TodoListContext | null,
   goal: string,
   rawTasks: readonly RawTaskInput[]
 ): TodoListContext {
+  const resolvedGoal = goal.trim() || previous?.goal || '';
+  const inheritable = previous && resolvedGoal === previous.goal ? previous : null;
   const tasks = rawTasks.map((raw, index) => {
-    const existing = previous?.tasks.find((task) =>
+    const existing = inheritable?.tasks.find((task) =>
       typeof raw.id === 'string' && task.id === normalizeId(raw.id, '')
     );
     return normalizeTask(raw, index, existing);
   });
 
   return {
-    goal: goal.trim() || previous?.goal || '',
+    goal: resolvedGoal,
     tasks,
     currentTaskId: inferCurrentTaskId(tasks),
     status: computeAggregateStatus(tasks),
-    createdAt: previous?.createdAt ?? Date.now(),
+    createdAt: inheritable ? inheritable.createdAt : Date.now(),
     updatedAt: Date.now(),
   };
 }
@@ -324,14 +332,20 @@ export function buildTodoToolDefinition(): IToolDefinition {
         tasks: {
           type: 'array',
           description:
-            '创建任务清单（全量覆盖），每个用户回合至多一次。沿用旧清单中相同 id 的任务会保留'
-            + '其状态与 summary，其余字段整体替换。与 updates 参数互斥。',
+            '创建任务清单（全量覆盖），每个用户回合至多一次。目标与上一版清单相同（续用/重排'
+            + '同一计划）时，同 id 任务保留其状态与 summary；目标已变化（新用户消息＝新目标）'
+            + '时全部从 pending 起步，需要保留完成态的任务请显式传 status。与 updates 参数互斥。',
           items: {
             type: 'object',
             properties: {
               id: { type: 'string', description: 'kebab-case 唯一 ID，例如 add-auth-router。' },
               title: { type: 'string', description: '一行简述。' },
               description: { type: 'string', description: '完成标准（Definition of Done），尽量具体到文件或验证命令。' },
+              status: {
+                type: 'string',
+                enum: ['pending', 'running', 'completed', 'failed'],
+                description: '（可选，一般不填）显式初始状态；新目标创建时只有这里声明的状态会被采用。',
+              },
               dependsOn: {
                 type: 'array',
                 items: { type: 'string' },
