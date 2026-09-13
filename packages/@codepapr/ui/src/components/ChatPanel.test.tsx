@@ -39,6 +39,7 @@ import {
 import type { CharacterProfile } from '../utils/characterTypes';
 import type { WorkMode } from '../utils/agentPrompts';
 import type { IImageContent } from '@codepapr/types';
+import { estimateMessageHeight } from '../utils/messageWindow';
 import { ChatPanel } from './ChatPanel';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
@@ -1404,6 +1405,51 @@ describe('ChatPanel', () => {
       );
     }
 
+    // 执行型回合：user + 过程消息 + agent 摘要。过程消息会被折叠进
+    // ExecutionProcessPanel（不进入 DOM），只有摘要消息实际渲染。
+    function setExecutionConversation(rounds: number, batchRounds: number) {
+      const messages: UIMessage[] = [];
+      for (let i = 1; i <= rounds; i++) {
+        messages.push({ id: `user-${i}`, role: 'user', content: `执行任务 ${i}`, timestamp: i * 10 - 9 });
+        messages.push({
+          id: `process-${i}`,
+          role: 'assistant',
+          content: `处理过程 ${i}`,
+          toolInvocations: [
+            {
+              id: `tool-${i}`,
+              name: 'workspace_run_command',
+              arguments: { command: 'npm', args: ['test'] },
+              status: 'success',
+              output: 'ok',
+            },
+          ],
+          timestamp: i * 10 - 8,
+        });
+        messages.push({
+          id: `summary-${i}`,
+          role: 'assistant',
+          workMode: 'agent',
+          content: `执行总结 ${i}`,
+          timestamp: i * 10 - 7,
+        });
+      }
+      useAgentStore.setState((state) => ({
+        ...state,
+        settings: normalizeSettings({ fastModelEnabled: false, chatRenderBatchRounds: batchRounds }),
+        sessions: [
+          { id: 'session-1', name: '会话 1', provider: 'deepseek', model: 'deepseek-v4-pro', createdAt: 1, updatedAt: 1 },
+        ],
+        activeSessionId: 'session-1',
+        messages,
+        sessionMessages: { 'session-1': messages },
+        sessionMessagesLoading: false,
+        isLoading: false,
+        loadingSessionId: null,
+        _pendingChatJump: null,
+      }));
+    }
+
     it('renders only the latest N rounds at first with a top spacer for unloaded history', async () => {
       setLongConversation(10, 3);
 
@@ -1629,6 +1675,76 @@ describe('ChatPanel', () => {
 
       // 窗口未移动：第 7 轮仍未渲染；但发生了滚动
       expect(container.querySelector('[data-message-id="user-7"]')).toBeNull();
+      expect(scrollToMock).toHaveBeenCalled();
+    });
+
+    it('keeps following the viewport after a programmatic jump once the user scrolls', async () => {
+      setLongConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+      expect(container.querySelector('[data-message-id="user-10"]')).not.toBeNull();
+
+      // 跳到最早一轮：窗口移到头部，程序化滚动闩锁置位
+      await act(async () => {
+        useAgentStore.getState().requestChatScrollToMessage('user-1');
+      });
+      expect(container.querySelector('[data-message-id="user-1"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-10"]')).toBeNull();
+
+      // 用户滚到底部：闩锁必须解开，窗口重新贴尾
+      const scrollContainer = container.querySelector('[data-chat-scroll="true"]') as HTMLElement;
+      await act(async () => {
+        scrollContainer.dispatchEvent(new Event('wheel', { bubbles: true }));
+        Object.defineProperty(scrollContainer, 'scrollTop', { value: 1_000_000, writable: true, configurable: true });
+        scrollContainer.dispatchEvent(new Event('scroll'));
+      });
+      await act(async () => {
+        flushRAF();
+      });
+
+      expect(container.querySelector('[data-message-id="user-10"]')).not.toBeNull();
+      expect(container.querySelector('[data-message-id="user-1"]')).toBeNull();
+    });
+
+    it('excludes folded process messages from the spacer geometry', async () => {
+      setExecutionConversation(10, 3);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+
+      // 渲染列表 = user + 摘要（过程消息被折叠）；窗口为最近 3 轮（8-10），
+      // 顶部占位只应包含前 7 轮中真实渲染消息的高度。
+      const rendered = useAgentStore
+        .getState()
+        .messages.filter((message) => !message.id.startsWith('process-'));
+      const start = rendered.findIndex((message) => message.id === 'user-8');
+      const expected = rendered
+        .slice(0, start)
+        .reduce((sum, message) => sum + estimateMessageHeight(message), 0);
+
+      const topSpacer = container.querySelector('[data-chat-scroll] [aria-hidden]') as HTMLElement | null;
+      expect(topSpacer).not.toBeNull();
+      expect(parseInt(topSpacer!.style.height, 10)).toBe(expected);
+    });
+
+    it('resolves a jump to a folded process message to its round summary', async () => {
+      setExecutionConversation(2, 6);
+
+      await act(async () => {
+        root.render(<ChatPanel />);
+      });
+      expect(container.querySelector('[data-message-id="process-1"]')).toBeNull();
+      expect(container.querySelector('[data-message-id="summary-1"]')).not.toBeNull();
+      scrollToMock.mockClear();
+
+      await act(async () => {
+        useAgentStore.getState().requestChatScrollToMessage('process-1');
+      });
+
+      // 目标被折叠：改跳到所在回合的摘要，而不是查不到 DOM 后什么都不做
       expect(scrollToMock).toHaveBeenCalled();
     });
   });

@@ -320,6 +320,30 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     () => new Set(executionProcessGroups.flatMap((group) => group.messages.map((message) => message.id))),
     [executionProcessGroups]
   );
+  // 实际进入 DOM 的消息列表：折叠进执行过程面板的过程消息不渲染。虚拟滚动的
+  // 几何（轮次边界、窗口切片、高度/占位、视口反查）必须基于这份列表，否则模型
+  // 会把未渲染消息的高度也算进去，导致指示器轮次与跳转定位整体偏移。
+  const renderMessages = useMemo(
+    () =>
+      hiddenProcessMessageIds.size === 0
+        ? visibleMessages
+        : visibleMessages.filter((message) => !hiddenProcessMessageIds.has(message.id)),
+    [visibleMessages, hiddenProcessMessageIds]
+  );
+  const renderMessagesRef = useRef(renderMessages);
+  renderMessagesRef.current = renderMessages;
+  // 过程消息 id → 所在回合摘要 id。跳转命中被折叠的消息时改跳到摘要（面板入口）。
+  const foldedSummaryByMessageId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of executionProcessGroups) {
+      for (const message of group.messages) {
+        map.set(message.id, group.summaryMessageId);
+      }
+    }
+    return map;
+  }, [executionProcessGroups]);
+  const foldedSummaryByMessageIdRef = useRef(foldedSummaryByMessageId);
+  foldedSummaryByMessageIdRef.current = foldedSummaryByMessageId;
   const hasStreamingMessage = useMemo(
     () => visibleMessages.some(
       (message) => message.role === 'assistant' && message.isStreaming
@@ -620,8 +644,8 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   // —— 历史滑动窗口渲染 ——
   // DOM 里恒定只保留约 N 轮：上滑时窗口整体上移（加载更早的轮、卸载下面的轮），
   // 下滑反之；滚回底部时窗口重新贴合尾部。完整 visibleMessages 仍供 LLM 上下文/
-  // TTS/搜索使用，这里只裁剪渲染范围。未渲染区域用占位块撑起滚动高度，占位高度
-  // 取自高度缓存（渲染时实测）或对未渲染过消息的估算。
+  // TTS/搜索使用；渲染与几何（窗口、占位、视口反查）一律基于 renderMessages（已
+  // 过滤折叠进过程面板的过程消息），保证模型坐标与真实 DOM 一致。
   const chatRenderBatchRounds = Math.max(1, settings.chatRenderBatchRounds || 6);
   const slideStepRounds = Math.max(1, Math.ceil(chatRenderBatchRounds / 2));
   const chatRenderBatchRoundsRef = useRef(chatRenderBatchRounds);
@@ -629,7 +653,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   const slideStepRoundsRef = useRef(slideStepRounds);
   slideStepRoundsRef.current = slideStepRounds;
 
-  const roundStarts = useMemo(() => computeRoundStartIndices(visibleMessages), [visibleMessages]);
+  const roundStarts = useMemo(() => computeRoundStartIndices(renderMessages), [renderMessages]);
   const totalRounds = roundStarts.length;
   const roundStartsRef = useRef(roundStarts);
   roundStartsRef.current = roundStarts;
@@ -644,6 +668,9 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   const windowSessionKeyRef = useRef<string | null>(null);
   // 跳转 / 打开会话后的程序化滚动期间暂缓窗口重定位，直到用户下一次主动滚动。
   const jumpScrollSuppressRef = useRef(false);
+  // 程序化滚动的目标位置；到达后即可判定该次滚动结束（拖滚动条等没有 wheel
+  // 事件的场景的兜底）。null 表示没有明确像素目标（如滚到底部）。
+  const programmaticScrollTargetRef = useRef<number | null>(null);
 
   // 防御：会话切换/截断的同一帧里窗口可能越界，先收敛再使用。
   const effectiveRoundWindow = useMemo(
@@ -652,21 +679,23 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   );
 
   const windowBounds = useMemo(
-    () => windowMessageBounds(visibleMessages, effectiveRoundWindow),
-    [visibleMessages, effectiveRoundWindow]
+    () => windowMessageBounds(renderMessages, effectiveRoundWindow),
+    [renderMessages, effectiveRoundWindow]
   );
+  const windowBoundsRef = useRef(windowBounds);
+  windowBoundsRef.current = windowBounds;
   const windowedMessages = useMemo(
-    () => visibleMessages.slice(windowBounds.start, windowBounds.end),
-    [visibleMessages, windowBounds]
+    () => renderMessages.slice(windowBounds.start, windowBounds.end),
+    [renderMessages, windowBounds]
   );
 
   // 高度缓存：消息 ID → 实测像素高度。跨会话保留（ID 唯一），回访时占位精确。
   const heightCacheRef = useRef(new Map<string, number>());
   const messageHeights = useMemo(
-    () => visibleMessages.map((m) => heightCacheRef.current.get(m.id) ?? estimateMessageHeight(m)),
+    () => renderMessages.map((m) => heightCacheRef.current.get(m.id) ?? estimateMessageHeight(m)),
     // effectiveRoundWindow 入依赖：窗口滑动后必须用最新缓存重算占位高度。
     // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
-    [visibleMessages, effectiveRoundWindow]
+    [renderMessages, effectiveRoundWindow]
   );
   const prefixHeights = useMemo(() => {
     const prefix = new Array<number>(messageHeights.length + 1);
@@ -677,7 +706,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     return prefix;
   }, [messageHeights]);
   const topSpacerHeight = prefixHeights[windowBounds.start];
-  const bottomSpacerHeight = prefixHeights[visibleMessages.length] - prefixHeights[windowBounds.end];
+  const bottomSpacerHeight = prefixHeights[renderMessages.length] - prefixHeights[windowBounds.end];
   const topSpacerHeightRef = useRef(topSpacerHeight);
   topSpacerHeightRef.current = topSpacerHeight;
   const prefixHeightsRef = useRef(prefixHeights);
@@ -803,25 +832,45 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     setRoundWindow(next);
   }, []);
 
+  // 视口中心 → 轮次的统一换算：按与占位同一份高度模型从 scrollTop 反查。模型
+  // 坐标与真实滚动坐标之间有一个固定偏差（容器内边距、「加载更早」哨兵按钮），
+  // 用窗口内首个已渲染项校准；无布局环境（offsetTop=0）等异常值不应用。
+  const resolveViewportRound = useCallback(() => {
+    const container = messageListRef.current;
+    const msgs = renderMessagesRef.current;
+    const starts = roundStartsRef.current;
+    if (!container || msgs.length === 0 || starts.length === 0) return null;
+    const prefix = prefixHeightsRef.current;
+    let centerOffset = container.scrollTop + container.clientHeight / 2;
+    const firstItem = container.querySelector('[data-window-item]') as HTMLElement | null;
+    if (firstItem) {
+      const start = Math.max(0, Math.min(windowBoundsRef.current.start, prefix.length - 1));
+      const delta = firstItem.offsetTop - prefix[start];
+      if (delta >= 0 && delta <= 500) centerOffset -= delta;
+    }
+    const messageIndex = findMessageIndexAtOffset(prefix, centerOffset);
+    return { centerOffset, round: findRoundIndexAtMessageIndex(starts, messageIndex) };
+  }, []);
+
   // 窗口跟随视口：滚动（含拖滚动条、打开会话的滚到底部、跳转后的滚动）时，
   // 按视口中心所在轮重定位窗口。占位块总高恒定，移动窗口不会改变 scrollTop，
   // 因此没有反馈环。仅当视口中心移出当前窗口才重定位，避免频繁重渲染。
   const placeRafRef = useRef(0);
   const placeWindowFromScroll = useCallback(() => {
     const container = messageListRef.current;
-    const msgs = visibleMessagesRef.current;
+    const msgs = renderMessagesRef.current;
     const starts = roundStartsRef.current;
     if (!container || msgs.length === 0 || starts.length === 0) return;
-    const prefix = prefixHeightsRef.current;
-    const centerOffset = container.scrollTop + container.clientHeight / 2;
-    const messageIndex = findMessageIndexAtOffset(prefix, centerOffset);
-    const centerRound = findRoundIndexAtMessageIndex(starts, messageIndex);
-    setViewportRoundIndex((prev) => (prev === centerRound + 1 ? prev : centerRound + 1));
+    const resolved = resolveViewportRound();
+    if (!resolved) return;
+    setViewportRoundIndex((prev) => (prev === resolved.round + 1 ? prev : resolved.round + 1));
     if (jumpScrollSuppressRef.current) return;
     const current = roundWindowRef.current;
-    if (centerRound >= current.lo && centerRound < current.hi) return;
-    setRoundWindow(computeWindowForViewport(msgs, prefix, centerOffset, chatRenderBatchRoundsRef.current));
-  }, []);
+    if (resolved.round >= current.lo && resolved.round < current.hi) return;
+    setRoundWindow(
+      computeWindowForViewport(msgs, prefixHeightsRef.current, resolved.centerOffset, chatRenderBatchRoundsRef.current)
+    );
+  }, [resolveViewportRound]);
   const handleScrollPlace = useCallback(() => {
     if (placeRafRef.current) return;
     placeRafRef.current = requestAnimationFrame(() => {
@@ -831,40 +880,64 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
   }, [placeWindowFromScroll]);
   useEffect(() => () => { cancelAnimationFrame(placeRafRef.current); }, []);
 
+  // 用户主动滚动意图：wheel / 指针按下 / 触摸都会把上一次程序化滚动的闩锁
+  // 解开，否则跳转后一旦没滚回底部，后续所有滚动都会被当成程序化滚动，窗口
+  // 不再跟随视口（表现为滚进占位区一片空白）。
+  const handleUserScrollIntent = useCallback(() => {
+    isProgrammaticScrollRef.current = false;
+    programmaticScrollTargetRef.current = null;
+    jumpScrollSuppressRef.current = false;
+  }, []);
+
+  // 程序化滚动结束事件（新 WebKit 支持）兜底解除闩锁。
+  useEffect(() => {
+    const container = messageListRef.current;
+    if (!container || !('onscrollend' in container)) return;
+    const handleScrollEnd = () => { isProgrammaticScrollRef.current = false; };
+    container.addEventListener('scrollend', handleScrollEnd);
+    return () => container.removeEventListener('scrollend', handleScrollEnd);
+  }, []);
+
   // 窗口/消息变化后同步一次指示器轮次（如流式追加、切换会话后未发生滚动）。
   useLayoutEffect(() => {
-    const container = messageListRef.current;
-    const starts = roundStartsRef.current;
-    if (!container || starts.length === 0) return;
-    const prefix = prefixHeightsRef.current;
-    const centerOffset = container.scrollTop + container.clientHeight / 2;
-    const round = findRoundIndexAtMessageIndex(
-      starts,
-      findMessageIndexAtOffset(prefix, centerOffset)
-    );
-    setViewportRoundIndex((prev) => (prev === round + 1 ? prev : round + 1));
-  }, [roundWindow, visibleMessages]);
+    const resolved = resolveViewportRound();
+    if (!resolved) return;
+    setViewportRoundIndex((prev) => (prev === resolved.round + 1 ? prev : resolved.round + 1));
+  }, [roundWindow, visibleMessages, resolveViewportRound]);
 
   // 跳转到指定消息：窗口外先移动窗口，渲染后再滚动；已在窗口内则直接滚动。
+  // 目标被折叠进执行过程面板（如搜索命中过程消息）时，改跳到所在回合的摘要。
   const scrollToMessageInView = useCallback((messageId: string) => {
-    const msgs = visibleMessagesRef.current;
-    const index = msgs.findIndex((m) => m.id === messageId);
+    const msgs = renderMessagesRef.current;
+    let targetId = messageId;
+    let index = msgs.findIndex((m) => m.id === targetId);
+    if (index < 0) {
+      const summaryId = foldedSummaryByMessageIdRef.current.get(messageId);
+      if (summaryId) {
+        targetId = summaryId;
+        index = msgs.findIndex((m) => m.id === targetId);
+      }
+    }
     if (index < 0) return;
+    shouldStickToBottomRef.current = false;
     jumpScrollSuppressRef.current = true;
     const bounds = windowMessageBounds(msgs, roundWindowRef.current);
     if (index < bounds.start || index >= bounds.end) {
-      pendingScrollToIdRef.current = messageId;
+      pendingScrollToIdRef.current = targetId;
       isProgrammaticScrollRef.current = true;
+      programmaticScrollTargetRef.current = null;
       setRoundWindow(computeWindowForJump(msgs, index, chatRenderBatchRoundsRef.current));
       return;
     }
     const container = messageListRef.current;
-    const el = container?.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+    const el = container?.querySelector(`[data-message-id="${targetId}"]`) as HTMLElement | null;
     if (container && el) {
       isProgrammaticScrollRef.current = true;
-      container.scrollTo?.({ top: Math.max(0, el.offsetTop - 80), behavior: 'smooth' });
+      const targetTop = Math.max(0, el.offsetTop - 80);
+      programmaticScrollTargetRef.current = targetTop;
+      container.scrollTo?.({ top: targetTop, behavior: 'smooth' });
     } else {
-      pendingScrollToIdRef.current = messageId;
+      pendingScrollToIdRef.current = targetId;
     }
   }, []);
 
@@ -877,8 +950,10 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     if (!el) return;
     pendingScrollToIdRef.current = null;
     isProgrammaticScrollRef.current = true;
-    container.scrollTop = Math.max(0, el.offsetTop - 80);
-  }, [roundWindow, visibleMessages]);
+    const targetTop = Math.max(0, el.offsetTop - 80);
+    programmaticScrollTargetRef.current = targetTop;
+    container.scrollTop = targetTop;
+  }, [roundWindow, visibleMessages, deferMessages]);
 
   // 跨面板跳转请求（如 AgentOpsPanel 里的会话搜索）。
   const pendingChatJump = useAgentStore((s) => s._pendingChatJump);
@@ -887,13 +962,6 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     scrollToMessageInView(pendingChatJump.messageId);
     useAgentStore.setState({ _pendingChatJump: null });
   }, [pendingChatJump, scrollToMessageInView]);
-
-  const renderedMessages = useMemo(() => {
-    if (hiddenProcessMessageIds.size === 0) {
-      return windowedMessages;
-    }
-    return windowedMessages.filter((message) => !hiddenProcessMessageIds.has(message.id));
-  }, [windowedMessages, hiddenProcessMessageIds]);
 
   useLayoutEffect(() => {
     lastVisibleMessageIdRef.current = tailMessageId;
@@ -1542,15 +1610,27 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
         ref={messageListRef}
         data-chat-scroll="true"
         onScroll={(event) => {
+          // 程序化滚动到达目标后立即解除闩锁（拖滚动条没有 wheel 事件的兜底）。
+          if (isProgrammaticScrollRef.current) {
+            const target = programmaticScrollTargetRef.current;
+            if (target !== null && Math.abs(event.currentTarget.scrollTop - target) <= 2) {
+              isProgrammaticScrollRef.current = false;
+              programmaticScrollTargetRef.current = null;
+            }
+          }
           if (!isProgrammaticScrollRef.current) {
             shouldStickToBottomRef.current = isScrollContainerNearBottom(event.currentTarget);
             jumpScrollSuppressRef.current = false;
           }
           if (isScrollContainerNearBottom(event.currentTarget)) {
             isProgrammaticScrollRef.current = false;
+            programmaticScrollTargetRef.current = null;
           }
           handleScrollPlace();
         }}
+        onWheel={handleUserScrollIntent}
+        onPointerDown={handleUserScrollIntent}
+        onTouchStart={handleUserScrollIntent}
         className="h-full overflow-y-auto overscroll-contain scrollbar-thin scrollbar-stable px-4 py-4"
         style={{ overflowAnchor: 'none' }}
       >
@@ -1566,7 +1646,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
             topSpacerHeight={topSpacerHeight}
             bottomSpacerHeight={bottomSpacerHeight}
             subagentRuns={subagentRuns}
-            renderedMessages={renderedMessages}
+            renderedMessages={windowedMessages}
             processGroupsBySummaryId={processGroupsBySummaryId}
             latestPlanAssistantMessageId={latestPlanAssistantMessageId}
             tailMessageId={tailMessageId}
