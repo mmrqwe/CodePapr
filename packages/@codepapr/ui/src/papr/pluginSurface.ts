@@ -150,8 +150,8 @@ export function shouldRevealOnPublish(
 
 export function defaultPluginPlacement(manifest: PaprManifest | null | undefined): PluginPlacement {
   if (manifest?.surface?.type === 'panel') return 'right';
-  if (manifest?.surface?.type === 'overlay') return 'float';
-  return pluginHasInbox(manifest) ? 'right' : 'float';
+  if (pluginHasInbox(manifest)) return 'right';
+  return 'float';
 }
 
 /** 用户显式 placement 优先。有几何的旧 chrome 一律 float，避免升级吞掉工作台。 */

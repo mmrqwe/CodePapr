@@ -69,9 +69,18 @@ describe('pluginSurface', () => {
     const ticker = { spec: 'papr/0.1' as const, name: '行情', kind: 'plugin' as const };
     expect(defaultPluginPlacement(board)).toBe('right');
     expect(defaultPluginPlacement(ticker)).toBe('float');
+    expect(
+      defaultPluginPlacement({
+        ...board,
+        surface: { type: 'overlay', width: 420, height: 280, position: 'top-right' },
+      }),
+    ).toBe('right');
+    expect(defaultPluginPlacement({ ...ticker, surface: { type: 'panel', width: 320, height: 200 } })).toBe('right');
+    expect(defaultPluginPlacement({ ...ticker, surface: { type: 'overlay', width: 320, height: 200 } })).toBe('float');
     expect(resolveShowPlacement(board, undefined)).toBe('right');
     expect(resolveShowPlacement(board, { x: 10, y: 20 })).toBe('float');
     expect(resolveShowPlacement(board, { placement: 'right', x: 10, y: 20 })).toBe('right');
+    expect(resolveShowPlacement(board, { placement: 'float' })).toBe('float');
     expect(selectDockedPluginId({
       apps: [{ appId: 'board', manifestJson: JSON.stringify(board) }],
       pinnedPluginIds: ['board'],

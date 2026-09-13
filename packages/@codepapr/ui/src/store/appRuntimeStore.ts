@@ -242,10 +242,11 @@ export const useAppRuntimeStore = create<AppRuntimeState>()((set, get) => ({
             )
           : [...state.apps, instance];
 
+      const isPlugin = isPluginApp({ manifestJson: input.manifestJson });
       return {
         apps: nextApps,
         activeAppId: input.appId,
-        mountSignal: opts?.silent ? state.mountSignal : state.mountSignal + 1,
+        mountSignal: opts?.silent || isPlugin ? state.mountSignal : state.mountSignal + 1,
       };
     });
   },

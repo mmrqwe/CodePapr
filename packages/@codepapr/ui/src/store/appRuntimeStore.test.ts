@@ -64,6 +64,28 @@ describe('appRuntimeStore plugins', () => {
     expect(useAppRuntimeStore.getState().mountSignal).toBe(1);
   });
 
+  it('does not bump mountSignal when mounting a plugin', () => {
+    useAppRuntimeStore.setState({ mountSignal: 0 });
+    useAppRuntimeStore.getState().mountApp({
+      appId: 'ticker',
+      title: 'Ticker',
+      html: '',
+      filePath: 'y',
+      manifestJson: pluginManifest,
+    });
+    expect(useAppRuntimeStore.getState().mountSignal).toBe(0);
+    expect(useAppRuntimeStore.getState().apps.map((app) => app.appId)).toEqual(['ticker']);
+
+    useAppRuntimeStore.getState().mountApp({
+      appId: 'dash',
+      title: 'Dash',
+      html: '',
+      filePath: 'x',
+      manifestJson: JSON.stringify({ spec: 'papr/0.1', name: 'Dash', kind: 'app' }),
+    });
+    expect(useAppRuntimeStore.getState().mountSignal).toBe(1);
+  });
+
   it('unpin keeps overlay geometry and stays enabled', () => {
     mountTicker();
     useAppRuntimeStore.getState().pinPlugin('ticker');
@@ -141,6 +163,25 @@ describe('appRuntimeStore plugins', () => {
     expect(useAppRuntimeStore.getState().pluginChrome.hidden.enabled).toBe(false);
     expect(useAppRuntimeStore.getState().pluginChrome.ticker.visible).toBe(true);
     expect(useAppRuntimeStore.getState().pluginChrome.hidden.visible).toBe(false);
+  });
+
+  it('docks inbox plugins on first pin even when the manifest declares an overlay surface', () => {
+    useAppRuntimeStore.getState().mountApp({
+      appId: 'board',
+      title: 'Board',
+      html: '',
+      filePath: 'z',
+      manifestJson: JSON.stringify({
+        spec: 'papr/0.1',
+        name: 'Board',
+        kind: 'plugin',
+        surface: { type: 'overlay', width: 420, height: 280, position: 'top-right' },
+        inbox: { cards: { description: '卡片' } },
+      }),
+    });
+    useAppRuntimeStore.getState().pinPlugin('board');
+    expect(useAppRuntimeStore.getState().pinnedPluginIds).toEqual(['board']);
+    expect(useAppRuntimeStore.getState().pluginChrome.board.placement).toBe('right');
   });
 
   it('docks one plugin at a time and undocks back to float', () => {
