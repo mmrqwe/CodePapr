@@ -51,11 +51,50 @@ function normalizeStringArray(value: unknown, max: number = 16): string[] {
     .slice(0, max);
 }
 
-function normalizeStatus(value: unknown): TaskStatus {
-  if (value === 'pending' || value === 'running' || value === 'completed' || value === 'failed') {
-    return value;
+/**
+ * 状态别名表：模型经常用近义写法（in_progress / done / wip…），按规范值收敛。
+ * 未知字符串返回 undefined——调用方据此决定是回退 pending（创建路径）还是
+ * 保持原状态不动（updates 路径），绝不把非法状态写进清单。
+ */
+const TASK_STATUS_ALIASES: Record<string, TaskStatus> = {
+  pending: 'pending',
+  todo: 'pending',
+  open: 'pending',
+  queued: 'pending',
+  new: 'pending',
+  not_started: 'pending',
+  running: 'running',
+  in_progress: 'running',
+  doing: 'running',
+  active: 'running',
+  started: 'running',
+  wip: 'running',
+  completed: 'completed',
+  complete: 'completed',
+  done: 'completed',
+  finished: 'completed',
+  success: 'completed',
+  succeeded: 'completed',
+  resolved: 'completed',
+  failed: 'failed',
+  fail: 'failed',
+  failure: 'failed',
+  error: 'failed',
+  errored: 'failed',
+  blocked: 'failed',
+};
+
+/** 解析状态字符串为规范值；大小写/空格/连字符不敏感，未知值返回 undefined。 */
+function parseTaskStatus(value: unknown): TaskStatus | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
   }
-  return 'pending';
+  const key = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return TASK_STATUS_ALIASES[key];
+}
+
+function normalizeStatus(value: unknown): TaskStatus {
+  return parseTaskStatus(value) ?? 'pending';
 }
 
 interface RawTaskInput {
@@ -195,7 +234,9 @@ export function parseTodoUpdatePatches(rawUpdates: unknown): TodoUpdatePatch[] {
     .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
     .map((item) => ({
       id: typeof item.id === 'string' ? item.id.trim() : '',
-      status: typeof item.status === 'string' ? (item.status as TaskStatus) : undefined,
+      // 非法/未知状态不写入：保持原状态，其余字段照常生效（避免 in_progress
+      // 这类非规范值绕过派生逻辑，把清单永久卡在 active）。
+      status: parseTaskStatus(item.status),
       summary: typeof item.summary === 'string' ? item.summary : undefined,
       errorLog: typeof item.errorLog === 'string' ? item.errorLog : undefined,
       touchedArtifacts: Array.isArray(item.touchedArtifacts)
@@ -247,22 +288,34 @@ export function updateTodoList(
   };
 }
 
+function isTerminalTaskStatus(status: TaskStatus): boolean {
+  return status === 'completed' || status === 'failed';
+}
+
+/** 非 pending 且非终态的「在飞/未知」状态：running，或历史数据里的非规范值。 */
+function isUnsettledTaskStatus(status: TaskStatus): boolean {
+  return status !== 'pending' && !isTerminalTaskStatus(status);
+}
+
 /**
  * 收敛未确认的 running 任务：回合结束（正常/取消/出错）或会话恢复时，若清单
  * 仍 active 且有 running 任务，说明模型忘了调用 todo 工具同步——running 是
  * "正在执行"的承诺，而没有在飞回合就不可能"正在执行"。诚实策略：退回
  * pending 并写 errorLog 标记未确认，绝不伪造 completed（完成与否交由下一
  * 回合的模型或用户根据 digest 核对）。无 running 任务时原样返回（同引用）。
+ *
+ * 兼容性：历史数据里可能存有非规范状态（如模型直写 in_progress 漏进来的），
+ * 同属"未确认在飞"，一并收敛回 pending，避免清单永久卡在 active。
  */
 export function convergeUnconfirmedRunningTasks(
   ctx: TodoListContext,
   reason: string = '回合结束未确认'
 ): TodoListContext {
-  if (!ctx.tasks.some((task) => task.status === 'running')) {
+  if (!ctx.tasks.some((task) => isUnsettledTaskStatus(task.status))) {
     return ctx;
   }
   const tasks = ctx.tasks.map((task) =>
-    task.status === 'running'
+    isUnsettledTaskStatus(task.status)
       ? { ...task, status: 'pending' as TaskStatus, errorLog: reason }
       : task
   );
@@ -281,7 +334,7 @@ export function convergeUnconfirmedRunningTasks(
  */
 export function hasUnsettledTodoTasks(ctx: TodoListContext | null | undefined): boolean {
   if (!ctx || ctx.status !== 'active') return false;
-  return ctx.tasks.some((task) => task.status === 'running' || task.status === 'pending');
+  return ctx.tasks.some((task) => !isTerminalTaskStatus(task.status));
 }
 
 /**

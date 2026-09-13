@@ -276,6 +276,61 @@ describe('updateTodoList（回合内进度通道，光标只派生不推进）',
   });
 });
 
+describe('updates 状态别名规范化（iPod 会话 in_progress 卡单事故回放）', () => {
+  function plan(): TodoListContext {
+    return writeTodoList(null, 'g', [
+      { id: 'a', title: 'A', description: 'a', status: 'completed' },
+      { id: 'b', title: 'B', description: 'b' },
+    ]);
+  }
+
+  it('in_progress 归一为 running，光标跟随、清单仍 active', () => {
+    const result = applyTodoToolRequest(
+      plan(),
+      { updates: [{ id: 'b', status: 'in_progress', summary: '进行中' }] },
+      { creationOpen: false, defaultGoal: 'g' }
+    );
+
+    const task = result.ctx.tasks.find((t) => t.id === 'b')!;
+    expect(task.status).toBe('running');
+    expect(task.summary).toBe('进行中');
+    expect(result.ctx.currentTaskId).toBe('b');
+    expect(result.ctx.status).toBe('active');
+  });
+
+  it('done/finished 等近义值归一为 completed，全部终结时清单收敛', () => {
+    const result = applyTodoToolRequest(
+      plan(),
+      { updates: [{ id: 'b', status: 'Done', summary: '完成' }] },
+      { creationOpen: false, defaultGoal: 'g' }
+    );
+
+    expect(result.ctx.tasks.find((t) => t.id === 'b')!.status).toBe('completed');
+    expect(result.ctx.status).toBe('completed');
+    expect(result.ctx.currentTaskId).toBeNull();
+  });
+
+  it('未知状态不写入：状态保持原样，其余字段照常生效', () => {
+    const running = updateTodoList(plan(), [{ id: 'b', status: 'running' }]);
+    const result = applyTodoToolRequest(
+      running,
+      { updates: [{ id: 'b', status: '待办中??', summary: '不能覆盖状态' }] },
+      { creationOpen: false, defaultGoal: 'g' }
+    );
+
+    const task = result.ctx.tasks.find((t) => t.id === 'b')!;
+    expect(task.status).toBe('running');
+    expect(task.summary).toBe('不能覆盖状态');
+  });
+
+  it('创建路径同样接受别名（normalizeStatus）', () => {
+    const ctx = writeTodoList(null, 'g', [
+      { id: 'a', title: 'A', description: 'a', status: 'in-progress' as never },
+    ]);
+    expect(ctx.tasks[0]!.status).toBe('running');
+  });
+});
+
 describe('applyTodoToolRequest（创建窗口闸门——本回合一次创建，其余全走 updates）', () => {
   const tasksArg = [
     { id: 'a', title: 'A', description: 'a' },
@@ -548,6 +603,42 @@ describe('convergeUnconfirmedRunningTasks（未确认 running 收敛）', () => 
   it('支持自定义原因（恢复钩子用）', () => {
     const next = convergeUnconfirmedRunningTasks(planWithRunning(), '进程退出前回合未确认');
     expect(next.tasks.find((t) => t.id === 'add-form')!.errorLog).toBe('进程退出前回合未确认');
+  });
+
+  it('历史非规范状态（in_progress）也收敛回 pending 并写 errorLog', () => {
+    const legacy = {
+      goal: 'g',
+      tasks: [
+        { id: 'a', title: 'A', description: 'a', status: 'completed' },
+        { id: 'b', title: 'B', description: 'b', status: 'in_progress' },
+      ],
+      currentTaskId: null,
+      status: 'active',
+      createdAt: 1,
+      updatedAt: 1,
+    } as unknown as TodoListContext;
+
+    const next = convergeUnconfirmedRunningTasks(legacy);
+    const task = next.tasks.find((t) => t.id === 'b')!;
+    expect(task.status).toBe('pending');
+    expect(task.errorLog).toBe('回合结束未确认');
+    expect(next.currentTaskId).toBe('b');
+    // 非法状态不能再让清单永久卡在 active：收敛后仍是可继续推进的 pending
+    expect(next.status).toBe('active');
+    expect(convergeUnconfirmedRunningTasks(next)).toBe(next);
+  });
+
+  it('hasUnsettledTodoTasks 对历史非规范状态同样返回 true', () => {
+    const legacy = {
+      goal: 'g',
+      tasks: [{ id: 'a', title: 'A', description: 'a', status: 'in_progress' }],
+      currentTaskId: null,
+      status: 'active',
+      createdAt: 1,
+      updatedAt: 1,
+    } as unknown as TodoListContext;
+
+    expect(hasUnsettledTodoTasks(legacy)).toBe(true);
   });
 });
 
