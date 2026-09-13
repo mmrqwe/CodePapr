@@ -6,9 +6,10 @@
 //! - **Confirm**：破坏性但有正当用途的命令——裸 `git push --force`、
 //!   `git reset --hard`、`git clean -f`、删远端分支、`find -delete`、`xargs rm`、
 //!   递归 chmod/chown、上游经 `|` 直喂 shell 解释器 stdin（`curl x | sh`），
-//!   「破坏性段首 + 目标无法静态解析（变量/命令替换）」，以及串联段解释器执行的
-//!   脚本目标含变量/命令替换（`&& bash "$F"`）。由宿主入口层（sidecar dispatch /
-//!   UI handler）向用户发起一次性确认，批准后自动创建检查点再执行——检测漏网的
+//!   「删除类段首 + 目标无法静态解析（变量/命令替换）」、`mv` 去向无法静态解析，
+//!   以及串联段解释器执行的脚本目标含变量/命令替换（`&& bash "$F"`）。
+//!   由宿主入口层（sidecar dispatch / UI handler）向用户发起一次性确认，
+//!   批准后自动创建检查点再执行——检测漏网的
 //!   最坏结果从「数据损毁」降级为「一次回滚」。`--force-with-lease` 是安全实践，放行。
 //! - **Allow**：其余命令。检测对普通命令保持保守——像 `rm -rf node_modules`、
 //!   `rm -rf dist` 这类常规清理不会命中；误报会把 agent 死锁在无关命令上。
@@ -154,22 +155,98 @@ fn find_head_index(tokens: &[String]) -> Option<usize> {
     }
 }
 
-/// token 中是否含无法静态解析的目标（变量展开 / 命令替换）。
+/// 单个 token 是否含无法静态解析的目标（变量展开 / 命令替换）。
 /// 引号只防词分裂，不防展开，因此成对引号已在 tokenize 剥除后检查内文。
-fn has_unresolvable_token(tokens: &[String]) -> bool {
-    tokens.iter().any(|token| {
-        token.contains("$(")
-            || token.contains('`')
-            || token.contains("${")
-            || token.chars().next() == Some('$')
-            || token
-                .split(['/', '='])
-                .any(|part| part.starts_with('$') && part.chars().count() > 1)
-    })
+fn token_is_unresolvable(token: &str) -> bool {
+    token.contains("$(")
+        || token.contains('`')
+        || token.contains("${")
+        || token.chars().next() == Some('$')
+        || token
+            .split(['/', '='])
+            .any(|part| part.starts_with('$') && part.chars().count() > 1)
 }
 
-/// 删除/搬移类动词：目标无法解析时必须走 Confirm（不再「漏报放行」）。
-const DELETE_LIKE_HEADS: &[&str] = &["rm", "rmdir", "mv", "shred", "dd", "truncate"];
+/// token 列表中是否含无法静态解析的目标。
+fn has_unresolvable_token(tokens: &[String]) -> bool {
+    tokens.iter().any(|token| token_is_unresolvable(token))
+}
+
+/// `mv` 的去向（destination）是否无法静态解析。
+///
+/// mv 的数据风险是文件被搬到未知位置；源含变量但去向静态时没有未知落点
+/// （如把动态源备份到工作区固定目录），不应弹窗。去向 = 最后一个位置参数，
+/// 或 `-t` / `--target-directory` 指定的目录；只有一个位置参数且含变量时，
+/// 未加引号的展开可能分裂成「源 + 去向」多词，保守走 Confirm。
+fn mv_destination_unresolvable(tokens: &[String]) -> bool {
+    let mut positional: Vec<&str> = Vec::new();
+    let mut target_dir: Option<&str> = None;
+    let mut past_flags = false;
+    let mut i = 1;
+    while i < tokens.len() {
+        let token = tokens[i].as_str();
+        if !past_flags {
+            match token {
+                "--" => {
+                    past_flags = true;
+                    i += 1;
+                    continue;
+                }
+                "--target-directory" => {
+                    if let Some(value) = tokens.get(i + 1) {
+                        target_dir = Some(value.as_str());
+                        i += 2;
+                        continue;
+                    }
+                }
+                _ => {
+                    if let Some(value) = token.strip_prefix("--target-directory=") {
+                        target_dir = Some(value);
+                        i += 1;
+                        continue;
+                    }
+                    // 短选项簇里 `t` 带值：`-t DIR`、`-ft DIR`、`-tDIR` 均取 DIR。
+                    if let Some(body) = token
+                        .strip_prefix('-')
+                        .filter(|body| !body.is_empty() && !body.starts_with('-'))
+                    {
+                        if let Some(pos) = body.find('t') {
+                            let remainder = &body[pos + 1..];
+                            if !remainder.is_empty() {
+                                target_dir = Some(remainder);
+                                i += 1;
+                                continue;
+                            }
+                            if let Some(value) = tokens.get(i + 1) {
+                                target_dir = Some(value.as_str());
+                                i += 2;
+                                continue;
+                            }
+                        }
+                        i += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        positional.push(token);
+        i += 1;
+    }
+    if let Some(dir) = target_dir {
+        return token_is_unresolvable(dir);
+    }
+    if positional.len() < 2 {
+        return positional
+            .last()
+            .is_some_and(|token| token_is_unresolvable(token));
+    }
+    token_is_unresolvable(positional[positional.len() - 1])
+}
+
+/// 删除类动词：目标无法解析时必须走 Confirm（不再「漏报放行」）。
+/// `mv` 不在此列：它按「去向（destination）不可解析」单独裁决，
+/// 见 [`mv_destination_unresolvable`]。
+const DELETE_LIKE_HEADS: &[&str] = &["rm", "rmdir", "shred", "dd", "truncate"];
 
 fn is_root_like_target(target: &str) -> bool {
     let cleaned = target.trim_end_matches('/');
@@ -357,6 +434,15 @@ fn segment_verdict(segment: &str, index: usize, piped: bool) -> DangerVerdict {
                 );
             }
         }
+        "mv" => {
+            if mv_destination_unresolvable(rest) {
+                return DangerVerdict::Confirm(
+                    "检测到 `mv` 的去向含变量/命令替换，无法静态确认文件将被移动到何处；\
+                     确认后可执行（将先创建检查点）。"
+                        .to_string(),
+                );
+            }
+        }
         "git" => {
             let verdict = git_verdict(rest);
             if !matches!(verdict, DangerVerdict::Allow) {
@@ -455,8 +541,9 @@ fn segment_verdict(segment: &str, index: usize, piped: bool) -> DangerVerdict {
         _ => {}
     }
 
-    // 破坏性动词 + 目标含变量/命令替换：静态无法解析删除范围，漏报比误报代价高——
+    // 删除类动词 + 目标含变量/命令替换：静态无法解析删除范围，漏报比误报代价高——
     // 降级为 Confirm（仅对 DELETE_LIKE_HEADS 生效，普通命令不受影响）。
+    // `mv` 不在此列：已在上方按「去向不可解析」单独裁决（源含变量 + 静态去向放行）。
     if DELETE_LIKE_HEADS.contains(&head.as_str()) && has_unresolvable_token(&rest[1..]) {
         return DangerVerdict::Confirm(format!(
             "`{head}` 的目标包含变量/命令替换，无法静态确认影响范围；\
@@ -733,11 +820,40 @@ mod tests {
         assert_confirm("rm -rf $(get_path)");
         assert_confirm("rm -rf \"${OUT}/cache\"");
         assert_confirm("truncate -s 0 $LOGFILE");
-        assert_confirm("mv ./a.txt $DEST/a.txt");
         // 变量出现在非破坏性命令里不弹窗（误报代价）。
         assert_allow("echo $HOME");
         assert_allow("npm run release -- --version=$V");
         assert_allow("git commit -m \"bump ${VER}\"");
+    }
+
+    #[test]
+    fn confirms_unresolvable_mv_destination_but_allows_static_one() {
+        // 事故复现：把动态源备份到工作区固定目录——去向静态，不应弹窗。
+        assert_allow(
+            "set -e\nUDID=F1551ACC-891D-4218-AD1E-8D56BCCEA8D9\n\
+             C=$(xcrun simctl get_app_container $UDID com.example.newipod data)\n\
+             DOCS=\"$C/Documents\"\n\
+             mv \"$DOCS/lyrics-test.m4a\" .CodePapr/tmp/docs-backup/",
+        );
+        assert_allow("mv $SRC ./dist/");
+        assert_allow("mv -f \"$CACHE_DIR\" /tmp/backup/");
+        assert_allow("mv ./a.txt ./b.txt");
+        // 去向由 -t/--target-directory 指定时同样只看去向。
+        assert_allow("mv -t /tmp/backup \"$DOCS/a.m4a\"");
+        assert_allow("mv -ft /tmp/backup \"$DOCS/a.m4a\"");
+        assert_allow("mv --target-directory /tmp/backup \"$DOCS/a.m4a\"");
+        assert_allow("mv --target-directory=/tmp/backup \"$DOCS/a.m4a\"");
+        // 去向不可解析：仍 Confirm（无法确认文件会被搬到哪里）。
+        assert_confirm("mv ./a.txt $DEST/a.txt");
+        assert_confirm("mv $SRC $DST");
+        assert_confirm("mv -t $DEST ./a.txt");
+        assert_confirm("mv --target-directory $DEST ./a.txt");
+        assert_confirm("mv --target-directory=$DEST ./a.txt");
+        // 单个位置参数且含变量：未加引号的展开可能分裂成「源 + 去向」，保守确认。
+        assert_confirm("mv $MAYBE_SPLIT");
+        // 单个静态位置参数 / 无操作数：命令只会报错，放行。
+        assert_allow("mv ./a.txt");
+        assert_allow("mv -f");
     }
 
     #[test]
@@ -781,6 +897,14 @@ mod tests {
         assert!(matches!(
             classify_dangerous_invocation("rm", &["-rf".to_string(), "node_modules".to_string()]),
             DangerVerdict::Allow
+        ));
+        assert!(matches!(
+            classify_dangerous_invocation("mv", &["$SRC".to_string(), "dest/".to_string()]),
+            DangerVerdict::Allow
+        ));
+        assert!(matches!(
+            classify_dangerous_invocation("mv", &["a.txt".to_string(), "$DEST".to_string()]),
+            DangerVerdict::Confirm(_)
         ));
     }
 
