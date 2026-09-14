@@ -282,12 +282,15 @@ export class ClaudeProvider extends BaseLLMProvider {
 
         try {
           await readSseStream(response, (payloadLine) => {
+            // 进度协议：只有真实输出（text/tool-args delta、tool_use 块）才返回
+            // true；心跳/usage/message_start 等元数据不续命空闲超时。
+            let progress = false;
             let chunk: ClaudeStreamChunk;
             try {
               chunk = JSON.parse(payloadLine) as ClaudeStreamChunk;
             } catch {
               log.warn('SSE chunk parse failed, skipping', { payloadLine: payloadLine.slice(0, 200) });
-              return;
+              return false;
             }
             // message_start 携带 input/cache token，message_delta 只携带
             // output_tokens：整体替换会丢掉 input/cache 统计，必须按字段合并。
@@ -312,13 +315,13 @@ export class ClaudeProvider extends BaseLLMProvider {
 
             if (chunk.type === 'message_start') {
               responseId = chunk.message?.id ?? responseId;
-              return;
+              return false;
             }
 
             // message_stop 是正常结束信号。
             if (chunk.type === 'message_stop') {
               sawTermination = true;
-              return;
+              return false;
             }
 
             if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'tool_use') {
@@ -332,14 +335,15 @@ export class ClaudeProvider extends BaseLLMProvider {
                     ? sortedStringify(chunk.content_block.input)
                     : '',
               };
-              return;
+              return true;
             }
 
             if (chunk.type === 'content_block_delta') {
               if (chunk.delta?.type === 'text_delta' && chunk.delta.text) {
                 content += chunk.delta.text;
                 onEvent({ type: 'content-delta', delta: chunk.delta.text });
-                return;
+                progress = true;
+                return progress;
               }
 
               if (chunk.delta?.type === 'input_json_delta') {
@@ -353,8 +357,9 @@ export class ClaudeProvider extends BaseLLMProvider {
                   ...current,
                   argumentsText: `${current.argumentsText}${chunk.delta.partial_json ?? ''}`,
                 };
+                progress = true;
               }
-              return;
+              return progress;
             }
 
             if (chunk.type === 'message_delta') {
@@ -363,7 +368,13 @@ export class ClaudeProvider extends BaseLLMProvider {
                 sawTermination = true;
               }
             }
-          }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
+
+            return progress;
+          }, signal, {
+            idleTimeoutMs: this.config.idleTimeoutMs,
+            waitNotifyIntervalMs: this.config.waitNotifyIntervalMs,
+            onWait: (waitMs) => onEvent({ type: 'stream-wait', waitMs }),
+          });
         } catch (err) {
           if (err instanceof DOMException && err.name === 'AbortError') {
             throw err;

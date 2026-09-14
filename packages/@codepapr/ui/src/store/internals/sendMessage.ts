@@ -33,6 +33,13 @@ import { snapshotCreateWithRetry, saveCheckpointRecord } from '../../utils/snaps
 import { buildCheckpointCommitMessage } from '../../utils/workspaceGitPanel';
 import type { WorkMode } from '../../utils/agentPrompts';
 import { getTranslation } from '../../utils/i18n';
+import {
+  clearStreamStallRecord,
+  noteStreamRetry,
+  noteStreamWait,
+  readStreamStallRecord,
+  writeStreamStallLog,
+} from '../../utils/streamStallLog';
 import { buildUserMessageTitleSource } from '../../utils/taskTitle';
 import { yieldToMainThread } from '../../utils/taskScheduling';
 import {
@@ -1613,6 +1620,47 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
 
               if (!assistantMessageId) return;
 
+              if (event.type === 'stream-wait') {
+                noteStreamWait(assistantMessageId, event.waitMs);
+              } else if (event.type === 'stream-restart' || event.type === 'request-retry') {
+                // 停滞/重连诊断：把累计重试次数、最长等待与首次停滞时间落盘，
+                // 供事后确认「是否真的触发过超时重连、等了多久」。
+                const stallRecord = noteStreamRetry(assistantMessageId);
+                void writeStreamStallLog({
+                  workspacePath: turnWorkspacePath,
+                  sessionId: activeSessionId!,
+                  messageId: assistantMessageId,
+                  modelName: route.model,
+                  modelTier: route.tier,
+                  outcome: 'retry',
+                  event: event.type,
+                  attempt: event.attempt,
+                  maxRetries: event.maxRetries,
+                  maxWaitMs: stallRecord.maxWaitMs,
+                  retries: stallRecord.retries,
+                  firstStallAt: stallRecord.firstStallAt,
+                });
+              } else if (event.type === 'assistant-round-complete') {
+                // 重连后的轮次成功收尾：补一条 recovered 记录说明恢复结果。
+                // 仅当确实发生过重连才落盘（单纯 stream-wait 不产生日志文件）。
+                const stallRecord = readStreamStallRecord(assistantMessageId);
+                if (stallRecord && stallRecord.retries > 0) {
+                  void writeStreamStallLog({
+                    workspacePath: turnWorkspacePath,
+                    sessionId: activeSessionId!,
+                    messageId: assistantMessageId,
+                    modelName: route.model,
+                    modelTier: route.tier,
+                    outcome: 'recovered',
+                    maxWaitMs: stallRecord.maxWaitMs,
+                    retries: stallRecord.retries,
+                    firstStallAt: stallRecord.firstStallAt,
+                    roundDurationMs: event.durationMs,
+                  });
+                }
+                clearStreamStallRecord(assistantMessageId);
+              }
+
               if (event.type === 'request-context') {
                 set({
                   _latestContextSnapshot: {
@@ -1649,6 +1697,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                     ...(typeof event.durationMs === 'number' && event.durationMs > 0
                       ? { durationMs: event.durationMs }
                       : {}),
+                  };
+                }
+
+                if (event.type === 'stream-wait') {
+                  // 流仍在线但无真实输出（心跳不续命）：只更新状态提示，
+                  // 不清空已累积的思考/内容；下一次真实 delta 会清掉提示。
+                  const waitSeconds = Math.max(1, Math.round(event.waitMs / 1000));
+                  return {
+                    ...message,
+                    isStreaming: message.isStreaming,
+                    statusText: getTranslation(normalizedSettings.lang).streamWaitStatus.replace(
+                      '{seconds}',
+                      String(waitSeconds)
+                    ),
                   };
                 }
 

@@ -1033,4 +1033,84 @@ describe('DeepSeekProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(response?.choices[0]?.message.content).toBe('好');
   });
+
+  it('心跳不续命：只发空 choices 心跳时仍按空闲超时重连，并上报 stream-wait', async () => {
+    const encoder = new TextEncoder();
+    // 假活网关：连接一直在线、周期性发心跳，但没有任何真实输出。
+    let cancelled = false;
+    const heartbeatStream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(encoder.encode('data: {"id":"hb","choices":[]}\n\n'));
+      },
+      pull(c) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            if (cancelled) {
+              resolve();
+              return;
+            }
+            try {
+              c.enqueue(encoder.encode('data: {"id":"hb","choices":[]}\n\n'));
+            } catch {
+              // 超时路径会 cancel reader，挂起的定时器不再入队
+              cancelled = true;
+            }
+            resolve();
+          }, 10);
+        });
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const okChunks =
+      'data: {"id":"resp-ok","choices":[{"index":0,"delta":{"content":"完整"},"finish_reason":"stop"}]}\n\n' +
+      'data: [DONE]\n\n';
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(heartbeatStream, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        )
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(okChunks, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        )
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new DeepSeekProvider({
+      apiKey: 'test-key',
+      // 心跳每 10ms 一发：旧实现按字节重置计时器，这种假活连接永不超时。
+      idleTimeoutMs: 80,
+      waitNotifyIntervalMs: 20,
+      streamRetryDelayMs: () => 0,
+    });
+    const waits: number[] = [];
+    const restarts: number[] = [];
+    const response = await provider.streamChat?.(
+      {
+        model: 'deepseek-v4-pro',
+        messages: [{ id: 'user-1', role: 'user', content: '请回答', timestamp: 1 }],
+        maxTokens: 1024,
+      },
+      (event) => {
+        if (event.type === 'stream-wait') waits.push(event.waitMs);
+        if (event.type === 'stream-restart') restarts.push(event.attempt);
+      }
+    );
+
+    // 无输出期间上报过等待提示，随后按空闲超时重连并成功恢复。
+    expect(waits.length).toBeGreaterThanOrEqual(1);
+    expect(restarts).toEqual([1]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response?.choices[0]?.message.content).toBe('完整');
+  });
 });

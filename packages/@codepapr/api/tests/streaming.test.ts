@@ -136,7 +136,7 @@ describe('readSseStream idle timeout', () => {
     expect(received).toEqual(['{"a":1}', '{"b":2}']);
   });
 
-  it('resets the idle timer on each chunk so a slow trickle never times out', async () => {
+  it('resets the idle timer on each progress chunk so a slow trickle never times out', async () => {
     let i = 0;
     const stream = new ReadableStream<Uint8Array>({
       pull(c) {
@@ -160,11 +160,97 @@ describe('readSseStream idle timeout', () => {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
       }),
-      (p) => received.push(p),
+      (p) => {
+        received.push(p);
+        // 每块都是真实输出：进度计时器被推进，慢速滴流不超时。
+        return true;
+      },
       undefined,
       { idleTimeoutMs: 60 }
     );
     expect(received).toEqual(['{"n":0}', '{"n":1}', '{"n":2}']);
+  });
+
+  it('does not extend the idle timer on heartbeat payloads (心跳不续命)', async () => {
+    // 字节一直在流（心跳），但没有任何真实输出：旧实现按字节重置计时器，
+    // 这种假活连接永不超时；新实现必须在 idleTimeoutMs 后抛错走重连。
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            if (cancelled) {
+              resolve();
+              return;
+            }
+            try {
+              c.enqueue(encoder.encode('data: {}\n\n'));
+            } catch {
+              // 超时路径会 cancel reader，挂起的定时器不再入队
+              cancelled = true;
+            }
+            resolve();
+          }, 20);
+        });
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    const received: string[] = [];
+    await expect(
+      readSseStream(
+        new Response(stream, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+        (p) => {
+          received.push(p);
+          // 心跳/空载荷：不产生进度。
+          return false;
+        },
+        undefined,
+        { idleTimeoutMs: 60 }
+      )
+    ).rejects.toBeInstanceOf(StreamIdleTimeoutError);
+    expect(received.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('reports onWait periodically while no progress arrives', async () => {
+    let i = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            if (i < 5) {
+              c.enqueue(encoder.encode(`data: {"n":${i}}\n\n`));
+              i += 1;
+            } else {
+              c.close();
+            }
+            resolve();
+          }, 20);
+        });
+      },
+    });
+
+    const waits: number[] = [];
+    await readSseStream(
+      new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+      () => {
+        // 前两块是心跳（无进度），第三块开始是真实输出。
+        return i >= 3;
+      },
+      undefined,
+      { idleTimeoutMs: 5_000, waitNotifyIntervalMs: 20, onWait: (waitMs) => waits.push(waitMs) }
+    );
+    // 心跳阶段至少上报一次等待；每次上报的等待时长不小于提示间隔。
+    expect(waits.length).toBeGreaterThanOrEqual(1);
+    expect(waits.every((waitMs) => waitMs >= 20)).toBe(true);
   });
 
   it('still honors abort even with an idle timeout armed', async () => {

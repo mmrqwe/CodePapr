@@ -1944,6 +1944,39 @@ describe('useAgentStore.sendMessage', () => {
     expect(statusTextDuringRetry).toContain('2/6');
   });
 
+  it('shows a wait status on stream-wait while keeping streamed reasoning intact', async () => {
+    let statusDuringWait: string | undefined;
+    let reasoningDuringWait: string | undefined;
+    const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {
+      onEvent?.({ type: 'reasoning-delta', delta: '已经流出的思考' });
+      onEvent?.({ type: 'stream-wait', waitMs: 45_000 });
+      // 事件处理是同步的：此刻状态栏应显示「仍在等待」，且已有思考不被清空
+      const assistant = (useAgentStore.getState().sessionMessages['session-1'] ?? [])
+        .find((message) => message.role === 'assistant');
+      statusDuringWait = assistant?.statusText;
+      reasoningDuringWait = assistant?.reasoningContent;
+      onEvent?.({ type: 'reasoning-delta', delta: '继续输出' });
+      const afterDelta = (useAgentStore.getState().sessionMessages['session-1'] ?? [])
+        .find((message) => message.role === 'assistant');
+      // 真实输出恢复后等待提示必须被清掉
+      expect(afterDelta?.statusText).toBeUndefined();
+
+      return createAgentResponse('完成', {
+        reasoningContent: '已经流出的思考继续输出',
+      });
+    });
+
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage('解释一下当前实现', '解释一下当前实现', 'ask');
+
+    expect(statusDuringWait).toContain('45');
+    expect(reasoningDuringWait).toBe('已经流出的思考');
+  });
+
   it('shows reconnect status without a cap when maxRetries is omitted (unlimited retries)', async () => {
     let statusTextDuringRetry: string | undefined;
     const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {

@@ -221,9 +221,12 @@ export class OpenAIProvider extends BaseLLMProvider {
 
         try {
           await readSseStream(response, (payloadLine) => {
+            // 进度协议：只有真实输出（reasoning/content/tool-call delta）才返回
+            // true；心跳/usage 等空载荷不续命空闲超时（心跳不算数据）。
+            let progress = false;
             if (payloadLine === '[DONE]') {
               sawDone = true;
-              return;
+              return false;
             }
 
             let chunk: OpenAIStreamChunk;
@@ -231,7 +234,7 @@ export class OpenAIProvider extends BaseLLMProvider {
               chunk = JSON.parse(payloadLine) as OpenAIStreamChunk;
             } catch {
               log.warn('SSE chunk parse failed, skipping', { payloadLine: payloadLine.slice(0, 200) });
-              return;
+              return false;
             }
 
             // 流内 error 对象 = 确定性 API 错误（鉴权/配置/上下文超限等），
@@ -267,16 +270,19 @@ export class OpenAIProvider extends BaseLLMProvider {
               if (delta.content) {
                 content += delta.content;
                 onEvent({ type: 'content-delta', delta: delta.content });
+                progress = true;
               }
 
               const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
               if (reasoningDelta) {
                 reasoningContent += reasoningDelta;
                 onEvent({ type: 'reasoning-delta', delta: reasoningDelta });
+                progress = true;
               }
 
               if (delta.tool_calls?.length) {
                 applyStreamingToolCallDeltas(toolCallStates, delta.tool_calls);
+                progress = true;
               }
 
               if (choice.finish_reason) {
@@ -284,7 +290,13 @@ export class OpenAIProvider extends BaseLLMProvider {
                 sawFinishReason = true;
               }
             }
-          }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
+
+            return progress;
+          }, signal, {
+            idleTimeoutMs: this.config.idleTimeoutMs,
+            waitNotifyIntervalMs: this.config.waitNotifyIntervalMs,
+            onWait: (waitMs) => onEvent({ type: 'stream-wait', waitMs }),
+          });
         } catch (err) {
           if (err instanceof DOMException && err.name === 'AbortError') {
             throw err;

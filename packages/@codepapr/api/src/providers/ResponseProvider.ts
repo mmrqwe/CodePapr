@@ -472,9 +472,22 @@ export class ResponseProvider extends BaseLLMProvider {
 
         try {
           await readSseStream(response, (rawData) => {
+            // 进度协议：只有真实输出（content/reasoning/tool-call）才续命空闲
+            // 超时；心跳/usage/response.created 等元数据不算（心跳不续命）。
+            let progress = false;
+            const emit = (event: IChatStreamEvent): void => {
+              if (
+                event.type === 'content-delta' ||
+                event.type === 'reasoning-delta' ||
+                event.type === 'tool-call-start'
+              ) {
+                progress = true;
+              }
+              onEvent(event);
+            };
             if (rawData === '[DONE]') {
               sawDone = true;
-              return;
+              return false;
             }
 
             let chunk: ResponseStreamChunk;
@@ -485,7 +498,7 @@ export class ResponseProvider extends BaseLLMProvider {
                 rawData: rawData.slice(0, 200),
                 error: (err as Error).message,
               });
-              return;
+              return false;
             }
 
             if (chunk.error) {
@@ -520,18 +533,18 @@ export class ResponseProvider extends BaseLLMProvider {
                   name: chunk.item.name,
                   argumentsText: chunk.item.arguments,
                 });
-                announceToolCallStart(state, onEvent);
+                announceToolCallStart(state, emit);
               } else if (chunk.item.type === 'reasoning' || chunk.item.type === 'reasoning_summary') {
                 reasoningContent = appendUniqueText(
                   reasoningContent,
                   extractReasoningFromOutputItem(chunk.item),
-                  (delta) => onEvent({ type: 'reasoning-delta', delta }),
+                  (delta) => emit({ type: 'reasoning-delta', delta }),
                 );
               } else if (chunk.item.type === 'message' || chunk.item.role === 'assistant') {
                 content = appendUniqueText(
                   content,
                   extractAssistantTextFromOutputItem(chunk.item),
-                  (delta) => onEvent({ type: 'content-delta', delta }),
+                  (delta) => emit({ type: 'content-delta', delta }),
                 );
               }
             }
@@ -544,13 +557,13 @@ export class ResponseProvider extends BaseLLMProvider {
               const delta = extractStreamText(chunk);
               if (delta) {
                 content += delta;
-                onEvent({ type: 'content-delta', delta });
+                emit({ type: 'content-delta', delta });
               }
             }
 
             // 4. Reasoning delta / done
             if (REASONING_DELTA_EVENT_TYPES.has(eventType)) {
-              reasoningContent = appendReasoningDelta(reasoningContent, extractStreamText(chunk), onEvent);
+              reasoningContent = appendReasoningDelta(reasoningContent, extractStreamText(chunk), emit);
             } else if (REASONING_DONE_EVENT_TYPES.has(eventType)) {
               const fullText = extractStreamText(chunk);
               if (fullText && !reasoningContent.includes(fullText)) {
@@ -560,9 +573,9 @@ export class ResponseProvider extends BaseLLMProvider {
                     ? ''
                     : fullText;
                 if (remainder) {
-                  reasoningContent = appendReasoningDelta(reasoningContent, remainder, onEvent);
+                  reasoningContent = appendReasoningDelta(reasoningContent, remainder, emit);
                 } else if (!reasoningContent) {
-                  reasoningContent = appendReasoningDelta(reasoningContent, fullText, onEvent);
+                  reasoningContent = appendReasoningDelta(reasoningContent, fullText, emit);
                 }
               }
             }
@@ -580,11 +593,11 @@ export class ResponseProvider extends BaseLLMProvider {
                     itemId: chunk.item_id,
                     appendArguments: delta,
                   });
-                  announceToolCallStart(state, onEvent);
+                  announceToolCallStart(state, emit);
                 } else if (toolCallStates.length > 0) {
                   const state = toolCallStates[toolCallStates.length - 1];
                   state.argumentsText += delta;
-                  announceToolCallStart(state, onEvent);
+                  announceToolCallStart(state, emit);
                 }
               }
             }
@@ -612,13 +625,13 @@ export class ResponseProvider extends BaseLLMProvider {
                     reasoningContent = appendUniqueText(
                       reasoningContent,
                       extractReasoningFromOutputItem(item),
-                      (delta) => onEvent({ type: 'reasoning-delta', delta }),
+                      (delta) => emit({ type: 'reasoning-delta', delta }),
                     );
                   } else if (item.type === 'message' || item.role === 'assistant') {
                     content = appendUniqueText(
                       content,
                       extractAssistantTextFromOutputItem(item),
-                      (delta) => onEvent({ type: 'content-delta', delta }),
+                      (delta) => emit({ type: 'content-delta', delta }),
                     );
                   } else if (item.type === 'function_call') {
                     const state = upsertResponsesToolCall(toolCallStates, {
@@ -627,7 +640,7 @@ export class ResponseProvider extends BaseLLMProvider {
                       name: item.name,
                       argumentsText: item.arguments,
                     });
-                    announceToolCallStart(state, onEvent);
+                    announceToolCallStart(state, emit);
                   }
                 }
               }
@@ -641,13 +654,13 @@ export class ResponseProvider extends BaseLLMProvider {
 
                 if (delta.content) {
                   content += delta.content;
-                  onEvent({ type: 'content-delta', delta: delta.content });
+                  emit({ type: 'content-delta', delta: delta.content });
                 }
 
                 const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
                 if (reasoningDelta) {
                   reasoningContent += reasoningDelta;
-                  onEvent({ type: 'reasoning-delta', delta: reasoningDelta });
+                  emit({ type: 'reasoning-delta', delta: reasoningDelta });
                 }
 
                 if (delta.tool_calls?.length) {
@@ -657,7 +670,7 @@ export class ResponseProvider extends BaseLLMProvider {
                       name: tc.function?.name,
                       appendArguments: tc.function?.arguments,
                     });
-                    announceToolCallStart(state, onEvent);
+                    announceToolCallStart(state, emit);
                   }
                 }
 
@@ -671,7 +684,13 @@ export class ResponseProvider extends BaseLLMProvider {
             if (chunk.usage) {
               usage = chunk.usage;
             }
-          }, signal, { idleTimeoutMs: this.config.idleTimeoutMs });
+
+            return progress;
+          }, signal, {
+            idleTimeoutMs: this.config.idleTimeoutMs,
+            waitNotifyIntervalMs: this.config.waitNotifyIntervalMs,
+            onWait: (waitMs) => onEvent({ type: 'stream-wait', waitMs }),
+          });
         } catch (err) {
           if (err instanceof DOMException && err.name === 'AbortError') {
             throw err;

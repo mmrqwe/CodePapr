@@ -27,6 +27,10 @@ export interface ProviderConfig {
   /** SSE 流空闲超时（毫秒）：超过该时长未收到任何数据块即判定超时。
    *  未设置时回退到 DEFAULT_STREAM_IDLE_TIMEOUT_MS。推理模型 thinking 阶段建议调大。 */
   idleTimeoutMs?: number;
+  /** SSE 流无真实输出时的等待提示间隔（毫秒）：每隔该时长发一次
+   *  stream-wait 事件供 UI 显示「仍在等待」。未设置时回退到
+   *  DEFAULT_STREAM_WAIT_NOTIFY_INTERVAL_MS（15s）。测试可注入小值。 */
+  waitNotifyIntervalMs?: number;
   /** 流中断重试前的等待时长（毫秒），attempt 从 1 开始。
    *  未设置时回退到默认 5s → 10s → 15s → 20s → 25s → 30s。测试可注入 0 跳过等待。 */
   streamRetryDelayMs?: (attempt: number) => number;

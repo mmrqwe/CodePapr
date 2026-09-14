@@ -164,6 +164,9 @@ export const MessageBubble = memo(function MessageBubble({
             })}
           </div>
         )}
+        {!showRunningStatusIndicator && msg.statusText && (
+          <p className="mb-2 text-xs font-medium text-fg-muted select-none">{msg.statusText}</p>
+        )}
         {(msg.displayReasoningContent ?? msg.reasoningContent) && (
           <ReasoningPanel
             content={msg.displayReasoningContent ?? msg.reasoningContent ?? ''}
@@ -175,9 +178,6 @@ export const MessageBubble = memo(function MessageBubble({
         <RelatedFileLinks paths={msg.relatedFilePaths ?? []} onOpenWorkspacePath={onOpenWorkspacePath} />
         {showRunningStatusIndicator && msg.statusText && (
           <RunningStatusIndicator label={msg.statusText} />
-        )}
-        {!showRunningStatusIndicator && msg.statusText && !msg.content && !(msg.displayReasoningContent ?? msg.reasoningContent) && (!msg.toolInvocations || msg.toolInvocations.length === 0) && (
-          <p className="mb-2 text-xs font-medium text-fg-muted select-none">{msg.statusText}</p>
         )}
         {isError && (
           <div className="mb-1.5 flex items-center gap-1.5 select-none">

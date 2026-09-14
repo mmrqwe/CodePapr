@@ -387,6 +387,10 @@ export type IChatStreamEvent =
    *  消费方必须先清空已累积内容再接收新一轮增量（LLM 流无法断点续传）。
    *  maxRetries 缺省 = 无限重试（可重试故障不再终止回合）。 */
   | { type: 'stream-restart'; attempt: number; maxRetries?: number }
+  /** 流仍在线但长时间没有真实输出（SSE 心跳/空块不算输出，不续命空闲超时）。
+   *  仅作状态可见：消费方更新状态提示即可，不得改动已累积内容。
+   *  waitMs = 距上次真实输出（reasoning/content/tool-call delta）的时长。 */
+  | { type: 'stream-wait'; waitMs: number }
   /** 请求尚未建立流（连接层失败）时的自动重试：尚无任何输出可作废，
    *  消费方仅需更新状态提示。maxRetries 缺省 = 无限重试。 */
   | { type: 'request-retry'; attempt: number; maxRetries?: number }

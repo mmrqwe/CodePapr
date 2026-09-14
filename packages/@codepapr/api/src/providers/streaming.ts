@@ -227,13 +227,18 @@ export function sanitizeToolCallArguments(
 
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000;
 
+/** 无输出等待提示的默认间隔（毫秒）：流在线但持续没有真实输出时，每隔该
+ *  时长回调一次 onWait，让 UI 能显示「仍在等待」。仅作状态可见，不参与
+ *  超时判定（超时仍由 idleTimeoutMs 负责）。 */
+export const DEFAULT_STREAM_WAIT_NOTIFY_INTERVAL_MS = 15_000;
+
 export class StreamIdleTimeoutError extends Error {
   readonly retriable = true;
   readonly idleTimeoutMs: number;
 
   constructor(idleTimeoutMs: number) {
     super(
-      `Stream idle timeout: no data received for ${Math.round(idleTimeoutMs / 1000)}s`
+      `Stream idle timeout: no model output received for ${Math.round(idleTimeoutMs / 1000)}s`
     );
     this.name = 'StreamIdleTimeoutError';
     this.idleTimeoutMs = idleTimeoutMs;
@@ -241,12 +246,27 @@ export class StreamIdleTimeoutError extends Error {
 }
 
 export interface ReadSseStreamOptions {
+  /** 空闲超时（毫秒）：距上次「真实输出」超过该时长即判超时。真实输出由
+   *  onData 返回值定义（见 SseDataHandler）；SSE 注释/空块/心跳不算进度，
+   *  所以网关靠心跳续命的假活连接同样会在该时长后超时并走流层重连。
+   *  <=0 关闭超时与等待提示。 */
   idleTimeoutMs?: number;
+  /** onWait 的触发间隔（毫秒，缺省 DEFAULT_STREAM_WAIT_NOTIFY_INTERVAL_MS）。 */
+  waitNotifyIntervalMs?: number;
+  /** 无真实输出期间周期回调，waitMs = 距上次真实输出的时长。 */
+  onWait?: (waitMs: number) => void;
 }
+
+/** SSE data 载荷处理器：
+ *  - 返回 true 表示该载荷产生了**真实模型输出**（reasoning/content/tool-call
+ *    delta），会重置空闲计时器；
+ *  - 不返回或返回 false（心跳、usage-only、message_start 等元数据）不算
+ *    进度，空闲计时器继续走——这正是「心跳不续命」的落点。 */
+export type SseDataHandler = (payload: string) => boolean | void;
 
 export async function readSseStream(
   response: Response,
-  onData: (payload: string) => void,
+  onData: SseDataHandler,
   signal?: AbortSignal,
   options?: ReadSseStreamOptions
 ): Promise<void> {
@@ -255,9 +275,15 @@ export async function readSseStream(
   }
 
   const idleTimeoutMs = options?.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+  const waitNotifyIntervalMs =
+    options?.waitNotifyIntervalMs ?? DEFAULT_STREAM_WAIT_NOTIFY_INTERVAL_MS;
+  const onWait = options?.onWait;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  // 进度计时基准：只被「真实输出」推进。每次 read 的剩余超时 = idleTimeoutMs
+  // 减去「距上次真实输出的时长」——心跳/空块到达不会重置它。
+  let lastProgressAt = Date.now();
 
   // 命名引用 + finally 移除：signal 常由 UI 长期持有，正常结束时不清理会让
   // 每次流式请求都泄漏一个监听器（并滞留 reader/response 引用）。
@@ -266,7 +292,7 @@ export async function readSseStream(
   };
   signal?.addEventListener('abort', abortHandler, { once: true });
 
-  const consumeEvent = (rawEvent: string): void => {
+  const consumeEvent = (rawEvent: string): boolean => {
     const lines = rawEvent.split(/\r?\n/);
     const payload = lines
       .filter((line) => line.startsWith('data:'))
@@ -275,19 +301,21 @@ export async function readSseStream(
       .trim();
 
     if (payload) {
-      onData(payload);
+      return onData(payload) === true;
     }
+    return false;
   };
 
   const readChunk = () => {
     if (idleTimeoutMs <= 0) {
       return reader.read();
     }
+    const remainingMs = Math.max(1, idleTimeoutMs - (Date.now() - lastProgressAt));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         reject(new StreamIdleTimeoutError(idleTimeoutMs));
-      }, idleTimeoutMs);
+      }, remainingMs);
     });
     const read = reader.read();
     // 超时先胜出后，落败的 read promise 仍可能稍后 reject（超时与断流同一
@@ -299,6 +327,22 @@ export async function readSseStream(
       }
     });
   };
+
+  // 状态可见性：无真实输出期间周期性上报已等待时长。定时器回调抛错会成为
+  // uncaughtException（Node sidecar 下直接崩进程），这里只做提示、必须吞掉。
+  const waitTimer =
+    onWait && idleTimeoutMs > 0 && waitNotifyIntervalMs > 0
+      ? setInterval(() => {
+          const waitMs = Date.now() - lastProgressAt;
+          if (waitMs >= waitNotifyIntervalMs) {
+            try {
+              onWait(waitMs);
+            } catch {
+              // 提示回调失败不影响流读取
+            }
+          }
+        }, waitNotifyIntervalMs)
+      : undefined;
 
   let isDone = false;
 
@@ -316,7 +360,9 @@ export async function readSseStream(
       buffer = events.pop() ?? '';
 
       for (const event of events) {
-        consumeEvent(event);
+        if (consumeEvent(event)) {
+          lastProgressAt = Date.now();
+        }
       }
 
       if (readDone) {
@@ -325,8 +371,8 @@ export async function readSseStream(
     }
 
     const trailing = buffer.trim();
-    if (trailing) {
-      consumeEvent(trailing);
+    if (trailing && consumeEvent(trailing)) {
+      lastProgressAt = Date.now();
     }
 
     // abort 发生在 reader.read() 挂起期间时，abortHandler 的 reader.cancel()
@@ -343,6 +389,9 @@ export async function readSseStream(
     }
     throw err;
   } finally {
+    if (waitTimer !== undefined) {
+      clearInterval(waitTimer);
+    }
     signal?.removeEventListener('abort', abortHandler);
   }
 }
