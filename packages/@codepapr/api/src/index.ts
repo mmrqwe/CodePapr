@@ -7,7 +7,13 @@ export { BaseLLMProvider, ProviderRequestError, setGlobalFetchFn, getGlobalFetch
 export type { ProviderConfig } from './providers/ILLMProvider';
 export { DeepSeekProvider } from './providers/DeepSeekProvider';
 export { OpenAIProvider } from './providers/OpenAIProvider';
-export { ResponseProvider, CODEPAPR_OPENCODE_USER_AGENT } from './providers/ResponseProvider';
+export { ResponseProvider } from './providers/ResponseProvider';
+export {
+  CODEPAPR_OPENCODE_USER_AGENT,
+  applyOpencodeGatewayHeaders,
+  isOpencodeGatewayBase,
+  resolveOpencodeSessionId,
+} from './providers/opencodeGateway';
 export { ClaudeProvider } from './providers/ClaudeProvider';
 export { LocalProvider, DEFAULT_LOCAL_BASE_URL } from './providers/LocalProvider';
 export {

@@ -28,6 +28,10 @@ import {
 } from './streaming';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
+import {
+  applyOpencodeGatewayHeaders,
+  resolveOpencodeSessionId,
+} from './opencodeGateway';
 
 const log = new Logger('OpenAIProvider');
 
@@ -146,13 +150,31 @@ function normalizeOpenAIContent(
 
 export class OpenAIProvider extends BaseLLMProvider {
   name = 'openai';
-  models = ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'];
+  models = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.3-codex'];
+
+  private readonly opencodeSessionId: string;
 
   constructor(config: ProviderConfig) {
     super({
       baseURL: 'https://api.openai.com/v1',
       ...config,
     });
+    this.opencodeSessionId = resolveOpencodeSessionId(config.sessionId);
+  }
+
+  /** 命中 opencode 网关（如 Zen/Go）时注入 x-opencode-session / User-Agent 契约头。 */
+  private requestHeaders(): Record<string, string> {
+    return applyOpencodeGatewayHeaders(
+      {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.apiKey}`,
+      },
+      {
+        baseURL: this.config.baseURL,
+        sessionId: this.opencodeSessionId,
+        sessionClient: this.config.sessionClient,
+      }
+    );
   }
 
   async streamChat(
@@ -190,10 +212,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       async () => {
         const response = await this.fetchWithRetry(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.config.apiKey}`,
-          },
+          headers: this.requestHeaders(),
           body: sortedStringify(payload),
         }, signal, (attempt, maxRetries, err) => {
           onEvent({
@@ -425,10 +444,7 @@ export class OpenAIProvider extends BaseLLMProvider {
     const protection: { release: () => void } = { release: () => undefined };
     const response = await this.fetchWithRetry(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`,
-      },
+      headers: this.requestHeaders(),
       body: sortedStringify(payload),
     }, signal, undefined, protection);
 

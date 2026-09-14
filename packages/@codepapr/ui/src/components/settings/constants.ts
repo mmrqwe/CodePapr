@@ -2,10 +2,10 @@ import type { ApiFormat, ApiMode, Settings } from '../../store/agentStore';
 import type { SettingsTab } from './types';
 
 export const MODEL_PRESETS: Record<ApiMode | ApiFormat, string[]> = {
-  deepseek: ['deepseek-v4-pro', 'deepseek-flash', 'deepseek-chat', 'deepseek-reasoner'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3-mini'],
-  response: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini', 'doubao-1.5-pro-32k'],
-  claude: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest'],
+  deepseek: ['deepseek-v4-pro', 'deepseek-flash'],
+  openai: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.3-codex', 'gemini-3.8-flash', 'grok-4.6', 'kimi-k3', 'glm-5.3'],
+  response: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-6-astra', 'doubao-seed-2-1-pro-260628', 'doubao-seed-evolving', 'deepseek-v4-pro'],
+  claude: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5', 'anthropic/claude-opus-5', 'minimax-m3'],
   custom: [],
   local: ['local-model', 'qwen2.5-coder', 'llama3.1'],
 };
@@ -13,8 +13,8 @@ export const MODEL_PRESETS: Record<ApiMode | ApiFormat, string[]> = {
 export const LOCAL_URL_PLACEHOLDER = 'http://127.0.0.1:8080/v1（llama.cpp / Ollama / LM Studio）';
 
 export const CUSTOM_URL_PLACEHOLDERS: Record<ApiFormat, string> = {
-  openai: 'https://api.openai.com/v1 或兼容服务 /v1',
-  response: 'https://api.openai.com/v1 或火山方舟 /api/v3（Responses API /responses）',
+  openai: 'https://api.openai.com/v1 或兼容服务 /v1（Gemini / xAI / Kimi / GLM / OpenCode 等）',
+  response: 'https://api.openai.com/v1、火山方舟 /api/v3 或 OpenCode /zen/go/v1（Responses API /responses）',
   claude: 'https://api.anthropic.com/v1 或兼容 Claude Messages API',
 };
 

@@ -22,12 +22,15 @@ import {
 } from './streaming';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
+import {
+  applyOpencodeGatewayHeaders,
+  isOpencodeGatewayBase,
+  resolveOpencodeSessionId,
+} from './opencodeGateway';
 
 const log = new Logger('ResponseProvider');
 
-/** OpenCode Go 契约要求专属 User-Agent（形如 my-coding-agent/1.0）。
- *  版本号与应用发布版本同步 bump（见根 package.json）。 */
-export const CODEPAPR_OPENCODE_USER_AGENT = 'codepapr/0.1.0';
+export { CODEPAPR_OPENCODE_USER_AGENT } from './opencodeGateway';
 
 interface ResponseUsage {
   input_tokens?: number;
@@ -376,7 +379,7 @@ function finalizeNamedResponsesToolCalls(
 
 export class ResponseProvider extends BaseLLMProvider {
   name = 'response';
-  models = ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini', 'doubao-1.5-pro-32k'];
+  models = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'doubao-seed-2-1-pro-260628'];
 
   private readonly opencodeSessionId: string;
 
@@ -385,30 +388,24 @@ export class ResponseProvider extends BaseLLMProvider {
       baseURL: 'https://api.openai.com/v1',
       ...config,
     });
-    this.opencodeSessionId =
-      String(config.sessionId ?? '').trim() ||
-      `codepapr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    this.opencodeSessionId = resolveOpencodeSessionId(config.sessionId);
   }
 
-  private get isOpencodeGo(): boolean {
-    const base = String(this.config.baseURL ?? '').toLowerCase();
-    return base.includes('opencode.ai');
-  }
-
-  /** OpenCode Go 网关强制要求会话路由头（缺失 → 400 MissingSessionID），
+  /** OpenCode 网关强制要求会话路由头（缺失 → 400 MissingSessionID），
    *  并要求客户端以专属 User-Agent 标识自己（而非通用 HTTP 库默认值）。
    *  其余 Responses 兼容网关不注入任何额外头。 */
   private requestHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${this.config.apiKey}`,
-    };
-    if (this.isOpencodeGo) {
-      headers['x-opencode-session'] = this.opencodeSessionId;
-      headers['x-opencode-client'] = String(this.config.sessionClient ?? '').trim() || 'codepapr';
-      headers['User-Agent'] = CODEPAPR_OPENCODE_USER_AGENT;
-    }
-    return headers;
+    return applyOpencodeGatewayHeaders(
+      {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.apiKey}`,
+      },
+      {
+        baseURL: this.config.baseURL,
+        sessionId: this.opencodeSessionId,
+        sessionClient: this.config.sessionClient,
+      }
+    );
   }
 
   private getEndpointUrl(): string {
@@ -1081,7 +1078,7 @@ export class ResponseProvider extends BaseLLMProvider {
 
     // OpenCode Go 网关：开启会话级缓存路由、关闭服务端存储（与 x-opencode-* 头配套）。
     const extra: Record<string, unknown> = {};
-    if (this.isOpencodeGo) {
+    if (isOpencodeGatewayBase(this.config.baseURL)) {
       extra.prompt_cache_key = true;
       extra.store = false;
     }

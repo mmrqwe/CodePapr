@@ -22,6 +22,10 @@ import {
 } from './streaming';
 import { buildClaudeImageContent, ClaudeContentPart } from './imageContent';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
+import {
+  applyOpencodeGatewayHeaders,
+  resolveOpencodeSessionId,
+} from './opencodeGateway';
 
 const log = new Logger('ClaudeProvider');
 
@@ -222,16 +226,35 @@ function normalizeStopReason(stopReason: string | null | undefined): string {
 export class ClaudeProvider extends BaseLLMProvider {
   name = 'claude';
   models = [
-    'claude-opus-4-7',
-    'claude-sonnet-4-6',
-    'claude-haiku-4-5-20251001',
+    'claude-opus-5',
+    'claude-sonnet-5',
+    'claude-haiku-4-5',
   ];
+
+  private readonly opencodeSessionId: string;
 
   constructor(config: ProviderConfig) {
     super({
       baseURL: 'https://api.anthropic.com/v1',
       ...config,
     });
+    this.opencodeSessionId = resolveOpencodeSessionId(config.sessionId);
+  }
+
+  /** 命中 opencode 网关（如 Go 的 /messages 端点）时注入会话契约头。 */
+  private requestHeaders(): Record<string, string> {
+    return applyOpencodeGatewayHeaders(
+      {
+        'Content-Type': 'application/json',
+        'x-api-key': this.config.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      {
+        baseURL: this.config.baseURL,
+        sessionId: this.opencodeSessionId,
+        sessionClient: this.config.sessionClient,
+      }
+    );
   }
 
   async streamChat(
@@ -253,11 +276,7 @@ export class ClaudeProvider extends BaseLLMProvider {
       async () => {
         const response = await this.fetchWithRetry(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': this.config.apiKey,
-            'anthropic-version': '2023-06-01',
-          },
+          headers: this.requestHeaders(),
           body: sortedStringify(payload),
         }, signal, (attempt, maxRetries, err) => {
           onEvent({
@@ -477,11 +496,7 @@ export class ClaudeProvider extends BaseLLMProvider {
     const protection: { release: () => void } = { release: () => undefined };
     const response = await this.fetchWithRetry(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.config.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: this.requestHeaders(),
       body: sortedStringify(payload),
     }, signal, undefined, protection);
 
