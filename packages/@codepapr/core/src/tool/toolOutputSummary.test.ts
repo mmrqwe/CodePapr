@@ -54,7 +54,7 @@ describe('resolveToolContextMode', () => {
 });
 
 describe('resolveToolContextOverrides', () => {
-  it('provides auto baseline for heavy tools', () => {
+  it('provides auto baseline for heavy tools and full for task', () => {
     const merged = resolveToolContextOverrides({});
     expect(merged.lsp).toBe('auto');
     expect(merged.git).toBe('auto');
@@ -63,7 +63,7 @@ describe('resolveToolContextOverrides', () => {
     expect(merged.bash).toBe('auto');
     expect(merged.browser).toBe('auto');
     expect(merged.webfetch).toBe('auto');
-    expect(merged.task).toBe('auto');
+    expect(merged.task).toBe('full');
   });
 
   it('user overrides win over the built-in baseline', () => {
@@ -77,6 +77,7 @@ describe('resolveToolContextOverrides', () => {
     for (const tool of ['bash', 'browser', 'webfetch', 'graph', 'lsp', 'diagnostics', 'git']) {
       expect(DEFAULT_TOOL_CONTEXT_OVERRIDES[tool]).toBe('auto');
     }
+    expect(DEFAULT_TOOL_CONTEXT_OVERRIDES.task).toBe('full');
   });
 });
 
@@ -295,15 +296,34 @@ describe('prepareHistorySummary', () => {
     ).toBeUndefined();
   });
 
-  it('task is summarizable once it leaves the protected set', () => {
+  it('task keeps full text with the built-in baseline even when large', () => {
     const config = makeConfig({
       defaultMode: 'full',
       overrides: resolveToolContextOverrides({}),
     });
+    expect(
+      prepareHistorySummary(
+        {
+          toolName: 'task',
+          args: { agent: 'explore', prompt: 'survey' },
+          result: { agent: 'explore', content: 'x'.repeat(100), steps: [] },
+          success: true,
+          originalChars: 10_000,
+        },
+        config
+      )
+    ).toBeUndefined();
+  });
+
+  it('task is summarized when the user overrides the baseline to auto', () => {
+    const config = makeConfig({
+      defaultMode: 'full',
+      overrides: resolveToolContextOverrides({ task: 'auto' }),
+    });
     const summary = prepareHistorySummary(
       {
         toolName: 'task',
-        args: { agent: 'explore', prompt: 'survey' },
+        args: { agent: 'explore' },
         result: { agent: 'explore', content: 'x'.repeat(100), steps: [] },
         success: true,
         originalChars: 10_000,
@@ -311,25 +331,6 @@ describe('prepareHistorySummary', () => {
       config
     );
     expect(summary).toContain('[task] ✓ | explore');
-  });
-
-  it('task stays full when the user overrides the baseline back to full', () => {
-    const config = makeConfig({
-      defaultMode: 'full',
-      overrides: resolveToolContextOverrides({ task: 'full' }),
-    });
-    expect(
-      prepareHistorySummary(
-        {
-          toolName: 'task',
-          args: { agent: 'explore' },
-          result: { agent: 'explore', content: 'x', steps: [] },
-          success: true,
-          originalChars: 10_000,
-        },
-        config
-      )
-    ).toBeUndefined();
   });
 
   it('appends the reused spill path as a read-back pointer', () => {

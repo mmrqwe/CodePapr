@@ -15,9 +15,12 @@
  *
  * 交互类工具（question / todo / skill）永不摘要。
  *
- * 重输出工具（分析类 graph/lsp/diagnostics/git、执行类 bash/browser/webfetch、子代理 task）
+ * 重输出工具（分析类 graph/lsp/diagnostics/git、执行类 bash/browser/webfetch）
  * 由 DEFAULT_TOOL_CONTEXT_OVERRIDES 给出 'auto' 底线，组合根经 resolveToolContextOverrides
  * 与用户 override 合并（用户显式设置优先）：小输出保持全文，超阈值的大输出在历史中摘要。
+ * 子代理 task 例外：基线为 'full'，mentor/子代理的结论在历史中永久保留全文——
+ * 头+尾 3 行摘要会让模型下一轮就丢失结论中段（见 NewiPod 会话）；用户显式 override
+ * 仍可改回 auto/summary。
  *
  * 冻结摘要不是内容切片，而是结构化卡片：
  *  `[工具] ✓/✗ | 关键参数` → `规模统计（基于原始输出）` → `头+尾预览`
@@ -44,9 +47,14 @@ export const DEFAULT_AUTO_THRESHOLD_CHARS = 5_000;
 
 /**
  * 重输出工具的 built-in 底线覆盖：分析类（graph/lsp/diagnostics/git）、执行类
- * （bash/browser/webfetch）与子代理 task 默认 'auto'——小输出保持全文，超阈值的
- * 大输出（findReferences、大 diff、项目级诊断、构建日志、子代理长结论）在历史中摘要。
+ * （bash/browser/webfetch）默认 'auto'——小输出保持全文，超阈值的大输出
+ * （findReferences、大 diff、项目级诊断、构建日志）在历史中摘要。
  * 与 UI 设置的分类覆盖对齐（设置面板按「分析」「执行」整类共享下拉）。
+ *
+ * 子代理 task 的底线是 'full'：全仓库唯一一处「结论性长文本」出口，
+ * mentor/explore/scout 的答复一旦被 auto 摘要成「前 3 行 + 后 3 行」，
+ * 主代理下一轮就会以为「回复被工具截断」。上下文增长由 task 调用频率和
+ * 用户显式 override（auto/summary）控制，不用默认值省 token。
  */
 export const DEFAULT_TOOL_CONTEXT_OVERRIDES: Readonly<Record<string, ToolContextMode>> = {
   graph: 'auto',
@@ -56,7 +64,7 @@ export const DEFAULT_TOOL_CONTEXT_OVERRIDES: Readonly<Record<string, ToolContext
   bash: 'auto',
   browser: 'auto',
   webfetch: 'auto',
-  task: 'auto',
+  task: 'full',
 };
 
 /** 组合根合并覆盖：built-in 底线在下，用户显式 override 在上（用户优先）。 */
