@@ -2481,7 +2481,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             set({ _agent: null, _agentModel: null, _agentPromptKey: null, _agentSessionId: null });
           }
           // v5 卡点 1（交付）：双信号门 curator，fire-and-forget。只切「本回合」
-          // 消息——历史里的旧「必须…」线索不该每回合重复触发。
+          // 消息——历史里的旧「必须…」线索不该每回合重复触发。门未命中但文件
+          // 达预算压力线时，同卡点内兜底跑 consolidate 纯整理（ADR-017）。
           if (activeSessionId && get().workspacePath === workspacePath) {
             const turnHistory = get().sessionMessages[activeSessionId] ?? [];
             const anchorId = userMsg?.id;

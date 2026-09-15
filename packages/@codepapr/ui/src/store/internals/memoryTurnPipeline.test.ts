@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { runMemoryCuratorMock, readMemoryMdMock } = vi.hoisted(() => ({
+const { runMemoryCuratorMock, readMemoryMdMock, getMemoryMdPressureMock } = vi.hoisted(() => ({
   runMemoryCuratorMock: vi.fn(async (..._args: unknown[]): Promise<unknown> => ({ kind: 'nochange' })),
   readMemoryMdMock: vi.fn(async (): Promise<string | null> => '# 记忆\n- 条目\n'),
+  getMemoryMdPressureMock: vi.fn(() => ({ tokens: 0, lines: 0, overPressure: false })),
 }));
 
 vi.mock('../../utils/memoryCuratorRunner', () => ({
@@ -11,6 +12,7 @@ vi.mock('../../utils/memoryCuratorRunner', () => ({
 
 vi.mock('../../utils/memoryFile', () => ({
   readMemoryMd: readMemoryMdMock,
+  getMemoryMdPressure: getMemoryMdPressureMock,
 }));
 
 import {
@@ -45,6 +47,8 @@ beforeEach(() => {
   runMemoryCuratorMock.mockResolvedValue({ kind: 'nochange' });
   readMemoryMdMock.mockReset();
   readMemoryMdMock.mockResolvedValue('# 记忆\n- 条目\n');
+  getMemoryMdPressureMock.mockReset();
+  getMemoryMdPressureMock.mockReturnValue({ tokens: 0, lines: 0, overPressure: false });
   clearCuratorOutcomes();
 });
 
@@ -145,6 +149,97 @@ describe('交付卡点（多信号门）', () => {
     ).not.toThrow();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(getLastCuratorOutcome('/ws')).toMatchObject({ kind: 'failed' });
+  });
+});
+
+describe('预算压力整理（ADR-017：无信号也整理）', () => {
+  const bigMd = '# 大记忆\n- 条目\n';
+
+  it('无信号但文件达压力线 → consolidate 模式兜底触发', async () => {
+    readMemoryMdMock.mockResolvedValue(bigMd);
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 3900, lines: 110, overPressure: true });
+    await runDeliveryCuratorForTurn({
+      workspacePath: '/ws-press',
+      turnMessages: [userMsg('u1', '改一下按钮颜色'), assistantMsg('a1', '好了')],
+      settings,
+    });
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(1);
+    const call = runMemoryCuratorMock.mock.calls[0]![0] as { mode?: string; currentMd?: string };
+    expect(call.mode).toBe('consolidate');
+    expect(call.currentMd).toBe(bigMd);
+    expect(getLastCuratorOutcome('/ws-press')).toMatchObject({
+      kind: 'nochange',
+      trigger: 'turn',
+      mode: 'consolidate',
+    });
+  });
+
+  it('信号命中且超预算 → 同样切 consolidate（新事实合并 + 压缩一把过）', async () => {
+    readMemoryMdMock.mockResolvedValue(bigMd);
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 3900, lines: 110, overPressure: true });
+    await runDeliveryCuratorForTurn({
+      workspacePath: '/ws-sig',
+      turnMessages: [userMsg('u1', '记住：端口是 5432'), assistantMsg('a1', '好')],
+      settings,
+    });
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(1);
+    expect(
+      (runMemoryCuratorMock.mock.calls[0]![0] as { mode?: string }).mode
+    ).toBe('consolidate');
+  });
+
+  it('节流：整理未落盘且文件未变 → 不再重复触发；文件变化后恢复', async () => {
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 3900, lines: 110, overPressure: true });
+    readMemoryMdMock.mockResolvedValue(bigMd);
+    const turn = {
+      workspacePath: '/ws-wall',
+      turnMessages: [userMsg('u1', '改颜色'), assistantMsg('a1', '好了')],
+      settings,
+    };
+    await runDeliveryCuratorForTurn(turn);
+    await runDeliveryCuratorForTurn(turn);
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(1);
+
+    readMemoryMdMock.mockResolvedValue('# 大记忆 v2\n- 条目\n');
+    await runDeliveryCuratorForTurn(turn);
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('整理成功落盘 → 节流墙清除（仍超线时下一回合继续迭代压缩）', async () => {
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 3900, lines: 110, overPressure: true });
+    readMemoryMdMock.mockResolvedValue(bigMd);
+    runMemoryCuratorMock.mockResolvedValue({ kind: 'updated', written: true });
+    const turn = {
+      workspacePath: '/ws-iter',
+      turnMessages: [userMsg('u1', '改颜色'), assistantMsg('a1', '好了')],
+      settings,
+    };
+    await runDeliveryCuratorForTurn(turn);
+    await runDeliveryCuratorForTurn(turn);
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('pre-compact：文件达压力线 → consolidate 模式；否则 update', async () => {
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 3900, lines: 110, overPressure: true });
+    await runPreCompactCurator({
+      workspacePath: '/ws-p',
+      skeleton: [{ userId: 'u1', q: 'q', a: 'a' }],
+      settings,
+    });
+    expect(
+      (runMemoryCuratorMock.mock.calls[0]![0] as { mode?: string }).mode
+    ).toBe('consolidate');
+
+    runMemoryCuratorMock.mockClear();
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 100, lines: 5, overPressure: false });
+    await runPreCompactCurator({
+      workspacePath: '/ws-p',
+      skeleton: [{ userId: 'u1', q: 'q', a: 'a' }],
+      settings,
+    });
+    expect(
+      (runMemoryCuratorMock.mock.calls[0]![0] as { mode?: string }).mode
+    ).toBe('update');
   });
 });
 

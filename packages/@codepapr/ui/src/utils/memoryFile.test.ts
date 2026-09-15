@@ -15,9 +15,12 @@ vi.mock('./projectStorage', () => ({
 }));
 
 import {
+  MEMORY_MD_CONSOLIDATION_RATIO,
   MEMORY_MD_MAX_LINES,
   MEMORY_MD_MAX_TOKENS,
   MEMORY_MD_PATH,
+  MEMORY_MD_TARGET_TOKENS,
+  getMemoryMdPressure,
   loadMemorySectionForPrompt,
   requestMemoryMdWrite,
   validateMemoryMdContent,
@@ -115,6 +118,38 @@ describe('validateMemoryMdContent', () => {
     // 标题与表格分隔行不算单元：只改标题措辞不触发（无条目丢失）。
     const retitled = prev.replace('# 项目与用户长期记忆', '# 项目长期记忆');
     expect(validateMemoryMdContent(prev, retitled, 'memory-curator').ok).toBe(true);
+  });
+});
+
+describe('getMemoryMdPressure（预算压力线：≥90% 硬顶）', () => {
+  it('空文件/小文件 → 无压力', () => {
+    expect(getMemoryMdPressure(null)).toMatchObject({ tokens: 0, lines: 0, overPressure: false });
+    expect(getMemoryMdPressure('   ').overPressure).toBe(false);
+    expect(getMemoryMdPressure('# 记忆\n- 一条\n').overPressure).toBe(false);
+  });
+
+  it('tokens 达 90%（3600）→ 触发；未达不触发（trim 口径与写入校验一致）', () => {
+    const over = `- ${'事'.repeat(4800)}`; // 14402B → 3601 tokens
+    const under = `- ${'事'.repeat(4700)}`; // 14102B → 3526 tokens
+    expect(estimateTokens(under)).toBeLessThan(MEMORY_MD_MAX_TOKENS * MEMORY_MD_CONSOLIDATION_RATIO);
+    expect(getMemoryMdPressure(over)).toMatchObject({
+      tokens: estimateTokens(over),
+      overPressure: true,
+    });
+    expect(getMemoryMdPressure(under).overPressure).toBe(false);
+    // 首尾空白不进预算（与 validateMemoryMdContent 的 trimmed 口径一致）。
+    expect(getMemoryMdPressure(`\n${over}\n  `).tokens).toBe(estimateTokens(over));
+  });
+
+  it('行数达 90%（108/120）→ 触发', () => {
+    const lines = ['# t', ...Array.from({ length: 107 }, (_, i) => `- x${i}`)].join('\n');
+    expect(getMemoryMdPressure(lines)).toMatchObject({ lines: 108, overPressure: true });
+  });
+
+  it('整理目标线低于触发线（留出余量）', () => {
+    expect(MEMORY_MD_TARGET_TOKENS).toBeLessThan(
+      MEMORY_MD_MAX_TOKENS * MEMORY_MD_CONSOLIDATION_RATIO
+    );
   });
 });
 

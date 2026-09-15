@@ -512,7 +512,7 @@
             <div class="addr">MEM</div>
             <div class="name">.CodePapr/MEMORY.md<span class="cchip c-text">项目记忆文件</span><span class="exp"></span></div>
           </div>
-          <div class="desc">工作区内的单一 Markdown 文件（三节：用户偏好与约束 / 技术栈与环境约束 / 架构与业务已知事实），硬上限 120 行 / 约 4000 tokens。内置记忆管家在交付（双信号门）与压缩前（无条件，20s 超时）两个卡点自动维护；密钥脱敏、注入指令 / 危险命令 / 超限 / 洗记忆操作拒写。</div>
+          <div class="desc">工作区内的单一 Markdown 文件（三节：用户偏好与约束 / 技术栈与环境约束 / 架构与业务已知事实），硬上限 120 行 / 约 4000 tokens。内置记忆管家在交付（双信号门）与压缩前（无条件，20s 超时）两个卡点自动维护；用量达 90% 预算时即使无信号也自动整理压缩（consolidate 模式，压回 ≤3200 tokens / ≤100 行，未落盘且文件未变则节流不重试）。密钥脱敏、注入指令 / 危险命令 / 超限 / 洗记忆操作拒写；管家每次动作追加到 <code>.CodePapr/logs/memory-curator.log</code>。</div>
           <div class="more"><div class="mbox">Agent 无 <code>memory_*</code> 工具，直写文件会被拦截拒绝；每回合直读文件渲染会话引导（保存后下一回合生效）。面板（上下文检查器 → 记忆）就是该文件的编辑器：预算条 + 保存 + 管家状态行。</div></div>
         </div>
       </section>

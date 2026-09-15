@@ -2,7 +2,7 @@
 
 - 状态: Accepted
 - 日期: 2026-09-12
-- 关联: 取代 [ADR-009](./ADR-009-memory-recall-b3.md)（Recall B3）与 [ADR-011](./ADR-011-retire-memory-md.md)（账本 + 面板为唯一记忆面）；废止 [ADR-010](./ADR-010-memory-zero-inbox.md) 的账本入队机制与 [ADR-014](./ADR-014-retire-cold-start-memory-bootstrap.md) 的账本语境；沿用 [ADR-001](./ADR-001-context-architecture-layers.md) / [ADR-004](./ADR-004-bootstrap-exclusion.md) 的分层与 Bootstrap 契约、[ADR-015](./ADR-015-skeleton-compaction-v4.md) 的 epoch 提交
+- 关联: 取代 [ADR-009](./ADR-009-memory-recall-b3.md)（Recall B3）与 [ADR-011](./ADR-011-retire-memory-md.md)（账本 + 面板为唯一记忆面）；废止 [ADR-010](./ADR-010-memory-zero-inbox.md) 的账本入队机制与 [ADR-014](./ADR-014-retire-cold-start-memory-bootstrap.md) 的账本语境；沿用 [ADR-001](./ADR-001-context-architecture-layers.md) / [ADR-004](./ADR-004-bootstrap-exclusion.md) 的分层与 Bootstrap 契约、[ADR-015](./ADR-015-skeleton-compaction-v4.md) 的 epoch 提交；后续由 [ADR-017](./ADR-017-memory-budget-consolidation.md) 补充预算压力触发（≥90% 自动整理）
 
 ## 背景
 
@@ -37,6 +37,8 @@ internal 子代理（零工具、fast 档、复用压缩模型/温度、prompt �
 - **压缩前卡点**：任意压缩入口（回合末 epoch、`/compact`、Goal force、mid-loop 提交前）**无条件**运行，20s 超时；超时即 abort 在飞会话（写盘前 aborted 检查兜底），本 epoch 沿用压缩前记忆，面板状态行显示 timeout。压缩本来就重置前缀缓存，这一刀零额外成本；写入发生在 epoch 重渲染 Bootstrap 之前，新记忆立刻随 epoch 生效。
 
 管家输出三选一：完整 MEMORY.md 内容 / `NO_CHANGE` / 拒绝说明。写入走 `requestMemoryMdWrite` 单飞队列 + `expectedContent` 并发守卫（读取后被并发修改则拒绝，面板重载后再试）。
+
+> 修订（[ADR-017](./ADR-017-memory-budget-consolidation.md)）：文件用量达硬顶 90% 时，交付卡点无视信号跑一次 `consolidate` 模式纯整理，压缩前卡点同样切整理模式；整理未落盘且文件未变则节流不重试，管家提示词恒携带预算实况与输出上限。
 
 ### 3. 素材边界与机械门
 

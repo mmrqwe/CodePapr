@@ -21,6 +21,37 @@ export const MEMORY_MD_PATH = '.CodePapr/MEMORY.md';
 /** 写盘硬顶（估算口径）：注入预算与文件预算同源，注入端不再截断。 */
 export const MEMORY_MD_MAX_TOKENS = 4_000;
 export const MEMORY_MD_MAX_LINES = 120;
+/** 预算压力线：用量达硬顶该比例即触发自动整理（提前压缩，避免满额后新事实写不进）。 */
+export const MEMORY_MD_CONSOLIDATION_RATIO = 0.9;
+/** 整理目标：压到硬顶该比例以下，给后续新条目留余量（管家提示词用）。 */
+export const MEMORY_MD_TARGET_RATIO = 0.8;
+export const MEMORY_MD_TARGET_TOKENS = Math.floor(MEMORY_MD_MAX_TOKENS * MEMORY_MD_TARGET_RATIO);
+/** 行数目标沿用提示词既有的 100 行（≈83%，低于 90% 触发线）。 */
+export const MEMORY_MD_TARGET_LINES = 100;
+
+export interface MemoryMdPressure {
+  tokens: number;
+  lines: number;
+  /** tokens 或 lines 达触发线（≥90% 硬顶）。 */
+  overPressure: boolean;
+}
+
+/** 与 validateMemoryMdContent 同口径（trim + estimateTokens）的预算读数。 */
+export function getMemoryMdPressure(content: string | null | undefined): MemoryMdPressure {
+  const trimmed = content?.trim() ?? '';
+  if (!trimmed) {
+    return { tokens: 0, lines: 0, overPressure: false };
+  }
+  const tokens = estimateTokens(trimmed);
+  const lines = trimmed.split(/\r?\n/).length;
+  return {
+    tokens,
+    lines,
+    overPressure:
+      tokens >= MEMORY_MD_MAX_TOKENS * MEMORY_MD_CONSOLIDATION_RATIO ||
+      lines >= MEMORY_MD_MAX_LINES * MEMORY_MD_CONSOLIDATION_RATIO,
+  };
+}
 
 export type MemoryMdLang = 'zh-CN' | 'zh-TW' | 'en';
 

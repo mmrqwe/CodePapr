@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { runCompactorSessionMock, invokeMock } = vi.hoisted(() => ({
-  runCompactorSessionMock: vi.fn(async (): Promise<unknown> => ({ content: 'NO_CHANGE' })),
+  runCompactorSessionMock: vi.fn(
+    async (..._args: unknown[]): Promise<unknown> => ({ content: 'NO_CHANGE' })
+  ),
   invokeMock: vi.fn(async (_cmd: string, _args?: Record<string, unknown>): Promise<unknown> => ({})),
 }));
 
@@ -23,6 +25,7 @@ import {
   parseCuratorOutput,
   runMemoryCurator,
 } from './memoryCuratorRunner';
+import { MEMORY_MD_MAX_TOKENS, MEMORY_MD_TARGET_TOKENS } from './memoryFile';
 import type { CompactionSettings } from '../store/internals/types';
 
 const currentMd = '# 项目与用户长期记忆\n\n## 用户偏好与约束\n- 统一使用 pnpm\n';
@@ -68,6 +71,17 @@ describe('buildCuratorUserPrompt', () => {
     expect(prompt).toContain('统一使用 pnpm');
     expect(prompt).toContain('<interaction>');
     expect(buildCuratorUserPrompt({ currentMd: null, material: 'x' })).toContain('文件尚不存在');
+  });
+
+  it('注入预算实况与输出上限（模型知道 token 硬顶，避免满额重写被整体拒）', () => {
+    const prompt = buildCuratorUserPrompt({ currentMd, material: 'x' });
+    expect(prompt).toContain(`/${MEMORY_MD_MAX_TOKENS} tokens`);
+    expect(prompt).toContain(`${MEMORY_MD_TARGET_TOKENS} tokens`);
+    expect(prompt).toContain('预算状态');
+  });
+
+  it('空素材 → 占位说明（consolidate 纯整理）', () => {
+    expect(buildCuratorUserPrompt({ currentMd, material: '   ' })).toContain('无新素材：仅压缩整理');
   });
 });
 
@@ -182,6 +196,42 @@ describe('runMemoryCurator', () => {
     });
     expect(result.kind).toBe('nochange');
     expect(runCompactorSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('consolidate 模式允许空素材：调模型且系统提示词含整理模式', async () => {
+    runCompactorSessionMock.mockResolvedValue({ content: 'NO_CHANGE' });
+    const result = await runMemoryCurator({
+      workspacePath: '/ws',
+      currentMd,
+      material: '   ',
+      settings,
+      lang: 'zh-CN',
+      mode: 'consolidate',
+    });
+    expect(result.kind).toBe('nochange');
+    expect(runCompactorSessionMock).toHaveBeenCalledTimes(1);
+    const call = runCompactorSessionMock.mock.calls[0]![0] as {
+      definition: { prompt: string };
+      prompt: string;
+    };
+    expect(call.definition.prompt).toContain('整理模式');
+    expect(call.prompt).toContain('无新素材：仅压缩整理');
+  });
+
+  it('update 模式不带整理附录（常规归整提示词保持窗口）', async () => {
+    runCompactorSessionMock.mockResolvedValue({ content: 'NO_CHANGE' });
+    await runMemoryCurator({
+      workspacePath: '/ws',
+      currentMd,
+      material: 'User: x\nAssistant: y',
+      settings,
+      lang: 'zh-CN',
+      mode: 'update',
+    });
+    const call = runCompactorSessionMock.mock.calls[0]![0] as {
+      definition: { prompt: string };
+    };
+    expect(call.definition.prompt).not.toContain('整理模式');
   });
 
   it('模型抛错 → failed（不上抛）', async () => {
