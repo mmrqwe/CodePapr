@@ -1,3 +1,5 @@
+Out cycling, back Oct 7
+
 # CodePapr
 
 > **[codepapr.com](https://codepapr.com/)** — Website / Download / Docs
