@@ -1070,7 +1070,7 @@ describe('app_start 后端启动工作目录', () => {
       if (command === 'check_port_owned_by') return true;
       if (command === 'check_port_bind_address') return ['*'];
       if (command === 'stop_background_process') return { stopped: true };
-      if (command === 'background_process_exit_info') return null;
+      if (command === 'background_process_exit_info') return {};
       return {};
     });
 
