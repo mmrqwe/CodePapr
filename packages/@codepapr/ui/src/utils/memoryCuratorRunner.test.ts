@@ -25,7 +25,12 @@ import {
   parseCuratorOutput,
   runMemoryCurator,
 } from './memoryCuratorRunner';
-import { MEMORY_MD_MAX_TOKENS, MEMORY_MD_TARGET_TOKENS } from './memoryFile';
+import {
+  MEMORY_MD_MAX_LINES,
+  MEMORY_MD_MAX_TOKENS,
+  MEMORY_MD_TARGET_LINES,
+  MEMORY_MD_TARGET_TOKENS,
+} from './memoryFile';
 import type { CompactionSettings } from '../store/internals/types';
 
 const currentMd = '# 项目与用户长期记忆\n\n## 用户偏好与约束\n- 统一使用 pnpm\n';
@@ -73,11 +78,21 @@ describe('buildCuratorUserPrompt', () => {
     expect(buildCuratorUserPrompt({ currentMd: null, material: 'x' })).toContain('文件尚不存在');
   });
 
-  it('注入预算实况与输出上限（模型知道 token 硬顶，避免满额重写被整体拒）', () => {
+  it('更新模式上限是硬顶；整理模式把目标线写成会被拒绝的上限', () => {
     const prompt = buildCuratorUserPrompt({ currentMd, material: 'x' });
     expect(prompt).toContain(`/${MEMORY_MD_MAX_TOKENS} tokens`);
-    expect(prompt).toContain(`${MEMORY_MD_TARGET_TOKENS} tokens`);
-    expect(prompt).toContain('预算状态');
+    expect(prompt).toContain(`${MEMORY_MD_MAX_TOKENS} tokens / ${MEMORY_MD_MAX_LINES} 行`);
+    expect(prompt).not.toContain('不会落盘');
+
+    const consolidated = buildCuratorUserPrompt({
+      currentMd,
+      material: 'x',
+      mode: 'consolidate',
+    });
+    expect(consolidated).toContain(
+      `${MEMORY_MD_TARGET_TOKENS} tokens / ${MEMORY_MD_TARGET_LINES} 行`
+    );
+    expect(consolidated).toContain('不会落盘');
   });
 
   it('空素材 → 占位说明（consolidate 纯整理）', () => {
@@ -149,6 +164,21 @@ describe('runMemoryCurator', () => {
       lang: 'zh-CN',
     });
     expect(result.kind).toBe('nochange');
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'write_text_file')).toBe(false);
+  });
+
+  it('consolidate 超过目标线 → rejected 且不写盘', async () => {
+    runCompactorSessionMock.mockResolvedValue({ content: `- ${'字'.repeat(4500)}\n` });
+    const result = await runMemoryCurator({
+      workspacePath: '/ws',
+      currentMd,
+      material: '',
+      settings,
+      lang: 'zh-CN',
+      mode: 'consolidate',
+    });
+    expect(result.kind).toBe('rejected');
+    expect(result.kind === 'rejected' && result.reasons).toContain('over-target:tokens');
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'write_text_file')).toBe(false);
   });
 

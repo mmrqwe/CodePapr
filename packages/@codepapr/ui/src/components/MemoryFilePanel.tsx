@@ -27,6 +27,8 @@ function describeReason(
   if (reason === 'concurrent-change') return t.memoryFileConflict;
   if (reason.startsWith('risk:')) return t.memoryFileRejectRisk;
   if (reason.startsWith('mass-drop:')) return t.memoryFileRejectMassDrop;
+  if (reason.startsWith('over-target')) return t.memoryFileRejectOverTarget;
+  if (reason.startsWith('consolidate-wash:')) return t.memoryFileRejectConsolidateWash;
   if (reason.startsWith('write-failed:')) return reason.slice('write-failed:'.length);
   return reason;
 }

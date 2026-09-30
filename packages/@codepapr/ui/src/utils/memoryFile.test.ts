@@ -19,6 +19,7 @@ import {
   MEMORY_MD_MAX_LINES,
   MEMORY_MD_MAX_TOKENS,
   MEMORY_MD_PATH,
+  MEMORY_MD_TARGET_LINES,
   MEMORY_MD_TARGET_TOKENS,
   getMemoryMdPressure,
   loadMemorySectionForPrompt,
@@ -118,6 +119,40 @@ describe('validateMemoryMdContent', () => {
     // 标题与表格分隔行不算单元：只改标题措辞不触发（无条目丢失）。
     const retitled = prev.replace('# 项目与用户长期记忆', '# 项目长期记忆');
     expect(validateMemoryMdContent(prev, retitled, 'memory-curator').ok).toBe(true);
+  });
+
+  it('整理模式：原文留下的子集可以删过半；换成另一份记忆则拒', () => {
+    const prev = `# t\n- 端口固定 5432\n- 构建用 pnpm build\n- 测试用 pnpm test\n- 统一使用 pnpm\n`;
+    const subset = `# t\n- 端口固定 5432\n`;
+    expect(validateMemoryMdContent(prev, subset, 'memory-curator').reasons).toContain('mass-drop:3');
+    expect(validateMemoryMdContent(prev, subset, 'memory-curator', { consolidate: true }).ok).toBe(true);
+
+    const tightened = `# t\n- 端口固定 5432（备用 5433）\n`;
+    expect(validateMemoryMdContent(prev, tightened, 'memory-curator', { consolidate: true }).ok).toBe(true);
+
+    const washed = `# t\n- 今天天气不错\n- 改去写别的项目\n`;
+    const verdict = validateMemoryMdContent(prev, washed, 'memory-curator', { consolidate: true });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reasons.some((reason) => reason.startsWith('consolidate-wash:'))).toBe(true);
+  });
+
+  it('整理模式：未压回目标线则拒；更新模式仍只看硬顶', () => {
+    const overTarget = `- ${'字'.repeat(4500)}`;
+    expect(estimateTokens(overTarget)).toBeGreaterThan(MEMORY_MD_TARGET_TOKENS);
+    expect(estimateTokens(overTarget)).toBeLessThanOrEqual(MEMORY_MD_MAX_TOKENS);
+    expect(
+      validateMemoryMdContent(null, overTarget, 'memory-curator', { consolidate: true }).reasons
+    ).toContain('over-target:tokens');
+    expect(validateMemoryMdContent(null, overTarget, 'memory-curator').ok).toBe(true);
+
+    const manyLines = ['# t', ...Array.from({ length: MEMORY_MD_TARGET_LINES }, (_, i) => `- x${i}`)].join(
+      '\n'
+    );
+    expect(manyLines.split('\n').length).toBe(MEMORY_MD_TARGET_LINES + 1);
+    expect(
+      validateMemoryMdContent(null, manyLines, 'memory-curator', { consolidate: true }).reasons
+    ).toContain('over-target:lines');
+    expect(validateMemoryMdContent(null, manyLines, 'panel').ok).toBe(true);
   });
 });
 

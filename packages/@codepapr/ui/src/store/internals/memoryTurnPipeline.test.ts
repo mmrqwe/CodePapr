@@ -219,6 +219,60 @@ describe('预算压力整理（ADR-017：无信号也整理）', () => {
     expect(runMemoryCuratorMock).toHaveBeenCalledTimes(2);
   });
 
+  it('节流墙挡住仅有测试命令的重试；显式记住可以破墙', async () => {
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 3900, lines: 110, overPressure: true });
+    readMemoryMdMock.mockResolvedValue(bigMd);
+    const tested = {
+      workspacePath: '/ws-test-wall',
+      turnMessages: [userMsg('u1', '跑一下'), assistantMsg('a1', '全绿', 'pnpm test')],
+      settings,
+    };
+    await runDeliveryCuratorForTurn(tested);
+    await runDeliveryCuratorForTurn(tested);
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(1);
+
+    await runDeliveryCuratorForTurn({
+      workspacePath: '/ws-test-wall',
+      turnMessages: [userMsg('u2', '记住：端口是 5432'), assistantMsg('a2', '好')],
+      settings,
+    });
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('未超压时显式记住不受整理节流墙影响', async () => {
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 3900, lines: 110, overPressure: true });
+    readMemoryMdMock.mockResolvedValue(bigMd);
+    await runDeliveryCuratorForTurn({
+      workspacePath: '/ws-under',
+      turnMessages: [userMsg('u1', '改颜色'), assistantMsg('a1', '好了')],
+      settings,
+    });
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 100, lines: 5, overPressure: false });
+    await runDeliveryCuratorForTurn({
+      workspacePath: '/ws-under',
+      turnMessages: [userMsg('u2', '记住：端口是 5432'), assistantMsg('a2', '好')],
+      settings,
+    });
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(2);
+    expect((runMemoryCuratorMock.mock.calls[1]![0] as { mode?: string }).mode).toBe('update');
+  });
+
+  it('压缩前整理未落盘后，仅测试命令的交付不再重试', async () => {
+    getMemoryMdPressureMock.mockReturnValue({ tokens: 3900, lines: 110, overPressure: true });
+    readMemoryMdMock.mockResolvedValue(bigMd);
+    await runPreCompactCurator({
+      workspacePath: '/ws-compact-wall',
+      skeleton: [{ userId: 'u1', q: 'q', a: 'a' }],
+      settings,
+    });
+    await runDeliveryCuratorForTurn({
+      workspacePath: '/ws-compact-wall',
+      turnMessages: [userMsg('u1', '跑一下'), assistantMsg('a1', '全绿', 'pnpm test')],
+      settings,
+    });
+    expect(runMemoryCuratorMock).toHaveBeenCalledTimes(1);
+  });
+
   it('pre-compact：文件达压力线 → consolidate 模式；否则 update', async () => {
     getMemoryMdPressureMock.mockReturnValue({ tokens: 3900, lines: 110, overPressure: true });
     await runPreCompactCurator({

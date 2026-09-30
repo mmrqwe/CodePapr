@@ -88,7 +88,7 @@ const CURATOR_CONSOLIDATION_APPENDIX: Record<MemoryMdLang, string> = {
 【整理模式】文件预算已接近或触及硬顶（上限 ${MEMORY_MD_MAX_TOKENS} tokens / ${MEMORY_MD_MAX_LINES} 行），本轮可能没有任何新事实。你的任务是压缩整理而非扩充：
 - 合并语义重复或同族的条目；精简冗长表述；删除已过时、可即时探测（目录树、依赖清单等）或信息量极低的条目；
 - 必须保留全部稳定的用户偏好、禁令与关键架构事实，不得发明新事实；
-- 输出必须不超过 ${MEMORY_MD_TARGET_TOKENS} tokens 且不超过 ${MEMORY_MD_TARGET_LINES} 行；
+- 输出必须不超过 ${MEMORY_MD_TARGET_TOKENS} tokens 且不超过 ${MEMORY_MD_TARGET_LINES} 行，超过会被直接拒绝、不会落盘；
 - 若所有条目都必要且已无可压缩空间：只输出 NO_CHANGE。
 有新事实时按正常判断一并合并进去，同时完成上述压缩。`,
   'zh-TW': `
@@ -96,7 +96,7 @@ const CURATOR_CONSOLIDATION_APPENDIX: Record<MemoryMdLang, string> = {
 【整理模式】檔案預算已接近或觸及硬頂（上限 ${MEMORY_MD_MAX_TOKENS} tokens / ${MEMORY_MD_MAX_LINES} 行），本輪可能沒有任何新事實。你的任務是壓縮整理而非擴充：
 - 合併語意重複或同族的條目；精簡冗長表述；刪除已過時、可即時探測（目錄樹、依賴清單等）或資訊量極低的條目；
 - 必須保留全部穩定的使用者偏好、禁令與關鍵架構事實，不得發明新事實；
-- 輸出必須不超過 ${MEMORY_MD_TARGET_TOKENS} tokens 且不超過 ${MEMORY_MD_TARGET_LINES} 行；
+- 輸出必須不超過 ${MEMORY_MD_TARGET_TOKENS} tokens 且不超過 ${MEMORY_MD_TARGET_LINES} 行，超過會被直接拒絕、不會落盤；
 - 若所有條目都必要且已無可壓縮空間：只輸出 NO_CHANGE。
 有新事實時按正常判斷一併合併進去，同時完成上述壓縮。`,
   en: `
@@ -104,7 +104,7 @@ const CURATOR_CONSOLIDATION_APPENDIX: Record<MemoryMdLang, string> = {
 [CONSOLIDATION MODE] The file is at or near its hard budget (${MEMORY_MD_MAX_TOKENS} tokens / ${MEMORY_MD_MAX_LINES} lines) and this turn may bring no new facts. Your job is compaction, not expansion:
 - merge duplicate or same-family entries; tighten verbose wording; delete outdated, instantly-detectable (directory trees, dependency lists) or low-value entries;
 - keep every stable user preference, prohibition and key architecture fact; never invent facts;
-- output must be at most ${MEMORY_MD_TARGET_TOKENS} tokens and ${MEMORY_MD_TARGET_LINES} lines;
+- output must be at most ${MEMORY_MD_TARGET_TOKENS} tokens and ${MEMORY_MD_TARGET_LINES} lines; anything over that is rejected and not written;
 - if every entry is necessary and nothing can be compressed: output exactly NO_CHANGE.
 If new facts are present, fold them in while applying the compaction above.`,
 };
@@ -142,16 +142,24 @@ export interface CuratorPromptParts {
   material: string;
 }
 
-export function buildCuratorUserPrompt(parts: CuratorPromptParts): string {
+export function buildCuratorUserPrompt(
+  parts: CuratorPromptParts & { mode?: MemoryCuratorMode }
+): string {
   const current = parts.currentMd?.trim() || '（文件尚不存在）';
   const material = parts.material.trim() || '（无新素材：仅压缩整理）';
   const pressure = getMemoryMdPressure(parts.currentMd);
+  const consolidate = parts.mode === 'consolidate';
+  const capTokens = consolidate ? MEMORY_MD_TARGET_TOKENS : MEMORY_MD_MAX_TOKENS;
+  const capLines = consolidate ? MEMORY_MD_TARGET_LINES : MEMORY_MD_MAX_LINES;
+  const capNote = consolidate
+    ? `整理输出上限 ${capTokens} tokens / ${capLines} 行（超过会被拒绝，不会落盘）。`
+    : `输出上限 ${capTokens} tokens / ${capLines} 行。`;
   return `当前记忆文件：
 <current_memory>
 ${current}
 </current_memory>
 
-预算状态：约 ${pressure.tokens}/${MEMORY_MD_MAX_TOKENS} tokens、${pressure.lines}/${MEMORY_MD_MAX_LINES} 行；输出上限 ${MEMORY_MD_TARGET_TOKENS} tokens / ${MEMORY_MD_TARGET_LINES} 行。
+预算状态：约 ${pressure.tokens}/${MEMORY_MD_MAX_TOKENS} tokens、${pressure.lines}/${MEMORY_MD_MAX_LINES} 行。${capNote}
 
 本轮交互摘要：
 <interaction>
@@ -170,7 +178,11 @@ export type CuratorOutcome =
 const NO_CHANGE_PATTERN = /^NO_CHANGE[.\s]*$/;
 
 /** 纯解析：curator 原始输出 → 语义结果（不落盘，供单测与写路径共用）。 */
-export function parseCuratorOutput(raw: string | null | undefined, currentMd: string | null): CuratorOutcome {
+export function parseCuratorOutput(
+  raw: string | null | undefined,
+  currentMd: string | null,
+  options?: { consolidate?: boolean }
+): CuratorOutcome {
   const content = raw?.trim();
   if (!content) {
     return { kind: 'failed', message: 'curator 输出为空' };
@@ -181,7 +193,9 @@ export function parseCuratorOutput(raw: string | null | undefined, currentMd: st
   // 剥掉常见的围栏包裹（模型偶发不守协议）。
   const fenced = /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/.exec(content);
   const body = (fenced ? fenced[1] : content).trim();
-  const verdict = validateMemoryMdContent(currentMd, body, 'memory-curator');
+  const verdict = validateMemoryMdContent(currentMd, body, 'memory-curator', {
+    consolidate: options?.consolidate,
+  });
   if (!verdict.ok) {
     return { kind: 'rejected', reasons: verdict.reasons };
   }
@@ -209,7 +223,8 @@ export async function runMemoryCurator(
 ): Promise<CuratorOutcome & { written?: boolean }> {
   const { workspacePath, currentMd, material, settings, lang, abortSignal } = params;
   const mode: MemoryCuratorMode = params.mode ?? 'update';
-  if (!material.trim() && mode !== 'consolidate') {
+  const consolidate = mode === 'consolidate';
+  if (!material.trim() && !consolidate) {
     return { kind: 'nochange' };
   }
   const baseModel = settings.model.trim();
@@ -221,13 +236,13 @@ export async function runMemoryCurator(
   try {
     const result = await runCompactorSession({
       definition: { ...definition, prompt: systemPrompt },
-      prompt: buildCuratorUserPrompt({ currentMd, material }),
+      prompt: buildCuratorUserPrompt({ currentMd, material, mode }),
       settings,
       baseModel,
       lang,
       abortSignal,
     });
-    const outcome = parseCuratorOutput(result.content, currentMd);
+    const outcome = parseCuratorOutput(result.content, currentMd, { consolidate });
     if (outcome.kind !== 'updated') {
       return outcome;
     }
@@ -239,6 +254,7 @@ export async function runMemoryCurator(
     const written = await requestMemoryMdWrite(workspacePath, outcome.content, {
       expectedContent: currentMd,
       origin: 'memory-curator',
+      consolidate,
     });
     if (!written.ok) {
       return { kind: 'rejected', reasons: written.reasons, written: false };

@@ -2,9 +2,10 @@
  * memoryTurnPipeline（v5）：MEMORY.md 两个维护卡点的接线层。
  *
  * - 卡点 1（交付）：回合结束处异步调 curator（fire-and-forget，不阻塞回合收尾）。
- *   双信号门命中走 update 模式；门未命中但文件预算达压力线（≥90% 硬顶）时，
- *   无视信号跑一次 consolidate 模式纯整理（ADR-017）——否则满额文件里的新事实
- *   永远写不进去。素材 = 本轮用户原话 + 最终 assistant 文本（绝不含工具输出）。
+ *   双信号门命中走 update 模式；文件预算达压力线（≥90% 硬顶）时切 consolidate。
+ *   整理未落盘且文件未变则节流：之后只有显式记住 / 持久禁令 / 记忆候选能再试，
+ *   成功的测试命令不再每次冲破节流墙。素材 = 本轮用户原话 + 最终 assistant 文本
+ *   （绝不含工具输出）。
  * - 卡点 2（pre-compact）：epoch 提交前，无条件、带超时 await curator；文件达
  *   压力线时同样切 consolidate 模式。素材 = 本次压缩将折叠的 v4 骨架
  *   （[轮次 n] Q/A + 轮内步骤行）。压缩本来就重置前缀缓存，这一刀的缓存成本
@@ -51,9 +52,10 @@ export interface CuratorAuditEntry {
 const lastOutcome = new Map<string, CuratorAuditEntry>();
 
 /**
- * 预算压力整理节流：记录上次「未落盘」整理尝试时的文件内容；文件未变则不再
- * 重复触发（无可压缩空间时避免每回合空烧一次 fast 档调用）。curator 成功
- * 写入后内容必变，墙自然失效——若仍超线则继续迭代压缩到线下为止。
+ * 预算压力整理节流：记录上次「未落盘」整理尝试时的文件内容。文件未变时，
+ * 无信号与「仅有成功测试/构建」都不再重试。显式记住、持久禁令、记忆候选
+ * 可以破墙（新事实还得有机会写进去）。成功落盘后清墙；内容仍超线则下一回合
+ * 再试一次，直到压到目标线或再次被拒绝。
  */
 const consolidationWall = new Map<string, string>();
 
@@ -109,6 +111,27 @@ async function writeCuratorLog(
   } catch {
     // 诊断写入失败不得影响记忆维护
   }
+}
+
+/** 显式记忆意图才能冲破整理节流。成功的测试命令不算。 */
+function memorySignalBypassesWall(signals: {
+  cue: boolean;
+  constraint: boolean;
+  agentProposal: boolean;
+}): boolean {
+  return signals.cue || signals.constraint || signals.agentProposal;
+}
+
+function noteConsolidationAttempt(
+  workspacePath: string,
+  currentMd: string | null,
+  mode: MemoryCuratorMode,
+  outcome: RunOutcome
+): void {
+  if (mode !== 'consolidate' || currentMd == null) return;
+  const key = workspacePath.trim();
+  if (outcome.kind === 'updated') consolidationWall.delete(key);
+  else consolidationWall.set(key, currentMd);
 }
 
 function record(
@@ -235,38 +258,27 @@ export async function runDeliveryCuratorForTurn(params: {
   // 达压力线时 update 也切 consolidate：新事实照常合并，同时把文件压回目标线
   // （整理附录明确要求「有新事实一并合并，同时完成压缩」）。
   const overPressure = currentMd ? getMemoryMdPressure(currentMd).overPressure : false;
-  if (shouldRunDeliveryCurator(signals)) {
-    await runCuratorSafe({
-      workspacePath: params.workspacePath,
-      material,
-      settings: params.settings,
-      trigger: 'turn',
-      mode: overPressure ? 'consolidate' : 'update',
-      currentMd,
-    });
+  const signaled = shouldRunDeliveryCurator(signals);
+  if (!signaled && !overPressure) return;
+  // 整理节流覆盖「无信号」和「只有成功测试/构建」。显式记住 / 禁令 / 记忆候选破墙。
+  if (
+    overPressure &&
+    currentMd &&
+    consolidationWall.get(key) === currentMd &&
+    !memorySignalBypassesWall(signals)
+  ) {
     return;
   }
-  // 预算压力兜底（ADR-017）：无信号但文件达压力线时也跑一次纯整理；文件未变且
-  // 上次整理未落盘则跳过（节流），避免无可压缩空间时空烧。
-  if (!currentMd || !overPressure) {
-    return;
-  }
-  if (consolidationWall.get(key) === currentMd) {
-    return;
-  }
+  const mode: MemoryCuratorMode = overPressure ? 'consolidate' : 'update';
   const { outcome } = await runCuratorSafe({
     workspacePath: params.workspacePath,
     material,
     settings: params.settings,
     trigger: 'turn',
-    mode: 'consolidate',
+    mode,
     currentMd,
   });
-  if (outcome.kind === 'updated') {
-    consolidationWall.delete(key);
-  } else {
-    consolidationWall.set(key, currentMd);
-  }
+  noteConsolidationAttempt(params.workspacePath, currentMd, mode, outcome);
 }
 
 /** 卡点 1 的 fire-and-forget 包装（sendMessage 收尾处调用，不 await）。 */
@@ -300,7 +312,7 @@ export async function runPreCompactCurator(params: {
   const mode: MemoryCuratorMode = getMemoryMdPressure(currentMd).overPressure
     ? 'consolidate'
     : 'update';
-  await runCuratorSafe({
+  const { outcome } = await runCuratorSafe({
     workspacePath: params.workspacePath,
     material,
     settings: params.settings,
@@ -309,4 +321,5 @@ export async function runPreCompactCurator(params: {
     currentMd,
     timeoutMs: PRE_COMPACT_TIMEOUT_MS,
   });
+  noteConsolidationAttempt(params.workspacePath, currentMd, mode, outcome);
 }

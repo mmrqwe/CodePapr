@@ -5,7 +5,8 @@
  * 整存整取维护、用户在面板直接编辑。本模块负责全部文件侧契约：
  * - 读：注入文本 = 文件全文（写入端已封顶，注入侧永远全量，不再投影/检索）；
  * - 写：单飞队列串行化 + 「读时内容守卫」（并发会话防互相覆盖）+
- *   机械门（密钥 redact、注入风险、token/行数上限、无新增 mass-drop 检查）；
+ *   机械门（密钥 redact、注入风险、token/行数上限、更新模式的 mass-drop、
+ *   整理模式的目标线与保留锚点）；
  *   校验不过 = 拒写并返回原因（curator 与面板保存共用同一道门）。
  *
  * 尺寸限制：MEMORY_MD_MAX_TOKENS 是唯一硬闸（约 16KB ≈ 120 行），curator 输出
@@ -23,11 +24,21 @@ export const MEMORY_MD_MAX_TOKENS = 4_000;
 export const MEMORY_MD_MAX_LINES = 120;
 /** 预算压力线：用量达硬顶该比例即触发自动整理（提前压缩，避免满额后新事实写不进）。 */
 export const MEMORY_MD_CONSOLIDATION_RATIO = 0.9;
-/** 整理目标：压到硬顶该比例以下，给后续新条目留余量（管家提示词用）。 */
+/** 整理目标：consolidate 模式的机械输出上限（更新模式与面板保存仍只用硬顶）。 */
 export const MEMORY_MD_TARGET_RATIO = 0.8;
 export const MEMORY_MD_TARGET_TOKENS = Math.floor(MEMORY_MD_MAX_TOKENS * MEMORY_MD_TARGET_RATIO);
 /** 行数目标沿用提示词既有的 100 行（≈83%，低于 90% 触发线）。 */
 export const MEMORY_MD_TARGET_LINES = 100;
+/**
+ * 整理模式洗记忆判定：旧单元被新文本认出的比例。
+ * 达到此值说明大半事实还在（允许精简措辞），不再看新文本是否换了说法。
+ */
+export const MEMORY_MD_CONSOLIDATE_MIN_PREV_RETENTION = 0.5;
+/**
+ * 旧单元留下不足一半时，新文本里必须有这么高的比例能对上某条旧单元。
+ * 这放行「删掉过时条目、留下的行仍是旧事实」；拦住「改写几个字然后换成另一份记忆」。
+ */
+export const MEMORY_MD_CONSOLIDATE_MIN_NEXT_ANCHOR = 0.8;
 
 export interface MemoryMdPressure {
   tokens: number;
@@ -134,10 +145,69 @@ function memoryUnitLines(md: string): string[] {
 
 export type MemoryMdWriteOrigin = 'memory-curator' | 'panel' | 'migration' | 'guard';
 
+export interface MemoryMdGateOptions {
+  /**
+   * 整理模式（仅管家 consolidate 传入）。目标线变成硬门；丢行改用保留锚点，
+   * 不再用「零新增且删过半」。面板保存与 update 模式不传。
+   */
+  consolidate?: boolean;
+}
+
+const UNIT_SIMILARITY = 0.5;
+
+function unitTokenSet(text: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const word of text.toLowerCase().match(/[a-z0-9_./:+-]{2,}/g) ?? []) {
+    tokens.add(word);
+  }
+  for (const run of text.match(/[\u4e00-\u9fff]+/g) ?? []) {
+    if (run.length === 1) {
+      tokens.add(run);
+    } else {
+      for (let index = 0; index < run.length - 1; index += 1) {
+        tokens.add(run.slice(index, index + 2));
+      }
+    }
+  }
+  return tokens;
+}
+
+/** 收紧措辞仍算同一条：较短一侧的 token 有一半出现在另一侧。 */
+function unitsSimilar(prev: string, next: string): boolean {
+  if (prev === next) return true;
+  const left = unitTokenSet(prev);
+  const right = unitTokenSet(next);
+  if (left.size === 0 || right.size === 0) return false;
+  const smaller = left.size <= right.size ? left : right;
+  const larger = left.size <= right.size ? right : left;
+  let shared = 0;
+  for (const token of smaller) {
+    if (larger.has(token)) shared += 1;
+  }
+  return shared / smaller.size >= UNIT_SIMILARITY;
+}
+
+function consolidationWashReason(prevItems: string[], nextItems: string[]): string | null {
+  if (prevItems.length === 0) return null;
+  if (nextItems.length === 0) return `consolidate-wash:0/${prevItems.length}`;
+  let retained = 0;
+  for (const prev of prevItems) {
+    if (nextItems.some((next) => unitsSimilar(prev, next))) retained += 1;
+  }
+  if (retained / prevItems.length >= MEMORY_MD_CONSOLIDATE_MIN_PREV_RETENTION) return null;
+  let anchored = 0;
+  for (const next of nextItems) {
+    if (prevItems.some((prev) => unitsSimilar(prev, next))) anchored += 1;
+  }
+  if (anchored / nextItems.length >= MEMORY_MD_CONSOLIDATE_MIN_NEXT_ANCHOR) return null;
+  return `consolidate-wash:${retained}/${prevItems.length}`;
+}
+
 export function validateMemoryMdContent(
   prev: string | null,
   next: string,
-  origin: MemoryMdWriteOrigin
+  origin: MemoryMdWriteOrigin,
+  options?: MemoryMdGateOptions
 ): MemoryMdGateVerdict {
   const reasons: string[] = [];
   const trimmed = next.trim();
@@ -164,21 +234,32 @@ export function validateMemoryMdContent(
   if (estimateTokens(trimmed) > MEMORY_MD_MAX_TOKENS) {
     reasons.push('max-tokens');
   }
-  if (trimmed.split(/\r?\n/).length > MEMORY_MD_MAX_LINES) {
+  const lineCount = trimmed.split(/\r?\n/).length;
+  if (lineCount > MEMORY_MD_MAX_LINES) {
     reasons.push('max-lines');
   }
-  // 4) mass-drop 检查：合并/冲突更新是 curator 的合法动作（素材带来新条目时
-  // 允许删旧）；「没有任何新增却丢掉过半既有单元」才是失控重写，拒写。
-  // 单元覆盖列表 / 表格 / 段落（标题与分隔行除外），不只看 `- ` 行。
+  // 4) 丢行。更新模式：合并/冲突更新是合法动作（有新增就允许删旧）；
+  // 「没有任何新增却丢掉过半既有单元」才是失控重写。
+  // 整理模式：目标线是硬门（提示词里的 3200/100 不再只是建议）；
+  // 删过时条目可以超过一半，但新文本必须仍锚在旧事实上，不能改写后整份换掉。
+  if (options?.consolidate) {
+    if (estimateTokens(trimmed) > MEMORY_MD_TARGET_TOKENS) reasons.push('over-target:tokens');
+    if (lineCount > MEMORY_MD_TARGET_LINES) reasons.push('over-target:lines');
+  }
   if (prev) {
     const nextItems = memoryUnitLines(trimmed);
     const prevItems = memoryUnitLines(prev);
-    const nextSet = new Set(nextItems);
-    const prevSet = new Set(prevItems);
-    const dropped = prevItems.filter((item) => !nextSet.has(item));
-    const added = nextItems.filter((item) => !prevSet.has(item));
-    if (added.length === 0 && dropped.length * 2 > prevItems.length) {
-      reasons.push(`mass-drop:${dropped.length}`);
+    if (options?.consolidate) {
+      const wash = consolidationWashReason(prevItems, nextItems);
+      if (wash) reasons.push(wash);
+    } else {
+      const nextSet = new Set(nextItems);
+      const prevSet = new Set(prevItems);
+      const dropped = prevItems.filter((item) => !nextSet.has(item));
+      const added = nextItems.filter((item) => !prevSet.has(item));
+      if (added.length === 0 && dropped.length * 2 > prevItems.length) {
+        reasons.push(`mass-drop:${dropped.length}`);
+      }
     }
   }
   return { ok: reasons.length === 0, reasons };
@@ -210,6 +291,8 @@ export async function requestMemoryMdWrite(
     origin: MemoryMdWriteOrigin;
     /** 迁移种子的生成场景：expected 为 null 且允许跳过「已有文件」。 */
     skipIfExists?: boolean;
+    /** 管家 consolidate 落盘：走目标线与保留锚点，不走 update 的 mass-drop。 */
+    consolidate?: boolean;
   }
 ): Promise<MemoryMdWriteResult> {
   const workspace = workspacePath.trim();
@@ -224,7 +307,9 @@ export async function requestMemoryMdWrite(
     if (currentNormalized !== expectedNormalized) {
       return { ok: false, reasons: ['concurrent-change'], stale: true };
     }
-    const verdict = validateMemoryMdContent(current, next, options.origin);
+    const verdict = validateMemoryMdContent(current, next, options.origin, {
+      consolidate: options.consolidate,
+    });
     if (!verdict.ok) {
       return verdict;
     }
