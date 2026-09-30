@@ -481,6 +481,7 @@ pub(crate) fn run_workspace_command_impl(
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
     // 嵌套项目（如子目录里的 go.mod）需要在模块目录内执行，否则命令会跑错模块。
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
+    let memory = super::memory_guard::snapshot(&workspace);
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -498,6 +499,7 @@ pub(crate) fn run_workspace_command_impl(
     let child = match cmd.spawn() {
         Ok(child) => child,
         Err(err) => {
+            let _ = super::memory_guard::rollback_if_needed(&memory);
             return Ok(CommandResult {
                 command,
                 args,
@@ -516,16 +518,24 @@ pub(crate) fn run_workspace_command_impl(
     if let Some(token) = cancel_token.as_deref() {
         unregister_command_cancel(token);
     }
-    let (status, stdout, stderr, timed_out) = collected?;
+    let (status, stdout, stderr, timed_out) = match collected {
+        Ok(collected) => collected,
+        Err(err) => {
+            let _ = super::memory_guard::rollback_if_needed(&memory);
+            return Err(err);
+        }
+    };
 
-    Ok(CommandResult {
+    let mut result = CommandResult {
         command,
         args,
         status,
         stdout,
         stderr,
         timed_out,
-    })
+    };
+    super::memory_guard::attach_note(&mut result, super::memory_guard::rollback_if_needed(&memory));
+    Ok(result)
 }
 
 /// 等待子进程退出并收集 stdout/stderr；超时则终止进程并标记 timed_out。
@@ -757,23 +767,38 @@ pub(crate) fn run_workspace_shell_command_impl(
     super::path_guard::ensure_command_paths_accessible(&workspace, &command, &[])?;
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
     let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30).clamp(1, MAX_COMMAND_SECONDS));
+    let memory = super::memory_guard::snapshot(&workspace);
     let mut cmd = build_shell_spawn_command(&command, &cwd, &workspace, sandbox.map(Into::into))?;
-    let child = cmd.spawn().map_err(|err| format!("启动命令失败: {err}"))?;
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            let _ = super::memory_guard::rollback_if_needed(&memory);
+            return Err(format!("启动命令失败: {err}"));
+        }
+    };
     let cancel_flag = register_command_cancel(cancel_token.as_deref().unwrap_or(""));
     let collected = collect_command_output_with_cancel(child, timeout, cancel_flag);
     // 无论成功失败都必须注销取消令牌，否则错误路径会让条目永久泄漏。
     if let Some(token) = cancel_token.as_deref() {
         unregister_command_cancel(token);
     }
-    let (status, stdout, stderr, timed_out) = collected?;
-    Ok(CommandResult {
+    let (status, stdout, stderr, timed_out) = match collected {
+        Ok(collected) => collected,
+        Err(err) => {
+            let _ = super::memory_guard::rollback_if_needed(&memory);
+            return Err(err);
+        }
+    };
+    let mut result = CommandResult {
         command,
         args: Vec::new(),
         status,
         stdout,
         stderr,
         timed_out,
-    })
+    };
+    super::memory_guard::attach_note(&mut result, super::memory_guard::rollback_if_needed(&memory));
+    Ok(result)
 }
 
 pub fn start_workspace_background_command(

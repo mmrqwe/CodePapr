@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -42,16 +42,30 @@ pub struct HostHandle {
     pending: Arc<AsyncMutex<PendingMap>>,
     next_id: AtomicU64,
     child: Mutex<Option<Child>>,
+    alive: Arc<AtomicBool>,
+    /// 本进程拉起的宿主。外部 `CODEPAPR_SERVER_URL` 为 false，断线后不重连。
+    owned: bool,
 }
 
-static GLOBAL: OnceLock<Arc<HostHandle>> = OnceLock::new();
+static SLOT: Mutex<Option<Arc<HostHandle>>> = Mutex::new(None);
+static APP: OnceLock<AppHandle> = OnceLock::new();
+static RECONNECT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static STOPPED: AtomicBool = AtomicBool::new(false);
+
+fn current_host() -> Option<Arc<HostHandle>> {
+    SLOT.lock().unwrap_or_else(|err| err.into_inner()).clone()
+}
+
+fn set_slot(host: Arc<HostHandle>) {
+    *SLOT.lock().unwrap_or_else(|err| err.into_inner()) = Some(host);
+}
 
 pub fn global() -> Option<Arc<HostHandle>> {
-    GLOBAL.get().cloned()
+    current_host()
 }
 
 pub fn from_app(app: &AppHandle) -> Result<Arc<HostHandle>, String> {
-    if let Some(host) = global() {
+    if let Some(host) = current_host() {
         return Ok(host);
     }
     app.try_state::<Arc<HostHandle>>()
@@ -60,12 +74,85 @@ pub fn from_app(app: &AppHandle) -> Result<Arc<HostHandle>, String> {
 }
 
 pub async fn call(app: &AppHandle, method: &str, params: Value) -> Result<Value, String> {
-    from_app(app)?.invoke(method, params).await
+    let host = ensure_connected(app).await?;
+    match host.invoke(method, params.clone()).await {
+        Err(err) if host.owned && !STOPPED.load(Ordering::SeqCst) && connection_lost(&err) => {
+            let host = reconnect_owned(app).await?;
+            host.invoke(method, params).await
+        }
+        other => other,
+    }
 }
 
 pub fn call_blocking(method: &str, params: Value) -> Result<Value, String> {
-    let host = global().ok_or_else(|| "codepapr-server 尚未连接".to_string())?;
-    tauri::async_runtime::block_on(host.invoke(method, params))
+    let Some(app) = APP.get() else {
+        let host = current_host().ok_or_else(|| "codepapr-server 尚未连接".to_string())?;
+        return tauri::async_runtime::block_on(host.invoke(method, params));
+    };
+    tauri::async_runtime::block_on(call(app, method, params))
+}
+
+fn connection_lost(err: &str) -> bool {
+    err.contains("closed the connection")
+        || err.contains("Server closed connection")
+        || err.contains("server channel closed")
+}
+
+async fn ensure_connected(app: &AppHandle) -> Result<Arc<HostHandle>, String> {
+    if STOPPED.load(Ordering::SeqCst) {
+        return current_host()
+            .filter(|host| host.alive.load(Ordering::SeqCst))
+            .ok_or_else(|| "codepapr-server 正在关闭".to_string());
+    }
+    if let Some(host) = current_host() {
+        if host.alive.load(Ordering::SeqCst) {
+            return Ok(host);
+        }
+        if !host.owned {
+            return Err("codepapr-server 连接已断开，外部宿主不会自动重连".to_string());
+        }
+    } else if std::env::var("CODEPAPR_SERVER_URL").is_ok() {
+        return Err("codepapr-server 尚未连接".to_string());
+    }
+    reconnect_owned(app).await
+}
+
+async fn reconnect_owned(app: &AppHandle) -> Result<Arc<HostHandle>, String> {
+    let _gate = RECONNECT.lock().await;
+    if STOPPED.load(Ordering::SeqCst) {
+        return Err("codepapr-server 正在关闭".to_string());
+    }
+    if let Some(host) = current_host() {
+        if host.alive.load(Ordering::SeqCst) {
+            return Ok(host);
+        }
+        if !host.owned {
+            return Err("codepapr-server 连接已断开，外部宿主不会自动重连".to_string());
+        }
+        host.alive.store(false, Ordering::SeqCst);
+        host.reap_child();
+    }
+    let mut last_err = "未知错误".to_string();
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(200 * (1 << (attempt - 1)))).await;
+        }
+        match spawn_and_connect(app.clone()).await {
+            Ok(handle) => {
+                if let Err(err) = handle.invoke("initialize", json!({})).await {
+                    last_err = err;
+                    handle.reap_child();
+                    continue;
+                }
+                let arc = Arc::new(handle);
+                set_slot(Arc::clone(&arc));
+                import_vault_secrets(app).await;
+                return Ok(arc);
+            }
+            Err(err) => last_err = err,
+        }
+    }
+    Err(format!("重连 codepapr-server 失败: {last_err}"))
 }
 
 impl HostHandle {
@@ -94,7 +181,17 @@ impl HostHandle {
             .map_err(|_| "Server closed connection before responding".to_string())?
     }
 
+    fn reap_child(&self) {
+        if let Ok(mut child) = self.child.lock() {
+            if let Some(child) = child.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
     pub fn shutdown(&self) {
+        STOPPED.store(true, Ordering::SeqCst);
         let _ = tauri::async_runtime::block_on(self.invoke("lsp/stopAll", json!({})));
         let _ = tauri::async_runtime::block_on(self.invoke("agent/stopAll", json!({})));
         let _ = tauri::async_runtime::block_on(self.invoke("fs/stopWatcher", json!({})));
@@ -124,19 +221,23 @@ impl Drop for HostHandle {
 
 pub async fn start(app: &AppHandle) -> Result<Arc<HostHandle>, String> {
     eprintln!("[CodePapr] host::start begin");
-    let handle = if let Ok(addr) = std::env::var("CODEPAPR_SERVER_URL") {
+    let _ = APP.set(app.clone());
+    if let Ok(addr) = std::env::var("CODEPAPR_SERVER_URL") {
         eprintln!("[CodePapr] host::start connect_tcp {addr}");
-        connect_tcp(&addr, None, app.clone()).await?
-    } else {
-        eprintln!("[CodePapr] host::start spawn_and_connect");
-        spawn_and_connect(app.clone()).await?
-    };
-    eprintln!("[CodePapr] host::start connected, sending initialize");
-    let _ = handle.invoke("initialize", json!({})).await?;
-    eprintln!("[CodePapr] host::start initialize ok");
-    let arc = Arc::new(handle);
-    let _ = GLOBAL.set(Arc::clone(&arc));
-    Ok(arc)
+        codepapr_core::host_auth::ensure_loopback_addr(&addr)?;
+        let token = std::env::var("CODEPAPR_AUTH_TOKEN")
+            .map_err(|_| "CODEPAPR_SERVER_URL 需要同时设置 CODEPAPR_AUTH_TOKEN".to_string())?;
+        let token = codepapr_core::host_auth::normalize_token(&token)?;
+        let handle = connect_tcp(&addr, None, app.clone(), &token, false).await?;
+        eprintln!("[CodePapr] host::start connected, sending initialize");
+        handle.invoke("initialize", json!({})).await?;
+        eprintln!("[CodePapr] host::start initialize ok");
+        let arc = Arc::new(handle);
+        set_slot(Arc::clone(&arc));
+        return Ok(arc);
+    }
+    eprintln!("[CodePapr] host::start spawn_and_connect");
+    reconnect_owned(app).await
 }
 
 pub async fn import_vault_secrets(app: &AppHandle) {
@@ -151,10 +252,13 @@ pub async fn import_vault_secrets(app: &AppHandle) {
     if let Some(value) = secrets.get_secret(crate::secrets::MENTOR_KEY_ACCOUNT) {
         map.insert("mentor_api_key".into(), Value::String(value));
     }
-    if map.is_empty() {
-        return;
+    if let Some(value) = secrets.get_secret(crate::secrets::FAST_KEY_ACCOUNT) {
+        map.insert("fast_api_key".into(), Value::String(value));
     }
-    let _ = host.invoke("secrets/import", Value::Object(map)).await;
+    let imported = host.invoke("secrets/import", Value::Object(map)).await.is_ok();
+    if imported {
+        crate::secrets::mark_secrets_ready();
+    }
 }
 
 async fn spawn_and_connect(app: AppHandle) -> Result<HostHandle, String> {
@@ -169,12 +273,14 @@ async fn spawn_and_connect(app: AppHandle) -> Result<HostHandle, String> {
     let _ = std::fs::remove_file(&port_file);
     eprintln!("[CodePapr] host: spawning");
 
+    let token = codepapr_core::host_auth::random_token();
     let mut cmd = Command::new(&server_bin);
     cmd.arg("--port")
         .arg("0")
         .arg("--port-file")
         .arg(&port_file)
-        .stdin(Stdio::null())
+        .arg("--auth-stdin")
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     #[cfg(windows)]
@@ -189,12 +295,21 @@ async fn spawn_and_connect(app: AppHandle) -> Result<HostHandle, String> {
             server_bin.display()
         )
     })?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin
+            .write_all(token.as_bytes())
+            .map_err(|err| format!("写入宿主认证令牌失败: {err}"))?;
+        drop(stdin);
+    } else {
+        return Err("宿主进程没有标准输入，无法传递认证令牌".to_string());
+    }
 
     eprintln!("[CodePapr] host: spawned pid={}", child.id());
     let stderr = child.stderr.take();
     let port = wait_for_bound_port(&port_file, stderr)?;
     eprintln!("[CodePapr] host: bound port {port}, connecting");
-    connect_tcp(&format!("127.0.0.1:{port}"), Some(child), app).await
+    connect_tcp(&format!("127.0.0.1:{port}"), Some(child), app, &token, true).await
 }
 
 fn wait_for_bound_port(
@@ -245,10 +360,14 @@ async fn connect_tcp(
     addr: &str,
     child: Option<Child>,
     app: AppHandle,
+    token: &str,
+    owned: bool,
 ) -> Result<HostHandle, String> {
-    let stream = TcpStream::connect(addr)
+    codepapr_core::host_auth::ensure_loopback_addr(addr)?;
+    let mut stream = TcpStream::connect(addr)
         .await
         .map_err(|e| format!("Failed to connect to codepapr-server at {addr}: {e}"))?;
+    codepapr_core::host_auth::client_handshake(&mut stream, token).await?;
     let (read_half, mut write_half) = stream.into_split();
 
     let (tx_writer, mut rx_writer) = mpsc::unbounded_channel::<String>();
@@ -263,6 +382,8 @@ async fn connect_tcp(
 
     let pending = Arc::new(AsyncMutex::new(HashMap::new()));
     let pending_clone = Arc::clone(&pending);
+    let alive = Arc::new(AtomicBool::new(true));
+    let alive_reader = Arc::clone(&alive);
     tokio::spawn(async move {
         let mut reader = BufReader::new(read_half).lines();
         while let Ok(Some(line)) = reader.next_line().await {
@@ -272,6 +393,7 @@ async fn connect_tcp(
             }
             dispatch_incoming_line(trimmed, &pending_clone, &app).await;
         }
+        alive_reader.store(false, Ordering::SeqCst);
         fail_pending(&pending_clone, "codepapr-server closed the connection").await;
     });
 
@@ -280,6 +402,8 @@ async fn connect_tcp(
         pending,
         next_id: AtomicU64::new(1),
         child: Mutex::new(child),
+        alive,
+        owned,
     })
 }
 

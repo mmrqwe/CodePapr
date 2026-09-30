@@ -15,6 +15,16 @@ use super::MAX_WRITE_BYTES;
 
 static TMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+fn is_memory_md_path(relative_path: &str) -> bool {
+    let normalized = relative_path
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .replace("//", "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase();
+    normalized == ".codepapr/memory.md"
+}
+
 /// 不可预测的临时文件名后缀：pid + 自增计数可被工作区内的其它进程预判并
 /// 预置符号链接（fs::write 跟随符号链接 → 写穿到任意文件）。混入熵来源：
 /// 系统时间纳秒 + /dev/urandom 随机数（失败时降级时间戳）。
@@ -156,8 +166,13 @@ pub(crate) fn write_text_file_impl(
         format!("写入文件 {} 失败: {err}", target.display())
     })?;
 
+    let rel = relative_string(&workspace, &target);
+    if is_memory_md_path(&rel) {
+        crate::memory_write_seq::note_trusted_memory_write(&workspace);
+    }
+
     Ok(WriteFileResult {
-        path: relative_string(&workspace, &target),
+        path: rel,
         bytes: bytes_to_write.len(),
         encoding: encoding_label,
         change: compute_line_change_summary(existed_before, previous_content.as_deref(), &content),

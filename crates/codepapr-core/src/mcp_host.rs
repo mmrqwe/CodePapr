@@ -398,6 +398,24 @@ fn is_tool_allowed(server: &McpServerConfig, tool_name: &str) -> bool {
         .any(|pattern| matches_pattern(pattern, tool_name))
 }
 
+fn looks_readonly_tool(tool_name: &str) -> bool {
+    let name = tool_name.to_ascii_lowercase();
+    const READONLY_PREFIXES: &[&str] = &["get", "list", "read", "search", "fetch"];
+    READONLY_PREFIXES.iter().any(|prefix| {
+        name == *prefix
+            || name.starts_with(&format!("{prefix}_"))
+            || name.starts_with(&format!("{prefix}-"))
+            || name.starts_with(&format!("{prefix}."))
+    })
+}
+
+fn explicitly_readonly(server: &McpServerConfig, tool_name: &str) -> bool {
+    server
+        .force_readonly
+        .iter()
+        .any(|pattern| matches_pattern(pattern, tool_name))
+}
+
 fn looks_mutating_tool(tool_name: &str) -> bool {
     let name = tool_name.to_ascii_lowercase();
     const MUTATING_PREFIXES: &[&str] = &[
@@ -453,12 +471,16 @@ fn validate_tool_policy(server: &McpServerConfig, tool_name: &str) -> Result<(),
     if !is_tool_allowed(server, tool_name) {
         return Err(format!("MCP tool is not allowed by policy: {tool_name}"));
     }
-    if server.permission_mode == "read-only" && is_mutating_with_overrides(server, tool_name) {
-        if explicitly_allows_mutating_tool(server, tool_name) {
+    if server.permission_mode == "read-only" {
+        if explicitly_allows_mutating_tool(server, tool_name) || explicitly_readonly(server, tool_name)
+        {
+            return Ok(());
+        }
+        if looks_readonly_tool(tool_name) && !is_mutating_with_overrides(server, tool_name) {
             return Ok(());
         }
         return Err(format!(
-            "MCP tool '{tool_name}' looks mutating but server '{}' is read-only. Allow it explicitly by changing permission mode or tool policy.",
+            "MCP tool '{tool_name}' is not a read-only tool and server '{}' is read-only. Allow it explicitly by name, or change the permission mode.",
             server.name
         ));
     }
@@ -1519,8 +1541,14 @@ mod tests {
             err.contains("read-only"),
             "expected read-only policy error, got: {err}"
         );
+        super::validate_tool_policy(&star, "search")
+            .expect("read-only prefix tools stay allowed under *");
         super::validate_tool_policy(&star, "query")
-            .expect("read-only tools must still be allowed under *");
+            .expect_err("unclassified tools are denied in read-only");
+        super::validate_tool_policy(&star, "shell")
+            .expect_err("shell is denied in read-only");
+        super::validate_tool_policy(&star, "apply_patch")
+            .expect_err("apply_patch is denied in read-only");
 
         let globstar = make_server_with(make_server("sse", "", &[]), "read-only", false, &["**"]);
         super::validate_tool_policy(&globstar, "delete_row")

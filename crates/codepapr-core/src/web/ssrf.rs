@@ -10,6 +10,39 @@ pub fn is_internal_ipv4(ip: std::net::Ipv4Addr) -> bool {
         || (octets[0] == 100 && (64..=127).contains(&octets[1])) // CGNAT 100.64/10
 }
 
+fn ipv4_from_segments(hi: u16, lo: u16) -> std::net::Ipv4Addr {
+    std::net::Ipv4Addr::new(
+        (hi >> 8) as u8,
+        (hi & 0xff) as u8,
+        (lo >> 8) as u8,
+        (lo & 0xff) as u8,
+    )
+}
+
+/// IPv4 carried inside 6to4, NAT64, or Teredo. `None` means this address is not one of those forms.
+fn embedded_ipv4(segments: [u16; 8]) -> Option<std::net::Ipv4Addr> {
+    if segments[0] == 0x2002 {
+        return Some(ipv4_from_segments(segments[1], segments[2]));
+    }
+    if segments[0] == 0x0064
+        && segments[1] == 0xff9b
+        && segments[2] == 0
+        && segments[3] == 0
+        && segments[4] == 0
+        && segments[5] == 0
+    {
+        return Some(ipv4_from_segments(segments[6], segments[7]));
+    }
+    if segments[0] == 0x0064 && segments[1] == 0xff9b && segments[2] == 0x0001 {
+        return Some(ipv4_from_segments(segments[6], segments[7]));
+    }
+    if segments[0] == 0x2001 && segments[1] == 0 {
+        let obfuscated = u32::from(ipv4_from_segments(segments[6], segments[7]));
+        return Some(std::net::Ipv4Addr::from(!obfuscated));
+    }
+    None
+}
+
 pub fn is_internal_ipv6(ip: std::net::Ipv6Addr) -> bool {
     if let Some(mapped) = ip.to_ipv4_mapped() {
         return is_internal_ipv4(mapped); // ::ffff:127.0.0.1 etc.
@@ -18,6 +51,9 @@ pub fn is_internal_ipv6(ip: std::net::Ipv6Addr) -> bool {
         return true; // ::1, ::
     }
     let segments = ip.segments();
+    if let Some(embedded) = embedded_ipv4(segments) {
+        return is_internal_ipv4(embedded);
+    }
     if segments[0] == 0
         && segments[1] == 0
         && segments[2] == 0
@@ -114,4 +150,31 @@ pub fn resolve_safe_socket_addr_blocking(
         }
     }
     Ok(Some((host, addrs[0])))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_private_or_internal_url;
+
+    #[test]
+    fn embedded_ipv4_forms_follow_the_ipv4_check() {
+        let blocked = [
+            "http://[2002:a9fe:a9fe::]/",
+            "http://[64:ff9b::a9fe:a9fe]/",
+            "http://[64:ff9b:1::a9fe:a9fe]/",
+            "http://[2001::80ff:fffe]/",
+            "http://[2002:a00:1::]/",
+        ];
+        for url in blocked {
+            assert!(is_private_or_internal_url(url), "should block {url}");
+        }
+        let allowed = [
+            "http://[2002:808:808::]/",
+            "http://[64:ff9b::808:808]/",
+            "http://[2606:4700:4700::1111]/",
+        ];
+        for url in allowed {
+            assert!(!is_private_or_internal_url(url), "should allow {url}");
+        }
+    }
 }

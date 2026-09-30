@@ -560,6 +560,7 @@ fn migrate_project_db_v9(conn: &Connection, workspace: &Path) -> Result<(), Stri
             let seed = render_memory_md_seed(&rows);
             fs::write(&memory_md, seed)
                 .map_err(|err| format!("写入 MEMORY.md 种子失败: {err}"))?;
+            crate::memory_write_seq::note_trusted_memory_write(workspace);
         }
     }
 

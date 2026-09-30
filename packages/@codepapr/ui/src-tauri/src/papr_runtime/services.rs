@@ -15,45 +15,11 @@ const MAX_PAPR_HTTP_BYTES: usize = 500_000;
 const PAPR_HTTP_POST_MAX_BYTES: usize = 100_000;
 
 pub(crate) fn is_internal_ipv4(ip: std::net::Ipv4Addr) -> bool {
-    let octets = ip.octets();
-    ip.is_loopback()           // 127.0.0.0/8
-        || ip.is_private()     // 10/8, 172.16/12, 192.168/16
-        || ip.is_link_local()  // 169.254/16 (incl. cloud metadata 169.254.169.254)
-        || ip.is_unspecified() // 0.0.0.0
-        || octets[0] == 0      // 0.0.0.0/8 "this" network
-        || (octets[0] == 100 && (64..=127).contains(&octets[1])) // CGNAT 100.64/10
+    codepapr_core::web::ssrf::is_internal_ipv4(ip)
 }
 
 pub(crate) fn is_internal_ipv6(ip: std::net::Ipv6Addr) -> bool {
-    if let Some(mapped) = ip.to_ipv4_mapped() {
-        return is_internal_ipv4(mapped); // ::ffff:127.0.0.1 etc.
-    }
-    if ip.is_loopback() || ip.is_unspecified() {
-        return true; // ::1, ::
-    }
-    // RFC 4291 §2.5.5.1 IPv4-compatible 形式 ::a.b.c.d（如 [::127.0.0.1]）：
-    // 前 5 段全零、后两段构成 IPv4。to_ipv4_mapped() 只认 ::ffff: 前缀，
-    // 漏判该兼容形式会让 SSRF 检查直接放过回环/内网目标。
-    let segments = ip.segments();
-    if segments[0] == 0
-        && segments[1] == 0
-        && segments[2] == 0
-        && segments[3] == 0
-        && segments[4] == 0
-    {
-        let v4 = std::net::Ipv4Addr::new(
-            (segments[5] >> 8) as u8,
-            (segments[5] & 0xff) as u8,
-            (segments[6] >> 8) as u8,
-            (segments[6] & 0xff) as u8,
-        );
-        if is_internal_ipv4(v4) {
-            return true;
-        }
-    }
-    let first = segments[0];
-    (first & 0xfe00) == 0xfc00 // fc00::/7 unique-local (fd00::/8 too)
-        || (first & 0xffc0) == 0xfe80 // fe80::/10 link-local
+    codepapr_core::web::ssrf::is_internal_ipv6(ip)
 }
 
 fn is_internal_domain(host: &str) -> bool {
@@ -1154,6 +1120,9 @@ mod tests {
             "http://[::192.168.1.1]/",       // IPv4-compatible 内网
             "http://[fe80::1]/",
             "http://[fd00::1]/",
+            "http://[2002:a9fe:a9fe::]/",
+            "http://[64:ff9b::a9fe:a9fe]/",
+            "http://[2001::80ff:fffe]/",
         ];
         for url in blocked {
             assert!(is_private_or_internal_url(url), "should block {url}");

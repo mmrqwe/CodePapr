@@ -26,7 +26,7 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use tauri::Emitter;
 
-use crate::secrets::{PRIMARY_KEY_ACCOUNT, MENTOR_KEY_ACCOUNT};
+use crate::secrets::{FAST_KEY_ACCOUNT, MENTOR_KEY_ACCOUNT, PRIMARY_KEY_ACCOUNT};
 use crate::vault::{migrate_from_keyring, AppSecrets};
 
 const DISABLE_CONTEXT_MENU_INIT_SCRIPT: &str = "";
@@ -55,7 +55,7 @@ fn main() {
 
             let migrated = migrate_from_keyring(
                 &app_secrets,
-                &[PRIMARY_KEY_ACCOUNT, MENTOR_KEY_ACCOUNT],
+                &[PRIMARY_KEY_ACCOUNT, MENTOR_KEY_ACCOUNT, FAST_KEY_ACCOUNT],
             )
             .unwrap_or(0);
             if migrated > 0 {
@@ -65,21 +65,27 @@ fn main() {
             app.manage(app_secrets);
 
             let handle = app.handle().clone();
+            let (ready_tx, ready_rx) = std::sync::mpsc::channel();
             std::thread::Builder::new()
                 .name("codepapr-host-start".into())
                 .spawn(move || {
                     eprintln!("[CodePapr] host thread: starting");
-                    match tauri::async_runtime::block_on(host::start(&handle)) {
-                        Ok(_) => {
-                            tauri::async_runtime::block_on(host::import_vault_secrets(&handle));
-                            eprintln!("[CodePapr] host thread: ready");
-                        }
-                        Err(e) => {
-                            eprintln!("[CodePapr] 连接 codepapr-server 失败: {e}");
-                        }
+                    let result = tauri::async_runtime::block_on(host::start(&handle)).and_then(|_| {
+                        tauri::async_runtime::block_on(host::import_vault_secrets(&handle));
+                        eprintln!("[CodePapr] host thread: ready");
+                        Ok(())
+                    });
+                    if let Err(err) = &result {
+                        eprintln!("[CodePapr] 连接 codepapr-server 失败: {err}");
                     }
+                    let _ = ready_tx.send(result);
                 })
                 .map_err(|e| format!("无法启动 codepapr-server 线程: {e}"))?;
+            match ready_rx.recv_timeout(std::time::Duration::from_secs(20)) {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => {}
+                Err(_) => eprintln!("[CodePapr] 等待 codepapr-server 超时，界面仍会打开"),
+            }
 
             if app.get_webview_window("main").is_none() {
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())

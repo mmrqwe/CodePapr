@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::host;
-use crate::secrets::{MENTOR_KEY_ACCOUNT, PRIMARY_KEY_ACCOUNT};
+use crate::secrets::{FAST_KEY_ACCOUNT, MENTOR_KEY_ACCOUNT, PRIMARY_KEY_ACCOUNT};
 use crate::vault::AppSecrets;
 
 async fn rpc(app: &AppHandle, method: &str, params: Value) -> Result<Value, String> {
@@ -19,6 +19,9 @@ async fn rpc_ok(app: &AppHandle, method: &str, params: Value) -> Result<(), Stri
 }
 
 fn persist_vault_from_settings(app: &AppHandle, settings_json: &str) {
+    if !crate::secrets::secrets_ready() {
+        return;
+    }
     let Ok(value) = serde_json::from_str::<Value>(settings_json) else {
         return;
     };
@@ -27,11 +30,25 @@ fn persist_vault_from_settings(app: &AppHandle, settings_json: &str) {
     };
     let secrets = app.state::<AppSecrets>();
     let mut changed = false;
-    for (field, account) in [("apiKey", PRIMARY_KEY_ACCOUNT), ("mentorApiKey", MENTOR_KEY_ACCOUNT)] {
-        if let Some(secret) = obj.get(field).and_then(|v| v.as_str()) {
-            if secrets.set_secret(account, secret).is_ok() {
-                changed = true;
-            }
+    for (field, account) in [
+        ("apiKey", PRIMARY_KEY_ACCOUNT),
+        ("mentorApiKey", MENTOR_KEY_ACCOUNT),
+        ("fastApiKey", FAST_KEY_ACCOUNT),
+    ] {
+        let Some(secret) = obj.get(field).and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let current = secrets.get_secret(account).unwrap_or_default();
+        if current == secret {
+            continue;
+        }
+        let stored = if secret.is_empty() {
+            secrets.delete_secret(account)
+        } else {
+            secrets.set_secret(account, secret)
+        };
+        if stored.is_ok() {
+            changed = true;
         }
     }
     if changed {

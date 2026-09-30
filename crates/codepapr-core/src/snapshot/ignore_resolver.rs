@@ -26,6 +26,16 @@ impl IgnoreResolver {
     }
 
     pub fn collect_files(&self) -> Vec<PathBuf> {
+        self.walk(MAX_FILESIZE, false).unwrap_or_default()
+    }
+
+    /// Backup before a hard reset. Files over [`MAX_FILESIZE`] are not silently
+    /// omitted: the reset is refused so undo still has the bytes.
+    pub fn collect_files_for_backup(&self) -> Result<Vec<PathBuf>, String> {
+        self.walk(MAX_FILESIZE, true)
+    }
+
+    fn walk(&self, max_filesize: u64, fail_on_oversize: bool) -> Result<Vec<PathBuf>, String> {
         let mut builder = WalkBuilder::new(&self.workspace);
         builder
             .hidden(false)
@@ -35,10 +45,11 @@ impl IgnoreResolver {
             .git_exclude(true)
             .git_global(true)
             .ignore(true)
-            .follow_links(false)
-            .max_filesize(Some(MAX_FILESIZE));
+            .follow_links(false);
 
         let mut files = Vec::new();
+        let mut oversized_count = 0usize;
+        let mut sample = Vec::new();
         for entry in builder.build() {
             let Ok(entry) = entry else { continue };
             let Some(ft) = entry.file_type() else { continue };
@@ -50,8 +61,59 @@ impl IgnoreResolver {
             }) {
                 continue;
             }
+            let len = match entry.metadata() {
+                Ok(meta) => meta.len(),
+                Err(err) if fail_on_oversize => {
+                    return Err(format!(
+                        "备份快照不完整：无法读取 {} 的大小（{err}），已拒绝执行 reset",
+                        relative.display()
+                    ));
+                }
+                Err(_) => continue,
+            };
+            if len > max_filesize {
+                if fail_on_oversize {
+                    oversized_count += 1;
+                    if sample.len() < 5 {
+                        sample.push(relative.display().to_string());
+                    }
+                }
+                continue;
+            }
             files.push(relative.to_path_buf());
         }
-        files
+        if oversized_count > 0 {
+            return Err(format!(
+                "备份快照不完整：{oversized_count} 个文件超过 {max_filesize} 字节，已拒绝执行 reset（{}）",
+                sample.join(", ")
+            ));
+        }
+        Ok(files)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn backup_refuses_files_over_the_limit() {
+        let workspace = std::env::temp_dir().join(format!(
+            "codepapr-backup-limit-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&workspace);
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(workspace.join("small.txt"), b"ok").unwrap();
+        fs::write(workspace.join("big.bin"), vec![0u8; 32]).unwrap();
+
+        let resolver = IgnoreResolver::new(&workspace);
+        let err = resolver.walk(8, true).expect_err("oversize file must fail the backup");
+        assert!(err.contains("已拒绝执行 reset"), "{err}");
+        let files = resolver.walk(8, false).unwrap();
+        assert!(files.iter().any(|path| path.ends_with("small.txt")));
+        assert!(files.iter().all(|path| !path.ends_with("big.bin")));
+        let _ = fs::remove_dir_all(&workspace);
     }
 }

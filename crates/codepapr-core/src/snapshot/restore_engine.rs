@@ -106,7 +106,7 @@ fn create_backup_snapshot(repo: &Repository, workspace: &Path) -> Result<Oid, St
         .and_then(|h| h.target())
         .and_then(|oid| repo.find_commit(oid).ok());
 
-    let files = IgnoreResolver::new(workspace).collect_files();
+    let files = IgnoreResolver::new(workspace).collect_files_for_backup()?;
     if files.is_empty() {
         return head_commit
             .map(|c| c.id())

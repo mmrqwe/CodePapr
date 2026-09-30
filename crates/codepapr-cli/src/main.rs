@@ -28,6 +28,9 @@ struct Cli {
     #[arg(short = 'v', long, global = true, help = "Verbose output")]
     verbose: bool,
 
+    #[arg(long, global = true, env = "CODEPAPR_AUTH_TOKEN", help = "TCP auth token")]
+    auth_token: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -134,7 +137,13 @@ async fn main_inner() -> Result<std::process::ExitCode, Box<dyn std::error::Erro
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<JsonRpcNotification>();
 
     // Connect to server (or auto-spawn stdio daemon)
-    let client_res = RpcClient::connect(cli.server.as_deref(), Some(&workspace), Some(event_tx), cli.verbose).await;
+    let client_res = RpcClient::connect(
+        cli.server.as_deref(),
+        Some(&workspace),
+        Some(event_tx),
+        cli.verbose,
+        cli.auth_token.as_deref(),
+    ).await;
 
     // Doctor can run even if server connection failed
     if let Some(Commands::Doctor) = cli.command {

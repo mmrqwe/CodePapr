@@ -44,6 +44,26 @@ fn add_subpath_rule(
     Some(canonical)
 }
 
+/// 拒绝写入时路径可以尚不存在：canonicalize 失败则按绝对路径写规则，
+/// 这样 YOLO 全盘写之后仍能挡住稍后才创建的 `~/.cargo/bin`。
+#[cfg(target_os = "macos")]
+fn add_subpath_rule_or_literal(
+    lines: &mut Vec<String>,
+    action: &str,
+    class: &str,
+    path: &Path,
+) {
+    if add_subpath_rule(lines, action, class, path).is_some() {
+        return;
+    }
+    if path.is_absolute() {
+        lines.push(format!(
+            "({action} {class} (subpath \"{}\"))",
+            profile_quote(path)
+        ));
+    }
+}
+
 /// 收集路径的所有严格祖先目录。node/npm 的 realpathSync 与一般路径解析需要
 /// lstat 允许路径链上的每个祖先目录，否则报 EPERM。
 #[cfg(target_os = "macos")]
@@ -76,7 +96,45 @@ fn unix_system_read_dirs() -> Vec<PathBuf> {
     .collect()
 }
 
-/// 工具缓存/临时目录：沙箱中读写均放行。
+/// 工具缓存目录：沙箱中允许写入。可执行目录（cargo/nvm/volta 的 bin）不在这里。
+#[cfg(target_os = "macos")]
+fn unix_tool_write_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![std::env::temp_dir()];
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        for name in [".npm", ".cache", ".local/share", ".cargo/registry", ".cargo/git"] {
+            dirs.push(home.join(name));
+        }
+    }
+    dirs
+}
+
+/// PATH 上的用户二进制目录。YOLO 的全盘写放行之后仍要拒绝写入，
+/// 否则沙箱内命令可以留下退出沙箱后会执行的程序。
+#[cfg(target_os = "macos")]
+fn path_bin_write_denies() -> Vec<PathBuf> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let home = PathBuf::from(home);
+    [
+        ".cargo/bin",
+        ".volta/bin",
+        ".nvm",
+        ".fnm",
+        ".local/bin",
+        "bin",
+        "local/bin",
+        "Library/Python",
+        "Library/Ruby",
+    ]
+    .into_iter()
+    .map(|name| home.join(name))
+    .collect()
+}
+
+/// 工具缓存/安装树：沙箱中允许读取，供 PATH 上的工具加载。
+/// 写入见 `unix_tool_write_dirs`，不包含可执行目录。
 #[cfg(not(target_os = "windows"))]
 fn unix_tool_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![std::env::temp_dir()];
@@ -221,27 +279,18 @@ fn build_profile(
         read_roots.push(canonical);
     }
 
-    // 工具/临时目录额外放行写入（缓存性质）
-    for path in unix_tool_dirs() {
+    // 工具/临时目录额外放行写入（仅缓存，不含 PATH 上的 bin）
+    for path in unix_tool_write_dirs() {
         if path.as_os_str().is_empty() {
             continue;
         }
         add_subpath_rule(&mut lines, "allow", "file-write*", &path);
     }
 
-    if policy.yolo && access.workspace_write {
+        if policy.yolo && access.workspace_write {
         // YOLO 只对全权调用（主代理，access 默认全开）生效：允许读写全盘（受保护 HOME 目录除外）。
         add_subpath_rule(&mut lines, "allow", "file-read*", Path::new("/"));
         add_subpath_rule(&mut lines, "allow", "file-write*", Path::new("/"));
-        // 全盘写会覆盖 PATH 内的用户二进制目录（~/.local/bin 不在旧保护清单里）：
-        // 沙箱内命令可在其中植入持久化二进制，退出沙箱后仍能执行。这类目录
-        // 只 deny 写、保留读（PATH 上的工具仍需可执行）。
-        if let Some(home) = std::env::var_os("HOME") {
-            let home = PathBuf::from(home);
-            for name in ["local/bin", "bin", ".local/bin", "Library/Python", "Library/Ruby"] {
-                add_subpath_rule(&mut lines, "deny", "file-write*", &home.join(name));
-            }
-        }
     } else {
         if let Some(canonical) = add_subpath_rule(&mut lines, "allow", "file-read*", workspace) {
             read_roots.push(canonical);
@@ -300,6 +349,9 @@ fn build_profile(
     for path in protected_home_paths() {
         add_subpath_rule(&mut lines, "deny", "file-read*", &path);
         add_subpath_rule(&mut lines, "deny", "file-write*", &path);
+    }
+    for path in path_bin_write_denies() {
+        add_subpath_rule_or_literal(&mut lines, "deny", "file-write*", &path);
     }
 
     Ok(lines.join("\n"))
@@ -489,7 +541,28 @@ fn backend_app_dir(args: &[String], cwd: &Path) -> Option<PathBuf> {
     if parent.as_os_str().is_empty() {
         return None;
     }
-    Some(parent.to_path_buf())
+    let cwd_norm = lexical_normalize(cwd);
+    let parent_norm = lexical_normalize(parent);
+    if parent_norm != cwd_norm && !parent_norm.starts_with(&cwd_norm) {
+        return None;
+    }
+    Some(parent_norm)
+}
+
+/// 去掉 `.` 和 `..`，不访问文件系统。用来判断脚本父目录有没有逃出 app 目录。
+#[cfg(target_os = "macos")]
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 /// `cwd` 是进程的实际工作目录：backend_app_dir 按它解析 args 里的相对脚本
@@ -1340,18 +1413,60 @@ mod tests {
             .expect("relative script must resolve against cwd");
         assert_eq!(resolved, app_dir, "app dir must be the script's parent under cwd");
 
-        // 绝对脚本不受 cwd 影响
-        let abs = backend_app_dir(
-            &["/opt/tools/runner/main.py".to_string()],
-            &app_dir,
-        )
-        .expect("absolute script must resolve to its own parent");
-        assert_eq!(abs, PathBuf::from("/opt/tools/runner"));
+        let nested = backend_app_dir(&["lib/server.js".to_string()], &app_dir)
+            .expect("script in a subdirectory stays inside the app dir");
+        assert_eq!(nested, app_dir.join("lib"));
+
+        assert!(
+            backend_app_dir(&["../../project.sqlite".to_string()], &app_dir).is_none(),
+            "a script path that leaves the app dir must not become a write root"
+        );
+        assert!(
+            backend_app_dir(&["/opt/tools/runner/main.py".to_string()], &app_dir).is_none(),
+            "an absolute script outside the app dir must not become a write root"
+        );
 
         // args[0] 是标志位（node -e / python -m / zsh -c）：无脚本可推导，不放行
         assert!(backend_app_dir(&["-c".to_string(), "node server.js".to_string()], &app_dir).is_none());
         assert!(backend_app_dir(&["-m".to_string(), "http.server".to_string()], &app_dir).is_none());
         assert!(backend_app_dir(&[], &app_dir).is_none());
+    }
+
+    #[test]
+    fn profile_does_not_grant_write_on_cargo_bin() {
+        let workspace = home_test_workspace("cargo-bin");
+        fs::create_dir_all(&workspace).expect("workspace");
+        let profile = build_profile(
+            "/bin/zsh",
+            &workspace,
+            Some(SandboxAccess {
+                network: true,
+                workspace_write: true,
+                allow_bind: false,
+                allow_codepapr_apps: false,
+            }),
+            None,
+        )
+        .expect("profile");
+        let _ = fs::remove_dir_all(&workspace);
+        let home = PathBuf::from(std::env::var_os("HOME").expect("HOME"));
+        let bin = home.join(".cargo/bin");
+        let denied = if let Ok(canonical) = bin.canonicalize() {
+            format!("(deny file-write* (subpath \"{}\"))", canonical.display())
+        } else {
+            format!("(deny file-write* (subpath \"{}\"))", bin.display())
+        };
+        assert!(
+            profile.contains(&denied),
+            "PATH bin must be write-denied; looked for {denied}"
+        );
+        if let Ok(cargo) = home.join(".cargo").canonicalize() {
+            let allow = format!("(allow file-write* (subpath \"{}\"))", cargo.display());
+            assert!(
+                !profile.contains(&allow),
+                "the cargo tree itself must not be writable"
+            );
+        }
     }
 
     /// 功能回归（math-mentor 事故）：manifest args 是相对 app 目录的

@@ -840,12 +840,9 @@ export async function launchAppBackend(
     );
   }
 
-  // #60 回环约束：沙箱 SBPL 的 network-bind 地址过滤对本平台无效（实测
-  // (local ip ...) 过滤器不限制 bind 地址，bind 0.0.0.0 照样成功），回环
-  // 强制放这里做。注意：`*`（IPv6 双栈通配）是 node listen(PORT) 的平台
-  // 默认，绝大多数后端无法修改，且它回环可达（connect 探测能通）——因此
-  // `*` 仅落 warning 不判失败；只有监听在具体的非回环 IP（如 192.168.x.x）
-  // 才判定暴露到局域网并拒绝启动。拿不到 lsof（容器/CI）时跳过。
+  // network: false 时，通配监听（node listen(port) 的 `*`）和非回环地址一样拒绝。
+  // 声明了 network 的应用仍只警告 `*`，具体的非回环地址继续拒绝。
+  // 拿不到 lsof（容器/CI）时跳过。
   let bindHosts: string[] = [];
   try {
     bindHosts = await invoke<string[]>('check_port_bind_address', { port });
@@ -853,6 +850,23 @@ export async function launchAppBackend(
     bindHosts = [];
   }
   const wildcardHosts = bindHosts.filter((host) => isWildcardBindHost(host));
+  const nonLoopbackHosts = bindHosts.filter((host) => !isLoopbackBindHost(host) && !isWildcardBindHost(host));
+  if (!appAccess.network && (wildcardHosts.length > 0 || nonLoopbackHosts.length > 0)) {
+    const exposed = [...wildcardHosts, ...nonLoopbackHosts];
+    const exitInfo = await fetchProcessExitInfo(result.pid);
+    try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-loopback-failure' }); } catch { /* best-effort */ }
+    try {
+      await invoke('log_ui_event', {
+        workspacePath,
+        message: `app_start-failure ${app.appId} port=${port} pid=${result.pid} reason=offline-non-loopback hosts=[${exposed.join(',')}]`,
+      });
+    } catch { /* best-effort */ }
+    const detail = formatExitDetail(exitInfo);
+    throw new Error(
+      `应用 '${app.appId}' 声明了 network: false，但后端监听在 ${exposed.join(', ')}。` +
+      `通配地址会从局域网访问到。请把服务绑到 127.0.0.1 或 ::1。${detail}`,
+    );
+  }
   if (wildcardHosts.length > 0) {
     try {
       await invoke('log_ui_event', {
@@ -861,7 +875,6 @@ export async function launchAppBackend(
       });
     } catch { /* best-effort */ }
   }
-  const nonLoopbackHosts = bindHosts.filter((host) => !isLoopbackBindHost(host) && !isWildcardBindHost(host));
   if (nonLoopbackHosts.length > 0) {
     const exitInfo = await fetchProcessExitInfo(result.pid);
     try { await invoke('stop_background_process', { pid: result.pid, source: 'app_start-loopback-failure' }); } catch { /* best-effort */ }
@@ -908,7 +921,7 @@ function formatExitDetail(exitInfo: BackgroundProcessExitInfo | null): string {
   return spawnLog ? `\n进程输出：\n${spawnLog}` : '';
 }
 
-/** #60：通配监听（IPv6 双栈 `*`，node listen(PORT) 平台默认）。 */
+/** Node `listen(port)` 的双栈通配。`0.0.0.0` / `::` 走非回环分支，始终拒绝。 */
 function isWildcardBindHost(host: string): boolean {
   return host === '*';
 }

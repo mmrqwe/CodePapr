@@ -67,11 +67,15 @@ impl RpcClient {
         workspace: Option<&str>,
         event_tx: Option<mpsc::UnboundedSender<JsonRpcNotification>>,
         verbose: bool,
+        auth_token: Option<&str>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         if let Some(addr) = server_addr {
-            Self::connect_tcp(addr, event_tx).await
+            Self::connect_tcp(addr, event_tx, auth_token).await
         } else if let Ok(addr) = std::env::var("CODEPAPR_SERVER_URL") {
-            Self::connect_tcp(&addr, event_tx).await
+            let token = auth_token
+                .map(|value| value.to_string())
+                .or_else(|| std::env::var("CODEPAPR_AUTH_TOKEN").ok());
+            Self::connect_tcp(&addr, event_tx, token.as_deref()).await
         } else {
             Self::spawn_stdio(workspace, event_tx, verbose).await
         }
@@ -81,9 +85,17 @@ impl RpcClient {
     pub async fn connect_tcp(
         addr: &str,
         event_tx: Option<mpsc::UnboundedSender<JsonRpcNotification>>,
+        auth_token: Option<&str>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let stream = TcpStream::connect(addr).await
+        codepapr_core::host_auth::ensure_loopback_addr(addr)?;
+        let token = auth_token
+            .map(|value| value.to_string())
+            .or_else(|| std::env::var("CODEPAPR_AUTH_TOKEN").ok())
+            .ok_or("连接 TCP 宿主需要 --auth-token 或 CODEPAPR_AUTH_TOKEN")?;
+        let token = codepapr_core::host_auth::normalize_token(&token)?;
+        let mut stream = TcpStream::connect(addr).await
             .map_err(|e| format!("Failed to connect to codepapr-server at {addr}: {e}"))?;
+        codepapr_core::host_auth::client_handshake(&mut stream, &token).await?;
         let (read_half, mut write_half) = stream.into_split();
 
         let (tx_writer, mut rx_writer) = mpsc::unbounded_channel::<String>();

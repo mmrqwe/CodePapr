@@ -1056,6 +1056,34 @@ describe('app_start 后端启动工作目录', () => {
     expect(installCall?.[1]).toMatchObject({ allowNetwork: false });
   });
 
+  it('network: false 时拒绝通配监听', async () => {
+    usePaprPermissionStore.getState().setAppSettings({
+      defaultLocal: 'none',
+      defaultNetwork: false,
+      appOverrides: { 'demo-app': { local: 'read', network: false } },
+    });
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'install_app_npm_deps') return 'skipped';
+      if (command === 'allocate_app_port') return typeof args?.preferred === 'number' ? args.preferred : 3456;
+      if (command === 'start_app_background_command') return { pid: 4242, started: true };
+      if (command === 'check_port_available_structured') return { v4: true, v6: false };
+      if (command === 'check_port_owned_by') return true;
+      if (command === 'check_port_bind_address') return ['*'];
+      if (command === 'stop_background_process') return { stopped: true };
+      if (command === 'background_process_exit_info') return null;
+      return {};
+    });
+
+    await expect(
+      build({ mode: 'app' }).execute('app_start', { appId: 'demo-app' }),
+    ).rejects.toThrow(/network: false/);
+    expect(
+      invokeMock.mock.calls.some(
+        ([command, args]) => command === 'stop_background_process' && args?.pid === 4242,
+      ),
+    ).toBe(true);
+  });
+
   it('权限变更后停掉并按新沙箱重启正在运行的后端', async () => {
     useAppRuntimeStore.setState((state) => ({
       ...state,
