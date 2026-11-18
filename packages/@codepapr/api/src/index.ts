@@ -4,6 +4,7 @@
 
 // Providers
 export { BaseLLMProvider, ProviderRequestError, setGlobalFetchFn, getGlobalFetchFn, mergeExtraHeaders } from './providers/ILLMProvider';
+export { isRequestBodyOverrideField, normalizeRequestBodyOverrides } from './providers/requestBodyOverrides';
 export type { ProviderConfig } from './providers/ILLMProvider';
 export { DeepSeekProvider } from './providers/DeepSeekProvider';
 export { OpenAIProvider } from './providers/OpenAIProvider';

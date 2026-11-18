@@ -3,6 +3,7 @@ import {
   DEFAULT_MAX_TOKENS,
   DEEPSEEK_DEFAULT_MAX_TOKENS,
   DEFAULT_MAX_CONTEXT_TOKENS,
+  normalizeRequestBodyOverrides,
 } from '@codepapr/api';
 import { normalizeMcpSettings } from '../../utils/mcpTypes';
 import { isBuiltinThemeId } from '../../theme/themes';
@@ -103,6 +104,7 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
       ? obj.multimodalEnabled
       : undefined;
   const extraHeaders = sanitizeExtraHeaders(obj.extraHeaders);
+  const requestBodyOverrides = normalizeRequestBodyOverrides(obj.requestBodyOverrides);
 
   return {
     id,
@@ -122,6 +124,7 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     ...(topP !== undefined ? { topP } : {}),
     ...(multimodalEnabled !== undefined ? { multimodalEnabled } : {}),
     ...(extraHeaders !== undefined ? { extraHeaders } : {}),
+    ...(requestBodyOverrides !== undefined ? { requestBodyOverrides } : {}),
   };
 }
 
@@ -1026,6 +1029,9 @@ export function normalizeSettings(
     apiKey: effectiveApiKey,
     baseURL: effectiveBaseURL,
     extraHeaders: effectiveExtraHeaders,
+    requestBodyOverrides: activePrimaryProfile.requestBodyOverrides,
+    fastRequestBodyOverrides: activeFastProfile.requestBodyOverrides,
+    mentorRequestBodyOverrides: activeMentorProfile.requestBodyOverrides,
     systemPrompt,
     thinkingEnabled: effectiveThinkingEnabled,
     thinkingEffort: effectiveThinkingEffort,

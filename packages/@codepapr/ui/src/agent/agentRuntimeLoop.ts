@@ -34,6 +34,7 @@ import {
   RequestBuilder,
   CacheValidator,
   setGlobalFetchFn,
+  type ProviderConfig,
 } from '@codepapr/api';
 import type { IAgentResponse, IChatRequest, IChatResponse, ICacheStatistics, IChatStreamEvent, IMessage, ILLMProvider, IToolDefinition } from '@codepapr/types';
 import {
@@ -519,6 +520,7 @@ function buildProviderFrom(
     apiKey: string;
     baseURL: string;
     extraHeaders?: Record<string, string>;
+    requestBodyOverrides?: WorkerAgentSettings['requestBodyOverrides'];
     streamIdleTimeoutMs: number;
   },
   sessionId?: string
@@ -529,20 +531,16 @@ function buildProviderFrom(
       baseURL: input.baseURL.trim().replace(/\/+$/, '') || DEFAULT_LOCAL_BASE_URL,
       idleTimeoutMs: input.streamIdleTimeoutMs,
       ...(input.extraHeaders ? { extraHeaders: input.extraHeaders } : {}),
+      requestBodyOverrides: input.requestBodyOverrides,
     });
   }
 
-  const config: {
-    apiKey: string;
-    baseURL?: string;
-    idleTimeoutMs?: number;
-    sessionId?: string;
-    extraHeaders?: Record<string, string>;
-  } = {
+  const config: ProviderConfig = {
     apiKey: input.apiKey.trim(),
     idleTimeoutMs: input.streamIdleTimeoutMs,
     ...(sessionId ? { sessionId } : {}),
     ...(input.extraHeaders ? { extraHeaders: input.extraHeaders } : {}),
+    requestBodyOverrides: input.requestBodyOverrides,
   };
   if (input.apiMode === 'custom') {
     config.baseURL = input.baseURL.trim().replace(/\/+$/, '');
@@ -568,6 +566,7 @@ function buildProvider(settings: WorkerAgentSettings, sessionId?: string) {
       apiKey: settings.apiKey,
       baseURL: settings.baseURL,
       extraHeaders: settings.extraHeaders,
+      requestBodyOverrides: settings.requestBodyOverrides,
       streamIdleTimeoutMs: settings.streamIdleTimeoutMs,
     },
     sessionId
@@ -602,6 +601,7 @@ function buildFastProvider(settings: WorkerAgentSettings, sessionId?: string) {
       apiKey,
       baseURL,
       extraHeaders: settings.extraHeaders,
+      requestBodyOverrides: settings.fastRequestBodyOverrides,
       streamIdleTimeoutMs: settings.streamIdleTimeoutMs,
     },
     sessionId
@@ -960,6 +960,7 @@ async function runSubagent(
       apiFormat: s.mentorApiFormat,
       apiMode: s.mentorApiMode ?? 'custom',
       ...(s.mentorExtraHeaders ? { extraHeaders: s.mentorExtraHeaders } : {}),
+      requestBodyOverrides: s.mentorRequestBodyOverrides,
       maxTokens: s.mentorMaxTokens,
       thinkingEnabled: s.mentorThinkingEnabled,
       thinkingEffort: s.mentorThinkingEffort ?? '',
@@ -997,6 +998,7 @@ async function runSubagent(
         apiKey: exec.mentor.apiKey,
         baseURL: exec.mentor.baseURL ?? '',
         extraHeaders: exec.mentor.extraHeaders,
+        requestBodyOverrides: exec.mentor.requestBodyOverrides,
         streamIdleTimeoutMs: payload.settings.streamIdleTimeoutMs,
       },
       `${payload.sessionId}:subagent:${runId}:mentor`
@@ -1386,6 +1388,7 @@ async function handleRunAppAgent(
           apiKey,
           baseURL,
           extraHeaders: s.mentorExtraHeaders,
+          requestBodyOverrides: s.mentorRequestBodyOverrides,
           streamIdleTimeoutMs: s.streamIdleTimeoutMs,
         },
         `${appAgentSessionId}:mentor`

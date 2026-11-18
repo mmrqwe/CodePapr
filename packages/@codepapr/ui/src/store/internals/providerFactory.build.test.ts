@@ -67,7 +67,7 @@ describe('providerFactory: OpenCode Go wiring', () => {
     expect(init.headers['x-opencode-session']).toBeUndefined();
   });
 
-  it('carries profile.extraHeaders through buildProviderForProfile', async () => {
+  it('carries profile headers and request body overrides through buildProviderForProfile', async () => {
     const fetchMock = responsesFetchMock();
     vi.stubGlobal('fetch', fetchMock);
     const profile: ModelProfile = {
@@ -80,13 +80,21 @@ describe('providerFactory: OpenCode Go wiring', () => {
       model: 'muse',
       maxTokens: 1000,
       extraHeaders: { 'X-Trace': 'on' },
+      requestBodyOverrides: {
+        max_output_tokens: 4096,
+        prompt_cache_key: null,
+        text: { verbosity: 'low' },
+      },
     };
     const provider = buildProviderForProfile(profile, 30000, 'conv-7');
     await provider!.chat(chat);
 
-    const init = fetchMock.mock.calls[0][1] as { headers: Record<string, string> };
+    const init = fetchMock.mock.calls[0][1] as { headers: Record<string, string>; body: string };
     expect(init.headers['x-opencode-session']).toBe('conv-7');
     expect(init.headers['X-Trace']).toBe('on');
+    const body = JSON.parse(init.body);
+    expect(body).toMatchObject({ max_output_tokens: 4096, text: { verbosity: 'low' } });
+    expect(body).not.toHaveProperty('prompt_cache_key');
   });
 
   it('deepseek apiMode 构建 DeepSeekProvider（导师档不再落到 OpenAI 默认端点）', () => {

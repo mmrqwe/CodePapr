@@ -628,7 +628,10 @@ describe('safeParseToolArguments', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const provider = new OpenAIProvider({ apiKey: 'test-key' });
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'https://relay.example.com/v1',
+    });
     await provider.chat({
       model: 'gpt-4o',
       thinking: { type: 'enabled' },

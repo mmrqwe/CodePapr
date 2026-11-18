@@ -258,6 +258,9 @@ export interface ICacheStatistics {
 /** 思考打开时请求体携带的字段组合。网关各认一套，由模型配置显式选择。 */
 export type ThinkingPayload = 'reasoning' | 'thinking' | 'both';
 
+/** Top-level JSON request fields. A null value removes the generated field. */
+export type RequestBodyOverrides = Record<string, unknown>;
+
 export interface MentorConfig {
   enabled: boolean;
   model: string;
@@ -268,6 +271,7 @@ export interface MentorConfig {
   apiMode?: 'deepseek' | 'custom' | 'local';
   /** 模型配置档的自定义附加请求头。 */
   extraHeaders?: Record<string, string>;
+  requestBodyOverrides?: RequestBodyOverrides;
   maxTokens: number;
   maxConsultations: number;
   thinkingEnabled: boolean;

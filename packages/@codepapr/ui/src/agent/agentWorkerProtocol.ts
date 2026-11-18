@@ -9,6 +9,7 @@ import type {
   IImageContent,
   IMessage,
   IToolDefinition,
+  RequestBodyOverrides,
   TodoListContext,
 } from '@codepapr/types';
 import type { ContextCheckpointPayload } from '../utils/contextCompaction';
@@ -28,6 +29,7 @@ export interface WorkerAgentSettings {
   model: string;
   /** 自定义附加请求头（来自模型配置档，见 ProviderConfig.extraHeaders 语义）。 */
   extraHeaders?: Record<string, string>;
+  requestBodyOverrides?: RequestBodyOverrides;
   /** Agent 工具面档位（极简时 worker 不补建 task 工具）。 */
   agentToolProfile?: AgentToolProfile;
   fastModelEnabled: boolean;
@@ -37,6 +39,7 @@ export interface WorkerAgentSettings {
   fastApiFormat?: WorkerApiFormat;
   fastApiKey?: string;
   fastBaseURL?: string;
+  fastRequestBodyOverrides?: RequestBodyOverrides;
   temperature: number;
   maxTokens: number;
   maxToolRounds: number;
@@ -53,6 +56,7 @@ export interface WorkerAgentSettings {
   /** 导师档完整 profile 语义（apiMode 决定默认端点/协议；缺省视为 custom）。 */
   mentorApiMode?: WorkerApiMode;
   mentorExtraHeaders?: Record<string, string>;
+  mentorRequestBodyOverrides?: RequestBodyOverrides;
   mentorMaxTokens: number;
   mentorThinkingEnabled: boolean;
   mentorThinkingEffort: string;

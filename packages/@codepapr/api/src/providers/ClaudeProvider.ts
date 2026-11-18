@@ -22,6 +22,7 @@ import {
 } from './streaming';
 import { buildClaudeImageContent, ClaudeContentPart } from './imageContent';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
+import { isOfficialApiHost } from './officialApi';
 import {
   applyOpencodeGatewayHeaders,
   resolveOpencodeSessionId,
@@ -223,6 +224,23 @@ function normalizeStopReason(stopReason: string | null | undefined): string {
   return stopReason === 'max_tokens' ? 'length' : stopReason ?? 'end_turn';
 }
 
+function buildAdaptiveThinkingOptions(request: IChatRequest, model: string) {
+  if (request.thinking?.type === 'enabled') {
+    const effort = request.thinking.reasoningEffort?.trim();
+    const supportsEffort = effort && /^(?:low|medium|high|xhigh|max)$/.test(effort) &&
+      !(effort === 'xhigh' && model.startsWith('claude-mythos-preview'));
+    return {
+      thinking: { type: 'adaptive', display: 'summarized' },
+      ...(supportsEffort && { output_config: { effort } }),
+    };
+  }
+  // These models default to thinking on and accept disabling it at the default effort.
+  if (/^claude-(?:(?:opus|sonnet)-5(?:-\d{8})?$|haiku-5-5(?:-|$))/.test(model)) {
+    return { thinking: { type: 'disabled' } };
+  }
+  return {};
+}
+
 export class ClaudeProvider extends BaseLLMProvider {
   name = 'claude';
   models = [
@@ -232,12 +250,14 @@ export class ClaudeProvider extends BaseLLMProvider {
   ];
 
   private readonly opencodeSessionId: string;
+  private readonly usesOfficialApi: boolean;
 
   constructor(config: ProviderConfig) {
     super({
-      baseURL: 'https://api.anthropic.com/v1',
       ...config,
+      baseURL: config.baseURL ?? 'https://api.anthropic.com/v1',
     });
+    this.usesOfficialApi = isOfficialApiHost(this.config.baseURL, 'api.anthropic.com');
     this.opencodeSessionId = resolveOpencodeSessionId(config.sessionId);
   }
 
@@ -277,7 +297,7 @@ export class ClaudeProvider extends BaseLLMProvider {
         const response = await this.fetchWithRetry(url, {
           method: 'POST',
           headers: this.requestHeaders(),
-          body: sortedStringify(payload),
+          body: sortedStringify(this.applyRequestBodyOverrides(payload)),
         }, signal, (attempt, maxRetries, err) => {
           onEvent({
             type: 'request-retry',
@@ -497,7 +517,7 @@ export class ClaudeProvider extends BaseLLMProvider {
     const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers: this.requestHeaders(),
-      body: sortedStringify(payload),
+      body: sortedStringify(this.applyRequestBodyOverrides(payload)),
     }, signal, undefined, protection);
 
     let data: ClaudeResponse;
@@ -532,16 +552,36 @@ export class ClaudeProvider extends BaseLLMProvider {
   private buildPayload(request: IChatRequest, stream: boolean = false) {
     const systemPrompt = getClaudeSystemPrompt(request);
     const applyPromptCache = shouldApplyPromptCache(request);
+    const model = request.model.trim().toLowerCase();
+    const usesAdaptiveThinking = this.usesOfficialApi &&
+      /^claude-(?:(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]\d*|4-[7-9])|mythos-preview)(?:-|$)/.test(model);
+    const maxTokens = request.maxTokens ?? DEFAULT_MAX_TOKENS;
+    const thinkingEnabled = request.thinking?.type === 'enabled';
+    const manualThinking = !usesAdaptiveThinking && thinkingEnabled &&
+      maxTokens > CLAUDE_THINKING_MIN_BUDGET_TOKENS;
+
+    let sampling: { temperature?: number; top_p?: number } = {};
+    if (!this.usesOfficialApi) {
+      sampling = {
+        temperature: thinkingEnabled ? 1 : request.temperature ?? 0.7,
+        top_p: request.topP ?? 0.9,
+      };
+    } else if (!usesAdaptiveThinking) {
+      if (manualThinking) {
+        if (request.topP !== undefined && request.topP >= 0.95 && request.topP <= 1) {
+          sampling.top_p = request.topP;
+        }
+      } else if (request.temperature === undefined && request.topP !== undefined) {
+        sampling.top_p = request.topP;
+      } else {
+        sampling.temperature = request.temperature ?? 0.7;
+      }
+    }
 
     return {
       model: request.model,
-      max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-      // Anthropic 要求 thinking 启用时 temperature 必须为 1，否则 400。
-      temperature:
-        request.thinking?.type === 'enabled'
-          ? 1
-          : (request.temperature ?? 0.7),
-      top_p: request.topP ?? 0.9,
+      max_tokens: maxTokens,
+      ...sampling,
       system: systemPrompt
         ? [
             {
@@ -565,24 +605,20 @@ export class ClaudeProvider extends BaseLLMProvider {
             }),
           })),
         }),
-      // budget_tokens 必须 ≥1024 且 < max_tokens：输出预算过小时（如连接
-      // 测试发 maxTokens:8）两个约束无法同时满足，降级不带 thinking 字段，
-      // 而不是发出必然 400 的请求。
-      // 预算优先取调用方设置（第三方 Claude 兼容端点可自由取值），缺省用
-      // CLAUDE_THINKING_BUDGET_TOKENS；无论来源都钳制到 [1024, max_tokens-1]。
-      ...(request.thinking?.type === 'enabled' &&
-        (request.maxTokens ?? DEFAULT_MAX_TOKENS) > CLAUDE_THINKING_MIN_BUDGET_TOKENS && {
-          thinking: {
-            type: 'enabled' as const,
-            budget_tokens: Math.min(
-              Math.max(
-                request.thinking.budgetTokens ?? CLAUDE_THINKING_BUDGET_TOKENS,
-                CLAUDE_THINKING_MIN_BUDGET_TOKENS
-              ),
-              (request.maxTokens ?? DEFAULT_MAX_TOKENS) - 1
+      ...(usesAdaptiveThinking && buildAdaptiveThinkingOptions(request, model)),
+      // Manual thinking requires 1024 <= budget_tokens < max_tokens.
+      ...(manualThinking && {
+        thinking: {
+          type: 'enabled' as const,
+          budget_tokens: Math.min(
+            Math.max(
+              request.thinking?.budgetTokens ?? CLAUDE_THINKING_BUDGET_TOKENS,
+              CLAUDE_THINKING_MIN_BUDGET_TOKENS
             ),
-          },
-        }),
+            maxTokens - 1
+          ),
+        },
+      }),
       ...(stream ? { stream: true } : {}),
     };
   }

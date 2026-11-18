@@ -131,6 +131,8 @@ export interface ReasoningRoundTripOptions {
    * reasoning 的消息仍必须回传，不受此开关限制）。
    */
   supportsThinkingPayload: boolean;
+  /** 官方 OpenAI 不接收兼容端点的 reasoning_content 扩展。 */
+  omitReasoningContent?: boolean;
 }
 
 /**
@@ -140,6 +142,7 @@ export function resolveReasoningContent(
   message: IMessage,
   opts: ReasoningRoundTripOptions
 ): string | undefined {
+  if (opts.omitReasoningContent) return undefined;
   if (isToolCallAssistant(message)) {
     if (hasNonEmptyReasoning(message)) return message.reasoningContent;
     return opts.supportsThinkingPayload ? buildReasoningPlaceholder(message) : undefined;

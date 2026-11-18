@@ -20,7 +20,13 @@ import {
   StreamIdleTimeoutError,
   withStreamIdleRetry,
 } from './streaming';
-import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
+import { DEFAULT_MAX_TOKENS, sanitizeMaxTokens } from '../tokenLimits';
+import {
+  isOfficialApiHost,
+  officialOpenAIReasoningEffort,
+  supportsOfficialOpenAISampling,
+} from './officialApi';
+import { reachedRequestOutputLimit } from './requestBodyOverrides';
 import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
 import {
   applyOpencodeGatewayHeaders,
@@ -382,12 +388,14 @@ export class ResponseProvider extends BaseLLMProvider {
   models = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'doubao-seed-2-1-pro-260628'];
 
   private readonly opencodeSessionId: string;
+  private readonly usesOfficialApi: boolean;
 
   constructor(config: ProviderConfig) {
     super({
-      baseURL: 'https://api.openai.com/v1',
       ...config,
+      baseURL: config.baseURL ?? 'https://api.openai.com/v1',
     });
+    this.usesOfficialApi = isOfficialApiHost(this.config.baseURL, 'api.openai.com');
     this.opencodeSessionId = resolveOpencodeSessionId(config.sessionId);
   }
 
@@ -423,6 +431,7 @@ export class ResponseProvider extends BaseLLMProvider {
   ): Promise<IChatResponse> {
     const url = this.getEndpointUrl();
     const payload = this.buildPayload(request, true);
+    const body = this.applyRequestBodyOverrides(payload);
 
     log.info('LLM Responses API request started', {
       model: payload.model,
@@ -437,7 +446,7 @@ export class ResponseProvider extends BaseLLMProvider {
           {
             method: 'POST',
             headers: this.requestHeaders(),
-            body: sortedStringify(payload),
+            body: sortedStringify(body),
           },
           signal,
           (attempt, maxRetries, err) => {
@@ -727,7 +736,6 @@ export class ResponseProvider extends BaseLLMProvider {
 
         const effectiveToolCalls = finalizeNamedResponsesToolCalls(toolCallStates);
         const outputTokensSeen = getResponseOutputTokens(usage);
-        const maxTokens = request.maxTokens ?? DEFAULT_MAX_TOKENS;
 
         let effectiveFinishReason: string;
         if (responseStatus === 'incomplete') {
@@ -744,7 +752,7 @@ export class ResponseProvider extends BaseLLMProvider {
           // 截断证据降级 'length'，否则显式标记 'unknown'。
           effectiveFinishReason = sawFinishReason
             ? finishReason
-            : outputTokensSeen >= maxTokens
+            : reachedRequestOutputLimit(body, outputTokensSeen)
               ? 'length'
               : 'unknown';
         }
@@ -812,7 +820,7 @@ export class ResponseProvider extends BaseLLMProvider {
       {
         method: 'POST',
         headers: this.requestHeaders(),
-        body: sortedStringify(payload),
+        body: sortedStringify(this.applyRequestBodyOverrides(payload)),
       },
       signal,
       undefined,
@@ -1033,7 +1041,9 @@ export class ResponseProvider extends BaseLLMProvider {
       model: request.model,
       input: inputItems,
       stream,
-      max_output_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+      max_output_tokens: this.usesOfficialApi
+        ? Math.max(16, sanitizeMaxTokens(request.maxTokens))
+        : request.maxTokens ?? DEFAULT_MAX_TOKENS,
     };
 
     if (request.tools && request.tools.length > 0) {
@@ -1055,15 +1065,21 @@ export class ResponseProvider extends BaseLLMProvider {
         });
     }
 
-    if (typeof request.temperature === 'number') {
-      payload.temperature = request.temperature;
-    }
-    if (typeof request.topP === 'number') {
-      payload.top_p = request.topP;
+    const officialEffort = this.usesOfficialApi
+      ? officialOpenAIReasoningEffort(request, 'medium')
+      : undefined;
+    if (!this.usesOfficialApi || supportsOfficialOpenAISampling(request.model, officialEffort)) {
+      if (typeof request.temperature === 'number') {
+        payload.temperature = request.temperature;
+      }
+      if (typeof request.topP === 'number') {
+        payload.top_p = request.topP;
+      }
     }
 
-    // 思考字段由模型配置的 thinkingPayload 决定，不再按域名猜测。
-    if (request.thinking) {
+    if (officialEffort) {
+      payload.reasoning = { effort: officialEffort, summary: 'auto' };
+    } else if (!this.usesOfficialApi && request.thinking) {
       const thinkingType = request.thinking.type || 'enabled';
       if (shouldSendThinkingType(request)) {
         payload.thinking = { type: thinkingType };

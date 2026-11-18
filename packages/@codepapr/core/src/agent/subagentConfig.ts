@@ -14,6 +14,7 @@ import type {
   ILLMProvider,
   ISubagentToolInvocation,
   IToolDefinition,
+  RequestBodyOverrides,
   ThinkingPayload,
 } from '@codepapr/types';
 import { createHeadlessCompaction } from './headlessCompaction';
@@ -72,6 +73,7 @@ export interface SubagentMentorSettings {
   apiMode?: 'deepseek' | 'custom' | 'local';
   /** 模型配置档的自定义附加请求头。 */
   extraHeaders?: Record<string, string>;
+  requestBodyOverrides?: RequestBodyOverrides;
   maxTokens: number;
   thinkingEnabled: boolean;
   thinkingEffort?: string;
@@ -121,6 +123,7 @@ export interface ResolvedSubagentMentor {
   apiFormat: 'openai' | 'claude' | 'response';
   apiMode: 'deepseek' | 'custom' | 'local';
   extraHeaders?: Record<string, string>;
+  requestBodyOverrides?: RequestBodyOverrides;
 }
 
 export interface ResolvedSubagentExecution {
@@ -167,6 +170,7 @@ export function resolveSubagentExecution(
         apiFormat: m.apiFormat,
         apiMode: m.apiMode ?? 'custom',
         ...(m.extraHeaders ? { extraHeaders: m.extraHeaders } : {}),
+        ...(m.requestBodyOverrides ? { requestBodyOverrides: m.requestBodyOverrides } : {}),
       };
       usingMentor = true;
     } else {

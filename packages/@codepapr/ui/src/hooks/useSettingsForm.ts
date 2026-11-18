@@ -73,6 +73,9 @@ export function useSettingsForm() {
         fastModel: effectiveFastModel,
         apiKey: effectiveApiKey,
         baseURL: effectiveBaseURL,
+        requestBodyOverrides: primaryProfile ? primaryProfile.requestBodyOverrides : merged.requestBodyOverrides,
+        fastRequestBodyOverrides: fastProfile ? fastProfile.requestBodyOverrides : merged.fastRequestBodyOverrides,
+        mentorRequestBodyOverrides: mentorProfile ? mentorProfile.requestBodyOverrides : merged.mentorRequestBodyOverrides,
         thinkingEnabled: primaryProfile
           ? (primaryProfile.thinkingEnabled ?? false)
           : merged.thinkingEnabled,

@@ -27,6 +27,12 @@ import {
   withStreamIdleRetry,
 } from './streaming';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
+import {
+  isOfficialApiHost,
+  officialOpenAIReasoningEffort,
+  supportsOfficialOpenAISampling,
+} from './officialApi';
+import { reachedRequestOutputLimit } from './requestBodyOverrides';
 import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
 import {
   applyOpencodeGatewayHeaders,
@@ -40,7 +46,7 @@ interface OpenAIResponse {
   choices: Array<{
     message: {
       role: 'assistant';
-      content: string | Array<{ type?: string; text?: string }>;
+      content: string | Array<{ type?: string; text?: string }> | null;
       reasoning_content?: string;
       tool_calls?: Array<{
         id: string;
@@ -143,7 +149,7 @@ function normalizeOpenAIContent(
     return content;
   }
 
-  return content
+  return (content ?? [])
     .map((part) => (part.type === 'text' || !part.type ? part.text ?? '' : ''))
     .join('');
 }
@@ -153,13 +159,20 @@ export class OpenAIProvider extends BaseLLMProvider {
   models = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.3-codex'];
 
   private readonly opencodeSessionId: string;
+  private readonly usesOfficialApi: boolean;
 
   constructor(config: ProviderConfig) {
     super({
-      baseURL: 'https://api.openai.com/v1',
       ...config,
+      baseURL: (config.baseURL ?? 'https://api.openai.com/v1').trim().replace(/\/+$/, ''),
     });
+    this.usesOfficialApi = isOfficialApiHost(this.config.baseURL, 'api.openai.com');
     this.opencodeSessionId = resolveOpencodeSessionId(config.sessionId);
+  }
+
+  private getEndpointUrl(): string {
+    const base = this.config.baseURL;
+    return base?.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
   }
 
   /** 命中 opencode 网关（如 Zen/Go）时注入 x-opencode-session / User-Agent 契约头。 */
@@ -199,8 +212,9 @@ export class OpenAIProvider extends BaseLLMProvider {
     onEvent: (event: IChatStreamEvent) => void,
     signal?: AbortSignal
   ): Promise<IChatResponse> {
-    const url = `${this.config.baseURL}/chat/completions`;
+    const url = this.getEndpointUrl();
     const payload = this.buildPayload(request, true);
+    const body = this.applyRequestBodyOverrides(payload);
 
     log.info('LLM request started', {
       model: payload.model,
@@ -213,7 +227,7 @@ export class OpenAIProvider extends BaseLLMProvider {
         const response = await this.fetchWithRetry(url, {
           method: 'POST',
           headers: this.requestHeaders(),
-          body: sortedStringify(payload),
+          body: sortedStringify(body),
         }, signal, (attempt, maxRetries, err) => {
           onEvent({
             type: 'request-retry',
@@ -361,7 +375,7 @@ export class OpenAIProvider extends BaseLLMProvider {
         const outputTokensSeen = getOpenAIOutputTokens(usage);
         const effectiveFinishReason = sawFinishReason
           ? finishReason
-          : outputTokensSeen >= (request.maxTokens ?? DEFAULT_MAX_TOKENS)
+          : reachedRequestOutputLimit(body, outputTokensSeen)
             ? 'length'
             : 'unknown';
 
@@ -431,7 +445,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   private async chatCore(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {
-    const url = `${this.config.baseURL}/chat/completions`;
+    const url = this.getEndpointUrl();
     const payload = this.buildPayload(request);
 
     log.info('LLM request started', {
@@ -445,7 +459,7 @@ export class OpenAIProvider extends BaseLLMProvider {
     const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers: this.requestHeaders(),
-      body: sortedStringify(payload),
+      body: sortedStringify(this.applyRequestBodyOverrides(payload)),
     }, signal, undefined, protection);
 
     let data: OpenAIResponse;
@@ -478,24 +492,31 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   private buildPayload(request: IChatRequest, stream: boolean = false) {
-    // thinking 是 DeepSeek 风格扩展；reasoning_effort 是 OpenAI 兼容参数。
-    // 发哪个由模型配置 thinkingPayload 决定，不再按域名猜测。
+    const maxTokens = request.maxTokens ?? DEFAULT_MAX_TOKENS;
+    const reasoningEffort = this.usesOfficialApi
+      ? officialOpenAIReasoningEffort(request)
+      : shouldSendReasoningEffort(request) ? request.thinking?.reasoningEffort : undefined;
+    const supportsSampling = !this.usesOfficialApi ||
+      supportsOfficialOpenAISampling(request.model, reasoningEffort);
+
     return {
       model: request.model,
-      messages: buildOpenAICompatibleMessages(request, { supportsThinkingPayload: true }),
-      temperature: request.temperature ?? 0.7,
-      top_p: request.topP ?? 0.9,
-      max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-      ...(request.thinking &&
+      messages: buildOpenAICompatibleMessages(request, {
+        supportsThinkingPayload: !this.usesOfficialApi,
+        omitReasoningContent: this.usesOfficialApi,
+      }),
+      ...(supportsSampling && {
+        temperature: request.temperature ?? 0.7,
+        top_p: request.topP ?? 0.9,
+      }),
+      ...(this.usesOfficialApi ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+      ...(!this.usesOfficialApi && request.thinking &&
         shouldSendThinkingType(request) && {
           thinking: {
             type: request.thinking.type,
           },
         }),
-      ...(shouldSendReasoningEffort(request) &&
-        request.thinking?.reasoningEffort && {
-          reasoning_effort: request.thinking.reasoningEffort,
-        }),
+      ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
       ...(request.tools &&
         request.tools.length > 0 && {
           tools: request.tools

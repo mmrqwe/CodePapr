@@ -32,6 +32,7 @@ import {
 } from './streaming';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
+import { reachedRequestOutputLimit } from './requestBodyOverrides';
 
 const log = new Logger('DeepSeekProvider');
 
@@ -163,6 +164,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
   ): Promise<IChatResponse> {
     const url = `${this.config.baseURL}/chat/completions`;
     const payload = this.buildPayload(request, true);
+    const body = this.applyRequestBodyOverrides(payload);
 
     log.info('LLM request started', {
       model: payload.model,
@@ -178,7 +180,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${this.config.apiKey}`,
           },
-          body: sortedStringify(payload),
+          body: sortedStringify(body),
         }, signal, (attempt, maxRetries, err) => {
           onEvent({
             type: 'request-retry',
@@ -324,7 +326,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
         // 被伪装成模型主动停止）。
         const effectiveFinishReason = sawFinishReason
           ? finishReason
-          : normalizedUsage.outputTokens >= (request.maxTokens ?? DEFAULT_MAX_TOKENS)
+          : reachedRequestOutputLimit(body, normalizedUsage.outputTokens)
             ? 'length'
             : 'unknown';
 
@@ -416,7 +418,7 @@ export class DeepSeekProvider extends BaseLLMProvider {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.config.apiKey}`,
       },
-      body: sortedStringify(payload),
+      body: sortedStringify(this.applyRequestBodyOverrides(payload)),
     }, signal, undefined, protection);
 
     let data: DeepSeekResponse;

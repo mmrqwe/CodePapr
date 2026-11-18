@@ -563,7 +563,7 @@ describe('ClaudeProvider', () => {
     expect(response?.choices[0]?.message.content).toBe('好');
   });
 
-  it('sends budget_tokens and temperature=1 when thinking is enabled', async () => {
+  it('sends budget_tokens without a sampling override for official manual thinking', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
         id: 'claude-thinking',
@@ -592,9 +592,7 @@ describe('ClaudeProvider', () => {
       thinking?: { type?: string; budget_tokens?: number };
     };
 
-    // 旧实现：thinking 只有 {type:"enabled"}——Anthropic 要求 budget_tokens
-    // 且 temperature=1，任何启用 thinking 的调用都会 400。
-    expect(body.temperature).toBe(1);
+    expect(body.temperature).toBeUndefined();
     expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: 4096 });
   });
 

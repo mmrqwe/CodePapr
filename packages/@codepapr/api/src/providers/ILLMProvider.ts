@@ -4,8 +4,9 @@
  * 所有 LLM 提供商必须实现此接口以确保统一的调用方式
  */
 
-import { IChatRequest, IChatResponse, ILLMProvider } from '@codepapr/types';
+import { IChatRequest, IChatResponse, ILLMProvider, RequestBodyOverrides } from '@codepapr/types';
 import { Logger } from '@codepapr/common';
+import { applyRequestBodyOverrides } from './requestBodyOverrides';
 
 const log = new Logger('LLMProvider');
 
@@ -55,6 +56,7 @@ export interface ProviderConfig {
    *  注意：浏览器/Worker 运行时 fetch 会静默丢弃 forbidden header
    *  （User-Agent、Cookie 等），仅桌面 sidecar（Node fetch）保证生效。 */
   extraHeaders?: Record<string, string>;
+  requestBodyOverrides?: RequestBodyOverrides;
 }
 
 /** 把 extraHeaders 合并进请求头：只新增、不覆盖（键名按小写比较），
@@ -164,6 +166,10 @@ export abstract class BaseLLMProvider implements ILLMProvider {
     onEvent: (event: import('@codepapr/types').IChatStreamEvent) => void,
     signal?: AbortSignal
   ): Promise<IChatResponse>;
+
+  protected applyRequestBodyOverrides(payload: Record<string, unknown>): Record<string, unknown> {
+    return applyRequestBodyOverrides(payload, this.config.requestBodyOverrides);
+  }
 
   validate(): boolean {
     return !!this.config.apiKey;

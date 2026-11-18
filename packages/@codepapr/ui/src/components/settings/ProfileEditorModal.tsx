@@ -1,9 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import {
   DEFAULT_MAX_TOKENS,
   DEEPSEEK_DEFAULT_MAX_TOKENS,
   DEFAULT_MAX_CONTEXT_TOKENS,
+  isRequestBodyOverrideField,
+  normalizeRequestBodyOverrides,
 } from '@codepapr/api';
+import type { RequestBodyOverrides } from '@codepapr/types';
 import type { ApiFormat, Lang, ModelProfile } from '../../store/agentStore';
 import type { Translation } from './types';
 import { InlineSelectRow, TextField, ToggleField } from '../forms';
@@ -42,6 +45,22 @@ function rowsToHeaders(rows: HeaderRow[]): Record<string, string> | undefined {
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+function parseBodyOverrides(value: string):
+  | { valid: true; overrides?: RequestBodyOverrides }
+  | { valid: false } {
+  if (!value.trim()) return { valid: true };
+  try {
+    const body: unknown = JSON.parse(value);
+    if (body && typeof body === 'object' && !Array.isArray(body) &&
+        Object.keys(body).every(isRequestBodyOverrideField)) {
+      return { valid: true, overrides: normalizeRequestBodyOverrides(body) };
+    }
+  } catch {
+    return { valid: false };
+  }
+  return { valid: false };
+}
+
 export interface ProfileEditorModalProps {
   profile: ModelProfile;
   isOpen: boolean;
@@ -66,6 +85,8 @@ export function ProfileEditorModal({
 }: ProfileEditorModalProps) {
   const [draft, setDraft] = useState<ModelProfile>({ ...profile });
   const [headerRows, setHeaderRows] = useState<HeaderRow[]>([]);
+  const [bodyOverridesText, setBodyOverridesText] = useState('');
+  const bodyOverridesId = useId();
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [modelFilter, setModelFilter] = useState('');
   const [fetchStatus, setFetchStatus] = useState<'idle' | 'fetching'>('idle');
@@ -82,6 +103,9 @@ export function ProfileEditorModal({
     setHeaderRows(
       Object.entries(profile.extraHeaders ?? {}).map(([key, value]) => ({ key, value }))
     );
+    setBodyOverridesText(profile.requestBodyOverrides
+      ? JSON.stringify(profile.requestBodyOverrides, null, 2)
+      : '');
     setFetchedModels(null);
     setModelFilter('');
     setFetchStatus('idle');
@@ -106,6 +130,13 @@ export function ProfileEditorModal({
   }, []);
 
   if (!isOpen) return null;
+
+  const bodyOverrides = parseBodyOverrides(bodyOverridesText);
+  const profileToSave = bodyOverrides.valid ? {
+    ...draft,
+    extraHeaders: rowsToHeaders(headerRows),
+    requestBodyOverrides: bodyOverrides.overrides,
+  } : undefined;
 
   const update = (patch: Partial<ModelProfile>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
@@ -417,7 +448,8 @@ export function ProfileEditorModal({
       );
     }
 
-    const provider = buildProviderForProfile({ ...draft, extraHeaders: rowsToHeaders(headerRows) });
+    if (!profileToSave) throw new Error(t.requestBodyOverridesInvalid);
+    const provider = buildProviderForProfile(profileToSave);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
@@ -849,6 +881,29 @@ export function ProfileEditorModal({
           </button>
         </div>
 
+        <div className="rounded-xl border border-line bg-base p-4 space-y-3">
+          <label htmlFor={bodyOverridesId} className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
+            {t.requestBodyOverridesLabel}
+          </label>
+          <p id={bodyOverridesId + '-hint'} className="text-xs leading-relaxed text-fg-dim">
+            {t.requestBodyOverridesHint}
+          </p>
+          <textarea
+            id={bodyOverridesId}
+            aria-describedby={bodyOverridesId + (bodyOverrides.valid ? '-hint' : '-error')}
+            aria-invalid={!bodyOverrides.valid}
+            spellCheck={false}
+            rows={4}
+            value={bodyOverridesText}
+            onChange={(e) => setBodyOverridesText(e.target.value)}
+            placeholder={'{\n  "temperature": null,\n  "reasoning_effort": "high"\n}'}
+            className="w-full resize-y rounded-lg border border-line bg-base px-3 py-2 font-mono text-xs text-fg focus:border-accent-soft focus:outline-none"
+          />
+          {!bodyOverrides.valid && (
+            <p id={bodyOverridesId + '-error'} className="text-xs text-danger">{t.requestBodyOverridesInvalid}</p>
+          )}
+        </div>
+
         {/* Context & Sampling Parameters */}
         <div className="rounded-xl border border-line bg-base p-4 space-y-4">
           <div className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
@@ -980,8 +1035,9 @@ export function ProfileEditorModal({
             </button>
             <button
               type="button"
-              onClick={() => onSave({ ...draft, extraHeaders: rowsToHeaders(headerRows) })}
-              className="rounded-xl bg-accent px-5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
+              onClick={() => { if (profileToSave) onSave(profileToSave); }}
+              disabled={!profileToSave}
+              className="rounded-xl bg-accent px-5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t.saveProfile}
             </button>

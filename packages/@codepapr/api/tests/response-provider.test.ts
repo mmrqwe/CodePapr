@@ -68,7 +68,7 @@ describe('ResponseProvider', () => {
     });
 
     const request: IChatRequest = {
-      model: 'gpt-4o',
+      model: 'gpt-5.6-luna',
       messages: [
         { id: '1', role: 'system', content: 'You are an assistant', timestamp: Date.now() },
         { id: '2', role: 'user', content: 'What is the weather in Beijing?', timestamp: Date.now() },
@@ -93,7 +93,7 @@ describe('ResponseProvider', () => {
     expect(calledUrl).toBe('https://api.openai.com/v1/responses');
 
     const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(calledBody.model).toBe('gpt-4o');
+    expect(calledBody.model).toBe('gpt-5.6-luna');
     expect(calledBody.thinking).toBeUndefined();
     expect(calledBody.reasoning).toEqual({ effort: 'high', summary: 'auto' });
     expect(calledBody.tools).toEqual([
@@ -396,10 +396,13 @@ describe('ResponseProvider', () => {
     ).rejects.toThrow('Invalid model endpoint');
   });
 
-  function okJsonProvider(fetchMock: ReturnType<typeof vi.fn>): ResponseProvider {
+  function okJsonProvider(
+    fetchMock: ReturnType<typeof vi.fn>,
+    baseURL = 'https://api.openai.com/v1',
+  ): ResponseProvider {
     return new ResponseProvider({
       apiKey: 'sk-test',
-      baseURL: 'https://api.openai.com/v1',
+      baseURL,
       fetchFn: fetchMock as unknown as typeof fetch,
     });
   }
@@ -424,8 +427,9 @@ describe('ResponseProvider', () => {
   }
 
   it('sends user-typed reasoning effort as-is (xhigh / max) and always asks for summary', async () => {
+    const baseURL = 'https://relay.example.com/v1';
     const fetchMock = okJsonFetch();
-    await okJsonProvider(fetchMock).chat({
+    await okJsonProvider(fetchMock, baseURL).chat({
       model: 'muse-spark-1.2-contributor',
       messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
       thinking: { type: 'enabled', reasoningEffort: 'xhigh', payload: 'reasoning' },
@@ -436,7 +440,7 @@ describe('ResponseProvider', () => {
     });
 
     const maxMock = okJsonFetch();
-    await okJsonProvider(maxMock).chat({
+    await okJsonProvider(maxMock, baseURL).chat({
       model: 'muse-spark-1.2-contributor',
       messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
       thinking: { type: 'enabled', reasoningEffort: 'max', payload: 'reasoning' },
@@ -450,7 +454,7 @@ describe('ResponseProvider', () => {
   it('defaults empty reasoning effort to medium', async () => {
     const fetchMock = okJsonFetch();
     await okJsonProvider(fetchMock).chat({
-      model: 'gpt-4o',
+      model: 'gpt-5.6-luna',
       messages: [{ id: '1', role: 'user', content: 'hi', timestamp: Date.now() }],
       thinking: { type: 'enabled', payload: 'reasoning' },
     });

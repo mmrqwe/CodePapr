@@ -8,6 +8,8 @@ import {
 } from '@codepapr/api';
 import { resolveProviderName } from './settingsNormalizer';
 import type { ApiFormat, ApiMode, ModelProfile } from './types';
+import type { RequestBodyOverrides } from '@codepapr/types';
+import type { ProviderConfig } from '@codepapr/api';
 
 interface ProviderBuildInput {
   apiMode: ApiMode;
@@ -16,6 +18,7 @@ interface ProviderBuildInput {
   baseURL: string;
   streamIdleTimeoutMs?: number;
   extraHeaders?: Record<string, string>;
+  requestBodyOverrides?: RequestBodyOverrides;
 }
 
 export function buildProviderInstance(
@@ -29,20 +32,16 @@ export function buildProviderInstance(
       baseURL: s.baseURL.trim().replace(/\/+$/, '') || DEFAULT_LOCAL_BASE_URL,
       idleTimeoutMs,
       ...(s.extraHeaders ? { extraHeaders: s.extraHeaders } : {}),
+      requestBodyOverrides: s.requestBodyOverrides,
     });
   }
 
-  const cfg: {
-    apiKey: string;
-    baseURL?: string;
-    idleTimeoutMs?: number;
-    sessionId?: string;
-    extraHeaders?: Record<string, string>;
-  } = {
+  const cfg: ProviderConfig = {
     apiKey: s.apiKey.trim(),
     idleTimeoutMs,
     ...(sessionId ? { sessionId } : {}),
     ...(s.extraHeaders ? { extraHeaders: s.extraHeaders } : {}),
+    requestBodyOverrides: s.requestBodyOverrides,
   };
   if (s.apiMode === 'custom') {
     cfg.baseURL = s.baseURL.trim().replace(/\/+$/, '');
@@ -69,6 +68,7 @@ export function buildProviderForProfile(
       baseURL: profile.baseURL,
       streamIdleTimeoutMs,
       extraHeaders: profile.extraHeaders,
+      requestBodyOverrides: profile.requestBodyOverrides,
     },
     sessionId
   );
@@ -80,6 +80,7 @@ interface FastProviderBuildInput extends ProviderBuildInput {
   fastApiFormat?: ApiFormat;
   fastApiKey?: string;
   fastBaseURL?: string;
+  fastRequestBodyOverrides?: RequestBodyOverrides;
 }
 
 /**
@@ -103,6 +104,7 @@ export function buildFastProviderInstance(
       baseURL,
       streamIdleTimeoutMs: s.streamIdleTimeoutMs,
       extraHeaders: s.extraHeaders,
+      requestBodyOverrides: s.fastRequestBodyOverrides,
     },
     sessionId
   );

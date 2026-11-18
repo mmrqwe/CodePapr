@@ -1,4 +1,4 @@
-import type { IContextSnapshot, IImageContent, ISubagentToolInvocation, QuestionData, ThinkingPayload } from '@codepapr/types';
+import type { IContextSnapshot, IImageContent, ISubagentToolInvocation, QuestionData, RequestBodyOverrides, ThinkingPayload } from '@codepapr/types';
 import type { WorkMode } from '../../utils/agentPrompts';
 import type { TaskModelRoute } from '../../utils/modelRouting';
 import type { ContextCheckpointPayload } from '../../utils/contextCompaction';
@@ -37,6 +37,7 @@ export interface ModelProfile {
   /** 自定义附加请求头（企业网关私有鉴权/路由头等）。仅追加、不覆盖内置头；
    *  见 @codepapr/api ProviderConfig.extraHeaders 语义。 */
   extraHeaders?: Record<string, string>;
+  requestBodyOverrides?: RequestBodyOverrides;
   maxTokens: number;
   maxContextTokens?: number;
   thinkingEnabled?: boolean;
@@ -73,9 +74,11 @@ export interface Settings {
   fastApiFormat: ApiFormat;
   fastApiKey: string;
   fastBaseURL: string;
+  fastRequestBodyOverrides?: RequestBodyOverrides;
   apiKey: string;
   /** 自定义附加请求头（派生自主配置文件 primaryProfile.extraHeaders）。 */
   extraHeaders?: Record<string, string>;
+  requestBodyOverrides?: RequestBodyOverrides;
   fastModelEnabled: boolean;
   systemPrompt: string;
   thinkingEnabled: boolean;
@@ -138,6 +141,7 @@ export interface Settings {
   mentorApiMode: ApiMode;
   /** 导师档自定义附加请求头（派生自 active mentor profile）。 */
   mentorExtraHeaders?: Record<string, string>;
+  mentorRequestBodyOverrides?: RequestBodyOverrides;
   mentorMaxTokens: number;
   maxMentorConsultations: number;
   mentorThinkingEnabled: boolean;

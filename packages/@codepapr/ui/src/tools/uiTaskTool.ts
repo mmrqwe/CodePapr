@@ -187,6 +187,7 @@ export async function runSubagent(
           baseURL: exec.mentor.baseURL ?? '',
           streamIdleTimeoutMs: context.streamIdleTimeoutMs,
           ...(exec.mentor.extraHeaders ? { extraHeaders: exec.mentor.extraHeaders } : {}),
+          requestBodyOverrides: exec.mentor.requestBodyOverrides,
         },
         mentorSessionId
       );

@@ -63,3 +63,23 @@ describe('toWorkerAgentSettings: mentor profile 凭据映射', () => {
     expect(worker.mentorExtraHeaders).toEqual({ 'X-Mentor': '1' });
   });
 });
+
+it('persists and routes each profile’s request body overrides to its worker slot', () => {
+  const base = normalizeSettings({});
+  const [primary, fast, mentor] = base.modelProfiles;
+  const modelProfiles = [
+    { ...primary, requestBodyOverrides: { max_tokens: null, max_completion_tokens: 4096, stream: false } },
+    { ...fast, requestBodyOverrides: { temperature: 0.2 } },
+    { ...mentor, requestBodyOverrides: { output_config: { effort: 'high' } } },
+  ];
+  const settings = normalizeSettings(JSON.parse(JSON.stringify({
+    modelProfiles,
+    primaryProfileId: primary.id,
+    fastProfileId: fast.id,
+    mentorProfileId: mentor.id,
+  })));
+  const worker = toWorkerAgentSettings(settings);
+  expect(worker.requestBodyOverrides).toEqual({ max_tokens: null, max_completion_tokens: 4096 });
+  expect(worker.fastRequestBodyOverrides).toEqual({ temperature: 0.2 });
+  expect(worker.mentorRequestBodyOverrides).toEqual({ output_config: { effort: 'high' } });
+});
