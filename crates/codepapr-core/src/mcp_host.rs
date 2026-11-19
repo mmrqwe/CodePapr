@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use rmcp::{
-    model::{CallToolRequestParams, ClientRequest, PingRequest},
+    model::{CallToolRequestParams, ClientRequest, PingRequest, Tool},
     object,
     service::RunningService,
     transport::{
@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 use std::{
     collections::HashMap,
     env, fs,
+    future::Future,
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
     time::Duration,
@@ -23,6 +24,8 @@ use crate::events::SharedEventSink;
 use tokio::{process::Command, sync::Mutex as AsyncMutex};
 use futures_util::future::join_all;
 
+#[path = "mcp_duckduckgo.rs"]
+mod mcp_duckduckgo;
 #[path = "mcp_sse.rs"]
 mod mcp_sse;
 
@@ -306,30 +309,53 @@ fn append_common_command_dirs(paths: &mut Vec<PathBuf>) {
 fn resolve_command(command: &str) -> Result<String, String> {
     let trimmed = command.trim();
     if trimmed.contains('/') || trimmed.contains('\\') {
-        let path = Path::new(trimmed);
-        if path.is_file() {
-            return Ok(trimmed.to_string());
-        }
-        return Err(format!("MCP command not found at path: {trimmed}"));
+        return executable_at(Path::new(trimmed))
+            .map(|path| path.to_string_lossy().into_owned())
+            .ok_or_else(|| format!("MCP command not found at path: {trimmed}"));
     }
     for dir in env::split_paths(&expanded_path()) {
-        let candidate = dir.join(trimmed);
-        if candidate.is_file() {
-            return Ok(candidate.to_string_lossy().to_string());
-        }
-        #[cfg(windows)]
-        {
-            for ext in ["exe", "cmd", "bat"] {
-                let candidate = dir.join(format!("{trimmed}.{ext}"));
-                if candidate.is_file() {
-                    return Ok(candidate.to_string_lossy().to_string());
-                }
-            }
+        if let Some(path) = executable_at(&dir.join(trimmed)) {
+            return Ok(path.to_string_lossy().into_owned());
         }
     }
     Err(format!(
         "MCP command not found: '{trimmed}' is not installed or not in PATH"
     ))
+}
+
+#[cfg(not(windows))]
+fn executable_at(path: &Path) -> Option<PathBuf> {
+    path.is_file().then(|| path.to_path_buf())
+}
+
+#[cfg(windows)]
+fn executable_at(path: &Path) -> Option<PathBuf> {
+    use std::io::Read;
+
+    const EXTENSIONS: &[&str] = &["exe", "com", "cmd", "bat"];
+    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+        if EXTENSIONS
+            .iter()
+            .any(|ext| ext.eq_ignore_ascii_case(extension))
+        {
+            return path.is_file().then(|| path.to_path_buf());
+        }
+    }
+    for ext in EXTENSIONS {
+        let mut candidate = path.as_os_str().to_os_string();
+        candidate.push(".");
+        candidate.push(ext);
+        let candidate = PathBuf::from(candidate);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    // npm installs a Bash script beside npx.cmd. Only a native executable can
+    // be launched directly without a recognized Windows extension.
+    let mut signature = [0; 2];
+    fs::File::open(path).ok()?.read_exact(&mut signature).ok()?;
+    (signature == *b"MZ").then(|| path.to_path_buf())
 }
 
 fn server_cache_key(server: &McpServerConfig) -> String {
@@ -533,8 +559,36 @@ fn is_retryable_transport_error(err: &str) -> bool {
     NEEDLES.iter().any(|needle| e.contains(needle))
 }
 
+fn server_timeout(server: &McpServerConfig) -> Duration {
+    Duration::from_secs(server.timeout_seconds.unwrap_or(60).clamp(5, 600))
+}
+
+async fn with_server_timeout<T>(
+    server: &McpServerConfig,
+    operation: &str,
+    task: impl Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    let timeout = server_timeout(server);
+    tokio::time::timeout(timeout, task).await.map_err(|_| {
+        format!(
+            "Timed out {operation} for server '{}' after {}s",
+            server.name,
+            timeout.as_secs()
+        )
+    })?
+}
+
+async fn list_client_tools(client: &SharedMcpClient) -> Result<Vec<Tool>, String> {
+    client
+        .lock()
+        .await
+        .list_all_tools()
+        .await
+        .map_err(|err| format!("Failed to list tools: {err}"))
+}
+
 async fn connect_client(server: &McpServerConfig) -> Result<SharedMcpClient, String> {
-    let timeout = Duration::from_secs(server.timeout_seconds.unwrap_or(60).clamp(5, 600));
+    let timeout = server_timeout(server);
     match server.transport.as_str() {
         "stdio" => connect_stdio(server, timeout).await,
         "sse" => mcp_sse::connect_sse(server, timeout).await,
@@ -836,33 +890,14 @@ pub async fn list_tools(
         }
     }
 
-    let futures = enabled_servers.iter().map(|server| {
-        let server = server.clone();
-        async move {
-            let server_id = sanitize_name_part(&server.id);
-            // #18：list_all_tools 必须有时限。旧实现无超时——挂起的服务器会无限
-            // 持有 client 的 AsyncMutex，该服务器后续所有 call_tool 永久排队。
-            // 超时后 future 被取消，锁随 guard drop 释放。
-            let timeout = Duration::from_secs(server.timeout_seconds.unwrap_or(60).clamp(5, 600));
-            let result = match tokio::time::timeout(timeout, async {
-                let client = get_or_connect_client(&server).await?;
-                let client = client.lock().await;
-                client
-                    .list_all_tools()
-                    .await
-                    .map_err(|err| format!("Failed to list tools: {err}"))
-            })
-            .await
-            {
-                Ok(inner) => inner,
-                Err(_) => Err(format!(
-                    "Timed out listing tools for server '{}' after {}s",
-                    server.name,
-                    timeout.as_secs()
-                )),
-            };
-            (server, server_id, result)
-        }
+    let futures = enabled_servers.iter().map(|server| async move {
+        let server_id = sanitize_name_part(&server.id);
+        let result = with_server_timeout(server, "listing tools", async {
+            let client = get_or_connect_client(server).await?;
+            list_client_tools(&client).await
+        })
+        .await;
+        (server, server_id, result)
     });
 
     let results = join_all(futures).await;
@@ -876,7 +911,7 @@ pub async fn list_tools(
                 let mut filtered = 0u32;
                 for tool in list {
                     let tool_name = tool.name.to_string();
-                    if let Err(reason) = validate_tool_policy(&server, &tool_name) {
+                    if let Err(reason) = validate_tool_policy(server, &tool_name) {
                         eprintln!(
                             "[MCP] Tool '{tool_name}' on server '{}' filtered by policy: {reason}",
                             server.name
@@ -986,7 +1021,7 @@ pub async fn call_tool(
         _ => object!({}),
     };
 
-    let timeout = Duration::from_secs(server.timeout_seconds.unwrap_or(60).clamp(5, 600));
+    let timeout = server_timeout(&server);
     let mut last_err = String::new();
     let mut result_value = None;
 
@@ -999,26 +1034,32 @@ pub async fn call_tool(
             }
         };
 
-        let call_res = {
+        let deadline = tokio::time::Instant::now() + timeout;
+        let call_res = tokio::time::timeout_at(deadline, async {
             let client = client.lock().await;
-            tokio::time::timeout(
-                timeout,
-                client.call_tool(CallToolRequestParams::new(tool_name.clone()).with_arguments(args_object.clone())),
-            )
-            .await
-        };
+            client
+                .call_tool(
+                    CallToolRequestParams::new(tool_name.clone())
+                        .with_arguments(args_object.clone()),
+                )
+                .await
+        })
+        .await;
 
         match call_res {
             Ok(Ok(result)) => {
-                match serde_json::to_value(result) {
-                    Ok(val) => {
-                        result_value = Some(val);
-                        break;
-                    }
-                    Err(err) => {
-                        return Err(format!("Failed to encode MCP result: {err}"));
-                    }
-                }
+                let result = if result.is_error == Some(true) {
+                    mcp_duckduckgo::fallback(&server, &tool_name, &args_object, deadline)
+                        .await
+                        .unwrap_or(result)
+                } else {
+                    result
+                };
+                result_value = Some(
+                    serde_json::to_value(result)
+                        .map_err(|err| format!("Failed to encode MCP result: {err}"))?,
+                );
+                break;
             }
             Ok(Err(err)) => {
                 last_err = format!("Failed to call MCP tool: {err}");
@@ -1052,6 +1093,23 @@ pub async fn call_tool(
         tool_name,
         result: truncate_json(value, max_bytes),
     })
+}
+
+fn uses_npx_package(server: &McpServerConfig, id: &str, package: &str) -> bool {
+    let command = Path::new(&server.command)
+        .file_stem()
+        .and_then(|stem| stem.to_str());
+    let mut args = server.args.iter().map(String::as_str);
+    let mut first = args.next();
+    if matches!(first, Some("-y" | "--yes")) {
+        first = args.next();
+    }
+    server.id == id
+        && server.transport == "stdio"
+        && command.is_some_and(|name| name.eq_ignore_ascii_case("npx"))
+        && first
+            .and_then(|arg| arg.strip_prefix(package))
+            .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('@'))
 }
 
 fn uuid_v4() -> String {
@@ -1236,7 +1294,7 @@ pub async fn test_server(
     settings: McpSettings,
     server_id: String,
 ) -> Result<McpTestServerResult, String> {
-    let server = find_server(&settings, &server_id)
+    let server = find_server_any(&settings, &server_id)
         .ok_or_else(|| format!("MCP server not found: {server_id}"))?;
     let server_id_sanitized = sanitize_name_part(&server.id);
 
@@ -1251,23 +1309,31 @@ pub async fn test_server(
         });
     }
 
-    let result: Result<(usize, usize), String> = async {
+    let result = with_server_timeout(&server, "testing connection", async {
         let client = get_or_connect_client(&server).await?;
-        let client = client.lock().await;
-        let tools = client
-            .list_all_tools()
-            .await
-            .map_err(|err| format!("Failed to list tools: {err}"))?;
+        let tools = list_client_tools(&client).await?;
         let total = tools.len();
-        let mut allowed = 0usize;
-        for tool in &tools {
-            if validate_tool_policy(&server, &tool.name).is_ok() {
-                allowed += 1;
+        let allowed = tools
+            .iter()
+            .filter(|tool| validate_tool_policy(&server, &tool.name).is_ok())
+            .count();
+        if uses_npx_package(&server, "postgres", "@modelcontextprotocol/server-postgres")
+            && tools.iter().any(|tool| tool.name == "query")
+            && validate_tool_policy(&server, "query").is_ok()
+            && !confirmation_required(&server, "query")
+        {
+            let probe = CallToolRequestParams::new("query")
+                .with_arguments(object!({ "sql": "SELECT 1" }));
+            let response = client.lock().await.call_tool(probe).await;
+            if !matches!(response, Ok(result) if result.is_error != Some(true)) {
+                return Err(concat!(
+                    "MCP initialized, but the Postgres database check failed. ",
+                    "Check that Postgres is running and verify the connection URL and credentials."
+                ).to_string());
             }
         }
         Ok((total, total - allowed))
-    }
-    .await;
+    }).await;
 
     match result {
         Ok((total, filtered)) => Ok(McpTestServerResult {
@@ -1322,19 +1388,17 @@ pub async fn preview_mcp_server(
         timeout_seconds,
     };
 
-    let client = connect_client(&server).await?;
-    let listed = {
-        let locked = client.lock().await;
-        locked
-            .list_all_tools()
+    let tools = with_server_timeout(&server, "previewing tools", async {
+        let client = connect_client(&server).await?;
+        let listed = list_client_tools(&client).await;
+        let _ = client
+            .lock()
             .await
-            .map_err(|e| format!("Failed to list tools: {e}"))
-    };
-    {
-        let mut locked = client.lock().await;
-        let _ = locked.close_with_timeout(Duration::from_secs(2)).await;
-    }
-    let tools = listed?;
+            .close_with_timeout(Duration::from_secs(2))
+            .await;
+        listed
+    })
+    .await?;
 
     let previews: Vec<McpToolPreviewItem> = tools
         .iter()
@@ -1423,6 +1487,70 @@ mod tests {
             require_confirmation: false,
             timeout_seconds: Some(60),
         }
+    }
+
+    #[test]
+    fn resolves_platform_launcher_when_npm_installs_both_shims() {
+        let dir = env::temp_dir().join(format!("codepapr-mcp-launcher-{}", uuid_v4()));
+        fs::create_dir(&dir).unwrap();
+        let script = dir.join("npx");
+        let batch = dir.join("npx.cmd");
+        fs::write(&script, "#!/usr/bin/env bash\n").unwrap();
+        fs::write(&batch, "@echo off\r\n").unwrap();
+        let resolved = executable_at(&script);
+        #[cfg(windows)]
+        let expected = &batch;
+        #[cfg(not(windows))]
+        let expected = &script;
+        fs::remove_file(&script).unwrap();
+        fs::remove_file(&batch).unwrap();
+        fs::remove_dir(dir).unwrap();
+        assert_eq!(resolved.as_ref(), Some(expected));
+    }
+
+    #[tokio::test]
+    async fn testing_a_disabled_server_reports_its_state() {
+        let mut server = make_server("stdio", "", &[]);
+        server.enabled = false;
+        let result = test_server(settings_from(vec![server]), "test".to_string())
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.message.contains("disabled"));
+    }
+
+    #[test]
+    fn duckduckgo_fallback_respects_preset_and_search_arguments() {
+        use mcp_duckduckgo::SafeSearch;
+
+        let mut server = make_server("stdio", "", &[]);
+        server.id = "search".to_string();
+        server.command = "npx".to_string();
+        server.args = vec!["-y".to_string(), "duckduckgo-mcp-server".to_string()];
+        server.env.clear();
+        let tool = "duckduckgo_web_search";
+        let args = object!({ "query": " Rust language ", "count": 3 });
+        assert_eq!(
+            mcp_duckduckgo::fallback_query(&server, tool, &args),
+            Some(("Rust language", 3, SafeSearch::Moderate))
+        );
+        let strict = object!({ "query": "Rust language", "safeSearch": "strict" });
+        assert_eq!(
+            mcp_duckduckgo::fallback_query(&server, tool, &strict),
+            Some(("Rust language", 10, SafeSearch::Strict))
+        );
+        let off = object!({ "query": "Rust language", "safeSearch": "off" });
+        assert_eq!(
+            mcp_duckduckgo::fallback_query(&server, tool, &off),
+            Some(("Rust language", 10, SafeSearch::Off))
+        );
+        let invalid = object!({ "query": "Rust language", "count": 99 });
+        assert!(mcp_duckduckgo::fallback_query(&server, tool, &invalid).is_none());
+        server.env.insert("HTTPS_PROXY".into(), "http://127.0.0.1:1234".into());
+        assert!(mcp_duckduckgo::fallback_query(&server, tool, &args).is_none());
+        server.env.clear();
+        server.args[1] = "custom-search-mcp".to_string();
+        assert!(mcp_duckduckgo::fallback_query(&server, tool, &args).is_none());
     }
 
     #[test]

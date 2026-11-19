@@ -293,6 +293,14 @@ describe('createDefaultMcpSettings', () => {
     expect(postgres.requireConfirmation).toBe(false);
     expect(postgres.deniedTools).toContain('delete*');
   });
+
+  it('pins the compatible SQLite SDK and exposes read_query in the default policy', () => {
+    const sqlite = createDefaultMcpSettings().servers.find((s) => s.id === 'sqlite')!;
+    expect(splitMcpArgs(sqlite.args)).toEqual([
+      '--with', 'mcp==1.30.0', 'mcp-server-sqlite@2025.4.25', '--db-path', './database.sqlite',
+    ]);
+    expect(sqlite.allowedTools).toBe('read_query,describe*,list*');
+  });
 });
 
 describe('normalizeMcpServer', () => {
@@ -366,6 +374,40 @@ describe('normalizeMcpSettings', () => {
   it('clamps resultMaxBytes to valid range', () => {
     expect(normalizeMcpSettings({ resultMaxBytes: 100 }).resultMaxBytes).toBe(1_000);
     expect(normalizeMcpSettings({ resultMaxBytes: 10_000_000 }).resultMaxBytes).toBe(5_000_000);
+  });
+
+  it('migrates the legacy SQLite package while preserving the saved database path and settings', () => {
+    const result = norm({
+      servers: [{
+        id: 'sqlite',
+        enabled: true,
+        command: 'C:\\Program Files\\uv\\uvx.exe',
+        args: 'mcp-server-sqlite --db-path "D:\\My Files\\db.sqlite"',
+        allowedTools: 'query,describe*,list*',
+        deniedTools: 'drop*',
+        timeoutSeconds: 35,
+      }],
+    });
+    const sqlite = result.servers.find((s) => s.id === 'sqlite')!;
+    expect(splitMcpArgs(sqlite.args)).toEqual([
+      '--with', 'mcp==1.30.0', 'mcp-server-sqlite@2025.4.25', '--db-path', 'D:\\My Files\\db.sqlite',
+    ]);
+    expect(sqlite).toMatchObject({
+      enabled: true,
+      command: 'C:\\Program Files\\uv\\uvx.exe',
+      allowedTools: 'read_query,describe*,list*',
+      deniedTools: 'drop*',
+      timeoutSeconds: 35,
+    });
+    expect(normalizeMcpSettings(result)).toEqual(result);
+  });
+
+  it('keeps a customized SQLite allowlist and does not migrate unrelated launchers', () => {
+    const legacy = { id: 'sqlite', args: 'mcp-server-sqlite --db-path custom.sqlite', allowedTools: 'list_tables' };
+    const sqlite = norm({ servers: [{ ...legacy, command: 'uvx' }] }).servers.find((s) => s.id === 'sqlite')!;
+    expect(sqlite.allowedTools).toBe('list_tables');
+    const custom = norm({ servers: [{ ...legacy, command: 'custom-launcher' }] }).servers.find((s) => s.id === 'sqlite')!;
+    expect(custom.args).toBe(legacy.args);
   });
 
   it('auto-migrates Brave preset args to DuckDuckGo defaults', () => {

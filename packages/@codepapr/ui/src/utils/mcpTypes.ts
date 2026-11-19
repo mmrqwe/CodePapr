@@ -206,6 +206,12 @@ export function parseMcpHeaders(value: string): Record<string, string> {
   return headers;
 }
 
+// This SQLite server uses the Python MCP 1.x API.
+const SQLITE_PACKAGE = '--with mcp==1.30.0 mcp-server-sqlite@2025.4.25';
+const LEGACY_SQLITE_PACKAGE = /^mcp-server-sqlite(?=\s|$)/;
+const LEGACY_DATABASE_TOOLS = 'query,describe*,list*';
+const SQLITE_TOOLS = 'read_query,describe*,list*';
+
 export function createDefaultMcpSettings(): McpSettings {
   return {
     enabled: false,
@@ -242,7 +248,7 @@ export function createDefaultMcpSettings(): McpSettings {
         url: '',
         env: '',
         headers: '',
-        allowedTools: 'query,describe*,list*',
+        allowedTools: LEGACY_DATABASE_TOOLS,
         deniedTools: 'delete*,drop*,truncate*,update*,insert*',
         forceMutating: '',
         forceReadonly: '',
@@ -257,11 +263,11 @@ export function createDefaultMcpSettings(): McpSettings {
         category: 'database',
         transport: 'stdio',
         command: 'uvx',
-        args: 'mcp-server-sqlite --db-path ./database.sqlite',
+        args: `${SQLITE_PACKAGE} --db-path ./database.sqlite`,
         url: '',
         env: '',
         headers: '',
-        allowedTools: 'query,describe*,list*',
+        allowedTools: SQLITE_TOOLS,
         deniedTools: 'delete*,drop*,truncate*,update*,insert*',
         forceMutating: '',
         forceReadonly: '',
@@ -292,6 +298,17 @@ export function normalizeMcpSettings(input?: Partial<McpSettings>): McpSettings 
         env: existing.env,
         allowedTools: existing.allowedTools,
         deniedTools: existing.deniedTools,
+      });
+    } else if (
+      server.id === 'sqlite' &&
+      server.transport === 'stdio' &&
+      /(?:^|[\\/])uvx(?:\.exe)?$/i.test(server.command) &&
+      LEGACY_SQLITE_PACKAGE.test(server.args)
+    ) {
+      byId.set(server.id, {
+        ...server,
+        args: server.args.replace(LEGACY_SQLITE_PACKAGE, SQLITE_PACKAGE),
+        allowedTools: server.allowedTools === LEGACY_DATABASE_TOOLS ? SQLITE_TOOLS : server.allowedTools,
       });
     } else {
       byId.set(server.id, server);

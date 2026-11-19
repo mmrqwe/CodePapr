@@ -4,12 +4,38 @@ use scraper::{Html, Selector};
 use serde::Deserialize;
 
 use crate::web::client::{
-    apply_browser_headers, rate_limit_domain, retry_with_backoff, DDG_MIN_REQUEST_INTERVAL_MS,
-    SEARCH_RETRY_MAX,
+    apply_browser_headers, build_web_client, rate_limit_domain, retry_with_backoff,
+    DDG_MIN_REQUEST_INTERVAL_MS, SEARCH_RETRY_MAX,
 };
 use crate::web::text::{decode_html_entities, normalize_search_text};
 
 use super::{push_unique_search_result, WebSearchEntry};
+
+const HTML_SEARCH_URL: &str = "https://html.duckduckgo.com/html/";
+
+pub(crate) async fn search_duckduckgo_html(
+    query: String,
+    max_results: usize,
+    safe_search: &'static str,
+) -> Result<Vec<WebSearchEntry>, String> {
+    tokio::task::spawn_blocking(move || {
+        let client = build_web_client()?;
+        rate_limit_domain(
+            "html.duckduckgo.com",
+            Duration::from_millis(DDG_MIN_REQUEST_INTERVAL_MS),
+        );
+        let response = client
+            .get(HTML_SEARCH_URL)
+            .query(&[("q", query.as_str()), ("kp", safe_search)])
+            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml")
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .map_err(|err| format!("DuckDuckGo 搜索失败: {err}"))?;
+        parse_duckduckgo_html(response, max_results)
+    })
+    .await
+    .map_err(|err| format!("DuckDuckGo 搜索失败: {err}"))?
+}
 
 fn resolve_duckduckgo_result_url(raw_href: &str) -> Option<String> {
     let decoded = decode_html_entities(raw_href);
@@ -46,7 +72,6 @@ pub(crate) fn collect_duckduckgo_html_results(
     query: &str,
     max_results: usize,
 ) -> Result<Vec<WebSearchEntry>, String> {
-    let search_url = "https://html.duckduckgo.com/html/";
     let form: [(&str, &str); 4] = [("q", query), ("kl", "wt-wt"), ("kp", "-2"), ("kz", "1")];
 
     let response = retry_with_backoff(
@@ -55,7 +80,7 @@ pub(crate) fn collect_duckduckgo_html_results(
                 "html.duckduckgo.com",
                 Duration::from_millis(DDG_MIN_REQUEST_INTERVAL_MS),
             );
-            apply_browser_headers(client.post(search_url), Some("https://duckduckgo.com/"))
+            apply_browser_headers(client.post(HTML_SEARCH_URL), Some("https://duckduckgo.com/"))
                 .form(&form)
                 .send()
                 .map_err(|err| format!("DuckDuckGo 搜索失败: {err}"))
@@ -72,7 +97,7 @@ pub(crate) fn collect_duckduckgo_html_results(
                     "html.duckduckgo.com",
                     Duration::from_millis(DDG_MIN_REQUEST_INTERVAL_MS * 2),
                 );
-                apply_browser_headers(client.post(search_url), Some("https://duckduckgo.com/"))
+                apply_browser_headers(client.post(HTML_SEARCH_URL), Some("https://duckduckgo.com/"))
                     .form(&form)
                     .send()
                     .map_err(|err| format!("DuckDuckGo 搜索失败: {err}"))

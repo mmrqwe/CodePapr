@@ -62,8 +62,9 @@ function copy(lang: Lang | undefined) {
       disconnected: 'Disconnected',
       enabledServers: 'Enabled servers',
       empty: 'Enable at least one server, then discover tools.',
-      searchHint: 'No API key needed. Uses DuckDuckGo HTML scraping with rate limiting. Best for quick web searches.',
-      dbHint: 'Read-only by default. Write operations are denylisted. Change permission to read-write to allow queries, inserts, and updates.',
+      searchHint: 'No API key needed. If the MCP server fails, CodePapr tries DuckDuckGo HTML and can use uvx for another DuckDuckGo connection. Other sources are available at the default SafeSearch level and are labeled in the results.',
+      dbHint: 'The default tool policy allows read-only queries and schema inspection.',
+      postgresHint: 'Read-only by default. Enter the connection URL for a running Postgres database. Test runs a read-only query when allowed.',
       customHint: 'stdio: command + args. sse / streamable-http: URL + headers.',
       testServer: 'Test',
       testingServer: 'Testing...',
@@ -122,8 +123,9 @@ function copy(lang: Lang | undefined) {
       disconnected: '未連接',
       enabledServers: '已啟用服務',
       empty: '先啟用至少一個服務，然後發現工具。',
-      searchHint: '無需 API Key。使用 DuckDuckGo HTML 抓取，有請求頻率限制。適合快速網頁搜尋。',
-      dbHint: '預設唯讀。寫入操作已列入拒絕列表。如需查詢、插入和更新，請將權限改為讀寫。',
+      searchHint: '無需 API Key。原服務搜尋失敗時，CodePapr 會嘗試 DuckDuckGo HTML，也可透過 uvx 連線至 DuckDuckGo。預設安全搜尋等級下也可使用其他來源，結果會標明來源。',
+      dbHint: '預設工具策略允許唯讀查詢與檢視資料表結構。',
+      postgresHint: '預設唯讀。請填寫執行中的 Postgres 資料庫連線網址。測試會在策略允許時執行唯讀查詢。',
       customHint: 'stdio：命令 + 參數。sse / streamable-http：URL + headers。',
       testServer: '測試',
       testingServer: '測試中...',
@@ -181,8 +183,9 @@ confirmation: '高风险调用确认',
       disconnected: '未连接',
       enabledServers: '已启用服务',
       empty: '先启用至少一个服务，然后发现工具。',
-      searchHint: '无需 API Key。使用 DuckDuckGo HTML 抓取，有请求频率限制。适合快速网页搜索。',
-      dbHint: '默认只读。写入操作已列入拒绝列表。如需查询、插入和更新，请将权限改为读写。',
+      searchHint: '无需 API Key。原服务搜索失败时，CodePapr 会尝试 DuckDuckGo HTML，也可通过 uvx 连接 DuckDuckGo。默认安全搜索级别下也可使用其他来源，结果会标明来源。',
+      dbHint: '默认工具策略允许只读查询和查看表结构。',
+      postgresHint: '默认只读。请填写运行中的 Postgres 数据库连接地址。测试会在策略允许时执行只读查询。',
       customHint: 'stdio：命令 + 参数。sse / streamable-http：URL + headers。',
       testServer: '测试',
       testingServer: '测试中...',
@@ -201,7 +204,8 @@ confirmation: '高风险调用确认',
 
 function getServerHint(server: McpServerConfig, c: ReturnType<typeof copy>): string {
   if (server.description) return server.description;
-  if (server.category === 'search') return c.searchHint;
+  if (server.id === 'search' && server.transport === 'stdio' && !server.env.trim() && /(?:^|\s)duckduckgo-mcp-server(?:@\S+)?(?:\s|$)/.test(server.args)) return c.searchHint;
+  if (server.id === 'postgres' && server.transport === 'stdio' && /(?:^|\s)@modelcontextprotocol\/server-postgres(?:@\S+)?(?:\s|$)/.test(server.args)) return c.postgresHint;
   if (server.category === 'database') return c.dbHint;
   return c.customHint;
 }
