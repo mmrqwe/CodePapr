@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+#[cfg(windows)]
+mod cuda;
 pub(crate) mod finetune;
 pub(crate) mod installer;
 pub(crate) mod player;
@@ -458,9 +460,7 @@ pub fn tts_server_start(
                 }
             }
 
-            // Tell the user upfront which compute backend we're trying. Saves a
-            // lot of confusion when MPS gives the user a 3-5x speedup vs CPU.
-            let device = server::recommended_device();
+            let device = server::recommended_device(&path);
             let _ = app_handle_for_thread.emit(
             "tts-server-log",
             ServerLogEvent {
@@ -498,7 +498,7 @@ pub fn tts_server_start(
                 let _ = DEFAULT_SOVITS_V4_PATH.set(default_v4.to_string_lossy().to_string());
             }
 
-            let result = start_with_retry(path, app_handle_for_thread.clone(), &mv);
+            let result = start_with_retry(path, app_handle_for_thread.clone(), &mv, device);
             match result {
                 Ok((srv, used_device)) => {
                     let reported_version = srv.model_version().to_string();
@@ -588,19 +588,18 @@ struct ServerStartedPayload {
 /// Try to start the server with smart fallback.
 ///
 /// Strategy:
-/// 1. Try the recommended device (mps on Apple Silicon, cpu elsewhere).
+/// 1. Try the recommended device (MPS, CUDA, or CPU).
 /// 2. If port is already taken — `start_once` already retries once after
 ///    cleaning the port; no extra fallback needed for that case.
 /// 3. If preferred device is non-cpu and start fails for some OTHER reason
 ///    (driver issues, unsupported ops, model loading errors), fall back to
-///    cpu. CPU is the universal lowest-common-denominator that always works
-///    if the install is healthy at all.
+///    full-precision CPU.
 fn start_with_retry(
     path: PathBuf,
     app_handle: tauri::AppHandle,
     model_version: &str,
+    preferred: &str,
 ) -> Result<(GptSovitsServer, String), String> {
-    let preferred = server::recommended_device();
     match start_once(&path, &app_handle, preferred, model_version) {
         Ok(srv) => Ok((srv, preferred.to_string())),
         // If the failure was a port conflict, `start_once` already did its own
@@ -615,7 +614,7 @@ fn start_with_retry(
                 ServerLogEvent {
                     stream: "system",
                     line: format!(
-                        "{preferred} backend failed: {}. Falling back to CPU (slower but always works).",
+                        "{preferred} backend failed: {}. Falling back to full-precision CPU.",
                         first_line(&e)
                     ),
                 },
@@ -819,12 +818,13 @@ pub fn tts_check_installed() -> Result<TtsInstallStatus, String> {
     let target = default_gpt_sovits_path();
     let venv_path = target.join(installer::VENV_DIR_NAME);
     let venv_python = installer::venv_python_path(&venv_path);
-    let pretrained = target.join("GPT_SoVITS").join("pretrained_models");
 
     let api_py = target.join("api.py").exists();
     let venv_ok = installer::venv_python_is_compatible(&venv_python);
-    let models_ok = installer::has_complete_model_set(&pretrained);
+    let models_ok = installer::has_complete_model_set(&target);
     let installed = api_py && venv_ok && models_ok;
+    #[cfg(windows)]
+    let installed = installed && cuda::CudaSetup::pending(&venv_path).is_none();
 
     Ok(TtsInstallStatus {
         installed,

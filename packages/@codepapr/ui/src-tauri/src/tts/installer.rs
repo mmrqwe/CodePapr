@@ -4,7 +4,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Mutex, TryLockError,
     },
     thread,
 };
@@ -20,6 +20,23 @@ pub(crate) const VENV_DIR_NAME: &str = ".codepapr_venv";
 const MODEL_ENDPOINTS: &[&str] = &[
     "https://hf-mirror.com",
     "https://huggingface.co",
+];
+
+// GPT-SoVITS model snapshot used by the bundled v1/v4 server. Keep the
+// required files and their sizes in sync with this revision for offline checks.
+const MODEL_REVISION: &str = "336b2ec4e8d4ac74740798dd40af44e74659ecaf";
+const REQUIRED_MODEL_FILES: &[(&str, u64)] = &[
+    ("chinese-hubert-base/config.json", 1_449),
+    ("chinese-hubert-base/preprocessor_config.json", 212),
+    ("chinese-hubert-base/pytorch_model.bin", 188_811_417),
+    ("chinese-roberta-wwm-ext-large/config.json", 963),
+    ("chinese-roberta-wwm-ext-large/pytorch_model.bin", 651_225_145),
+    ("chinese-roberta-wwm-ext-large/tokenizer.json", 268_962),
+    ("gsv-v4-pretrained/s2Gv4.pth", 769_025_545),
+    ("gsv-v4-pretrained/vocoder.pth", 57_781_109),
+    ("s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt", 155_093_966),
+    ("s1v3.ckpt", 155_284_856),
+    ("s2G488k.pth", 105_973_721),
 ];
 
 /// Endpoints (Git URLs) for cloning the GPT-SoVITS source code.
@@ -42,6 +59,7 @@ const PIP_INDEXES: &[&str] = &[
 
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_PID: Mutex<Option<u32>> = Mutex::new(None);
+static INSTALL_LOCK: Mutex<()> = Mutex::new(());
 
 pub(crate) fn cancel() {
     CANCELLED.store(true, Ordering::SeqCst);
@@ -197,6 +215,12 @@ fn run_and_stream(
 }
 
 pub(crate) fn install(app: AppHandle, source: Option<String>) {
+    // Concurrent invocations share the cancellation state and download paths.
+    let _install = match INSTALL_LOCK.try_lock() {
+        Ok(guard) => guard,
+        Err(TryLockError::WouldBlock) => return,
+        Err(TryLockError::Poisoned(error)) => error.into_inner(),
+    };
     CANCELLED.store(false, Ordering::SeqCst);
     if let Ok(mut guard) = ACTIVE_PID.lock() {
         *guard = None;
@@ -208,12 +232,19 @@ pub(crate) fn install(app: AppHandle, source: Option<String>) {
     let venv_path = target_path.join(VENV_DIR_NAME);
     let venv_python = venv_python_path(&venv_path);
     let pretrained_dir = target_path.join("GPT_SoVITS").join("pretrained_models");
+    #[cfg(windows)]
+    let cuda_setup = super::cuda::CudaSetup::pending(&venv_path);
+    #[cfg(windows)]
+    let runtime_ready = cuda_setup.is_none();
+    #[cfg(not(windows))]
+    let runtime_ready = true;
 
     // ---------- Fast-path: if everything is already installed, skip all steps ----------
     if target_path.join("api.py").exists()
         && venv_python_is_compatible(&venv_python)
         && deps_marker_ok(&venv_path, &target_path)
-        && has_complete_model_set(&pretrained_dir)
+        && has_complete_model_set(&target_path)
+        && runtime_ready
     {
         emit(&app, &InstallProgress::ok("check-python", "Checking Python", "Already set up"));
         emit(&app, &InstallProgress::ok("clone-code", "Cloning code repository", "Already present"));
@@ -305,6 +336,30 @@ pub(crate) fn install(app: AppHandle, source: Option<String>) {
         }
     };
 
+    #[cfg(windows)]
+    if let Some(setup) = cuda_setup {
+        const STEP: &str = "install-deps";
+        const LABEL: &str = "Preparing NVIDIA CUDA support";
+        let mut ready = super::cuda::is_usable(&venv_python, &venv_path);
+        if !ready {
+            emit(&app, &InstallProgress::running(STEP, LABEL, "Downloading the CUDA PyTorch runtime from PyTorch"));
+            let cmd = setup.install_command(&venv_python, &venv_path);
+            ready = run_and_stream(cmd, &app, STEP, LABEL).is_ok()
+                && super::cuda::is_usable(&venv_python, &venv_path);
+        }
+        if cancelled_emit(&app, STEP, LABEL) { return; }
+        if let Err(e) = setup.record_attempt(&venv_path) {
+            emit(&app, &InstallProgress::fail(STEP, LABEL, &format!("Could not save CUDA setup status: {e}")));
+            return;
+        }
+        let status = if ready {
+            "CUDA runtime verified"
+        } else {
+            "CUDA runtime unavailable. Speech will use full-precision CPU."
+        };
+        emit(&app, &InstallProgress::ok(STEP, LABEL, status));
+    }
+
     // Post-install: download NLTK data (required by GPT-SoVITS for text processing).
     if !nltk_data_present() {
         emit(&app, &InstallProgress::running(
@@ -333,15 +388,9 @@ pub(crate) fn install(app: AppHandle, source: Option<String>) {
 
     // ---------- Step 4: Download models ----------
     // Run the script unless we already have a complete model set.
-    // The script itself is idempotent — it skips files that exist with size > 0.
+    // The downloader reuses files whose size matches the model snapshot.
     emit(&app, &InstallProgress::pending("download-models", "Downloading pretrained models"));
-    if has_complete_model_set(&pretrained_dir) {
-        emit(&app, &InstallProgress::ok(
-            "download-models",
-            "Downloading pretrained models",
-            "Models already present",
-        ));
-    } else {
+    if !has_pretrained_models(&pretrained_dir) {
         // Clean up any orphaned .part files from interrupted previous runs
         let _ = cleanup_part_files(&pretrained_dir);
 
@@ -351,7 +400,25 @@ pub(crate) fn install(app: AppHandle, source: Option<String>) {
         }
     }
 
+    #[cfg(windows)]
+    if !has_text_models(&target_path) {
+        let mut cmd = Command::new(&venv_python);
+        cmd.arg("-u")
+            .arg("-c")
+            .arg(include_str!("../../resources/tts_text_models.py"))
+            .arg(&target_path)
+            .env("PYTHONIOENCODING", "utf-8");
+        if let Err(e) = run_and_stream(cmd, &app, "download-models", "Downloading text models") {
+            emit(&app, &InstallProgress::fail("download-models", "Downloading text models", &e));
+            return;
+        }
+    }
+
     if cancelled_emit(&app, "verify", "Verifying installation") { return; }
+
+    emit(&app, &InstallProgress::ok(
+        "download-models", "Downloading pretrained models", "Models ready",
+    ));
 
     // ---------- Step 5: Verify ----------
     emit(&app, &InstallProgress::pending("verify", "Verifying installation"));
@@ -760,9 +827,10 @@ fn download_models(
     // For each file, tries each endpoint in order until one succeeds.
     let script = format!(
         r#"
-import json, os, sys, time, urllib.request, urllib.error
+import hashlib, json, os, sys, time, urllib.parse, urllib.request
 ENDPOINTS = {endpoints_py}
 REPO_ID = "lj1995/GPT-SoVITS"
+REVISION = "{revision}"
 LOCAL_DIR = {local_dir:?}
 
 def http_get(url, timeout=60):
@@ -773,12 +841,17 @@ def http_get(url, timeout=60):
 files = None
 list_endpoint = None
 for ep in ENDPOINTS:
-    api_url = f"{{ep}}/api/models/{{REPO_ID}}"
+    api_url = f"{{ep}}/api/models/{{REPO_ID}}/revision/{{REVISION}}?blobs=true"
     print(f"LIST  trying {{api_url}}", flush=True)
     try:
         with http_get(api_url, timeout=30) as resp:
             data = json.loads(resp.read().decode())
-        files = [f["rfilename"] for f in data.get("siblings", []) if not f["rfilename"].startswith(".")]
+        entries = [f for f in data["siblings"] if not f["rfilename"].startswith(".")]
+        if data.get("sha") != REVISION or not entries or any(
+            not isinstance(f.get("size"), int) for f in entries
+        ):
+            raise ValueError("Incomplete model metadata")
+        files = entries
         list_endpoint = ep
         print(f"LIST  ok via {{ep}}, {{len(files)}} files", flush=True)
         break
@@ -792,30 +865,37 @@ if files is None:
 # 2. Download each file. For each file, try endpoints in order (preferring the one that worked for listing).
 endpoints_for_files = [list_endpoint] + [e for e in ENDPOINTS if e != list_endpoint]
 errors = []
-for idx, name in enumerate(files, 1):
+for idx, entry in enumerate(files, 1):
+    name = entry["rfilename"]
+    expected_size = entry["size"]
+    expected_hash = (entry.get("lfs") or {{}}).get("sha256")
     out = os.path.join(LOCAL_DIR, name)
-    if os.path.exists(out) and os.path.getsize(out) > 0:
-        print(f"[{{idx}}/{{len(files)}}] SKIP {{name}} (exists)", flush=True)
+    if os.path.isfile(out) and os.path.getsize(out) == expected_size:
+        print(f"[{{idx}}/{{len(files)}}] SKIP {{name}} (size matches)", flush=True)
         continue
     os.makedirs(os.path.dirname(out) or LOCAL_DIR, exist_ok=True)
 
     success = False
     last_err = ""
+    tmp = out + ".part"
     for ep in endpoints_for_files:
-        url = f"{{ep}}/{{REPO_ID}}/resolve/main/{{name}}"
+        url = f"{{ep}}/{{REPO_ID}}/resolve/{{REVISION}}/{{urllib.parse.quote(name)}}"
         try:
             print(f"[{{idx}}/{{len(files)}}] GET  {{name}} via {{ep}}", flush=True)
             t0 = time.time()
-            with http_get(url, timeout=600) as resp:
-                tmp = out + ".part"
-                with open(tmp, "wb") as fp:
-                    while True:
-                        chunk = resp.read(1 << 16)
-                        if not chunk:
-                            break
-                        fp.write(chunk)
-                os.rename(tmp, out)
-            sz = os.path.getsize(out)
+            digest = hashlib.sha256()
+            with http_get(url, timeout=600) as resp, open(tmp, "wb") as fp:
+                for chunk in iter(lambda: resp.read(1 << 20), b""):
+                    fp.write(chunk)
+                    digest.update(chunk)
+            sz = os.path.getsize(tmp)
+            if sz != expected_size:
+                raise ValueError(f"Expected {{expected_size}} bytes, got {{sz}}")
+            if expected_hash and digest.hexdigest() != expected_hash:
+                raise ValueError("SHA-256 mismatch")
+            # Promote only a verified download; os.replace also works when
+            # repairing an existing file on Windows.
+            os.replace(tmp, out)
             dt = time.time() - t0
             rate = sz / max(dt, 0.001)
             print(f"[{{idx}}/{{len(files)}}] OK   {{name}} ({{sz}} bytes, {{rate/1024/1024:.1f}} MB/s)", flush=True)
@@ -825,9 +905,8 @@ for idx, name in enumerate(files, 1):
             last_err = str(e)
             print(f"[{{idx}}/{{len(files)}}] FAIL via {{ep}}: {{e}}", flush=True)
             try:
-                if os.path.exists(out + ".part"):
-                    os.remove(out + ".part")
-            except Exception:
+                os.remove(tmp)
+            except OSError:
                 pass
 
     if not success:
@@ -840,71 +919,44 @@ if errors:
 print("DONE OK", flush=True)
 "#,
         endpoints_py = endpoints_py,
+        revision = MODEL_REVISION,
         local_dir = pretrained_dir.to_string_lossy(),
     );
 
     let mut cmd = Command::new(venv_python);
-    cmd.arg("-c").arg(&script);
-    run_and_stream(cmd, app, "download-models", "Downloading pretrained models")?;
-
-    emit(app, &InstallProgress::ok(
-        "download-models",
-        "Downloading pretrained models",
-        "Models downloaded",
-    ));
-    Ok(())
+    cmd.arg("-c").arg(&script).env("PYTHONIOENCODING", "utf-8");
+    run_and_stream(cmd, app, "download-models", "Downloading pretrained models")
 }
 
-/// Returns true only when pretrained_models contains the expected set of large model
-/// files. This is intentionally strict so that partial / interrupted downloads
-/// do NOT cause the download step to be skipped.
-///
-/// Heuristic: count files >50 MB recursively. The model repo has ~10+ such files
-/// totalling ~5 GB; if we have at least 5, assume the install is complete.
-pub(crate) fn has_complete_model_set(pretrained_dir: &Path) -> bool {
-    if !pretrained_dir.exists() {
-        return false;
-    }
-    let mut large_count = 0usize;
-    let _ = visit_files_recursive(pretrained_dir, &mut |path, size| {
-        // Skip hidden files and .part temp files
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with('.') || name.ends_with(".part") {
-                return;
-            }
-        }
-        if size > 50 * 1024 * 1024 {
-            large_count += 1;
-        }
-    });
-    large_count >= 5
+pub(crate) fn has_complete_model_set(target_path: &Path) -> bool {
+    has_pretrained_models(&target_path.join("GPT_SoVITS/pretrained_models"))
+        && (!cfg!(windows) || has_text_models(target_path))
 }
 
-fn visit_files_recursive(
-    dir: &Path,
-    visitor: &mut dyn FnMut(&Path, u64),
-) -> std::io::Result<()> {
-    if !dir.is_dir() {
-        return Ok(());
-    }
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            // Skip hidden directories like .cache and .git
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with('.') {
-                    continue;
-                }
-            }
-            let _ = visit_files_recursive(&path, visitor);
-        } else if path.is_file() {
-            if let Ok(meta) = entry.metadata() {
-                visitor(&path, meta.len());
-            }
-        }
-    }
-    Ok(())
+fn has_pretrained_models(pretrained_dir: &Path) -> bool {
+    model_files_match(pretrained_dir, REQUIRED_MODEL_FILES)
+}
+
+fn has_text_models(target_path: &Path) -> bool {
+    model_files_match(
+        &target_path.join("GPT_SoVITS"),
+        &[
+            ("pretrained_models/fast_langdetect/lid.176.bin", 131_266_198),
+            ("text/G2PWModel/g2pW.onnx", 635_212_732),
+            ("text/G2PWModel/config.py", 347),
+            ("text/G2PWModel/char_bopomofo_dict.json", 1_851_143),
+            ("text/G2PWModel/bopomofo_to_pinyin_wo_tune_dict.json", 7_739),
+            ("text/G2PWModel/MONOPHONIC_CHARS.txt", 120_744),
+            ("text/G2PWModel/POLYPHONIC_CHARS.txt", 102_444),
+        ],
+    )
+}
+
+fn model_files_match(directory: &Path, files: &[(&str, u64)]) -> bool {
+    files.iter().all(|&(name, size)| {
+        std::fs::metadata(directory.join(name))
+            .is_ok_and(|metadata| metadata.is_file() && metadata.len() == size)
+    })
 }
 
 /// Probes the venv python by running it and verifying both that it executes
@@ -1019,16 +1071,8 @@ fn verify_files(_app: &AppHandle, target_path: &Path, venv_python: &Path) -> Res
     if !venv_python.exists() {
         return Err(format!("venv python missing at {}", venv_python.display()));
     }
-    let pretrained = target_path.join("GPT_SoVITS").join("pretrained_models");
-    if !pretrained.exists() {
-        return Err("pretrained_models directory not found".to_string());
-    }
-    // Check that pretrained_models has at least one file beyond ".git"
-    let has_models = std::fs::read_dir(&pretrained)
-        .map(|d| d.filter_map(|e| e.ok()).any(|e| e.file_name() != ".git"))
-        .unwrap_or(false);
-    if !has_models {
-        return Err("pretrained_models directory is empty".to_string());
+    if !has_complete_model_set(target_path) {
+        return Err("Required TTS model files are missing or incomplete".to_string());
     }
 
     // Optional: probe the venv python to confirm it runs.

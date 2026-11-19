@@ -82,7 +82,7 @@ export interface UseTtsPlayerReturn {
   serverModelVersion: string;
   /** Whether the server is running in half precision mode. */
   serverHalfPrecision: boolean;
-  /** Device the server is running on ("mps"/"cpu"). */
+  /** Device the server is running on ("mps", "cuda", or "cpu"). */
   serverDevice: string;
   refreshServerStatus: () => Promise<void>;
   /** Whether GPT-SoVITS is installed */

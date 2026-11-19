@@ -453,8 +453,7 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
     }
     if (ttsServerDevice === 'cpu') {
       warnings.push(t.ttsWarnCpu);
-    }
-    if (!ttsServerHalfPrecision) {
+    } else if (ttsServerDevice && !ttsServerHalfPrecision) {
       warnings.push(t.ttsWarnNoHalf);
     }
     if (warnings.length > 0) {

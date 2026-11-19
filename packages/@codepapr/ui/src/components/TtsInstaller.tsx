@@ -62,14 +62,18 @@ export function TtsInstaller({ onClose }: TtsInstallerProps) {
     // 重复点击安装（或取消后重装）时先解绑旧监听器，避免监听器累积。
     unlistenRef.current?.();
     unlistenRef.current = null;
-    unlistenRef.current = await listen<InstallStep>('tts-install-progress', (event) => {
-      updateStep(event.payload);
-      if (event.payload.status === 'cancelled' || event.payload.status === 'ok' || event.payload.status === 'fail') {
-        setRunning(false);
-      }
-    });
 
     try {
+      unlistenRef.current = await listen<InstallStep>('tts-install-progress', ({ payload }) => {
+        updateStep(payload);
+        if (
+          payload.status === 'cancelled' ||
+          payload.status === 'fail' ||
+          (payload.step_id === 'verify' && payload.status === 'ok')
+        ) {
+          setRunning(false);
+        }
+      });
       await invoke('tts_install', { source: 'hf-mirror' });
     } catch (err) {
       // 启动失败要让用户看到：日志区留痕并退出 running 态，否则按钮永远卡在 Installing。

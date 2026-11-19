@@ -1,8 +1,8 @@
 use std::{
     collections::VecDeque,
     io::{BufRead, BufReader},
-    path::PathBuf,
-    process::{Child, Command, Stdio},
+    path::{Path, PathBuf},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -107,8 +107,14 @@ impl GptSovitsServer {
             }
         }
 
-        // Force half precision for ~2x faster synthesis on all devices.
-        cmd.arg("-hp");
+        // HuBERT and SoVITS convolutions can take minutes in half precision
+        // on CPUs without native FP16 support.
+        cmd.arg(if device == "cpu" { "-fp" } else { "-hp" });
+        #[cfg(windows)]
+        if device == "cuda" {
+            let venv = self.api_path.join(super::installer::VENV_DIR_NAME);
+            super::cuda::configure_python(&mut cmd, &venv);
+        }
 
         // 每次启动随机生成控制令牌并注入 api.py：/control 端点（restart/exit）
         // 无令牌即禁用，防止其他本机进程随意重启/杀掉 TTS 服务（本地 DoS）。
@@ -118,8 +124,10 @@ impl GptSovitsServer {
         let control_token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
         cmd.env("CODEPAPR_CONTROL_TOKEN", control_token);
 
-        // Force unbuffered Python stdout/stderr so we get logs in real time.
-        cmd.env("PYTHONUNBUFFERED", "1");
+        // Windows otherwise uses the local code page for piped output.
+        cmd.env("PYTHONIOENCODING", "utf-8")
+            .env("PYTHONUNBUFFERED", "1")
+            .env("PYTHONFAULTHANDLER", "1");
         // Enable MPS fallback for ops not supported on MPS.
         cmd.env("PYTORCH_ENABLE_MPS_FALLBACK", "1");
         // Suppress tokenizers parallelism warning.
@@ -243,31 +251,19 @@ impl GptSovitsServer {
     }
 
     pub(crate) fn check_alive(&mut self) -> bool {
-        if !self.running && self.child.is_none() {
-            return false;
+        let alive = matches!(self.try_wait(), Ok(None));
+        if !alive {
+            self.running = false;
         }
-        if let Some(ref child_arc) = self.child {
-            match child_arc.lock() {
-                Ok(mut child) => match child.as_mut().map(|c| c.try_wait()) {
-                    Some(Ok(Some(_))) => {
-                        self.running = false;
-                        false
-                    }
-                    Some(Ok(None)) => true,
-                    // None：已被 stop() 交给收割线程 → 视为已停止
-                    _ => {
-                        self.running = false;
-                        false
-                    }
-                },
-                Err(_) => {
-                    self.running = false;
-                    false
-                }
-            }
-        } else {
-            false
-        }
+        alive
+    }
+
+    fn try_wait(&self) -> Result<Option<ExitStatus>, String> {
+        let child = self.child.as_ref().ok_or("TTS server process is unavailable")?;
+        let mut child = child.lock().map_err(|_| "Could not lock the TTS server process")?;
+        child.as_mut().ok_or("TTS server process has been stopped")?
+            .try_wait()
+            .map_err(|e| format!("Could not check the TTS server process: {e}"))
     }
 
     pub(crate) fn health_check(&self) -> Result<(), String> {
@@ -292,24 +288,21 @@ impl GptSovitsServer {
         format!("http://127.0.0.1:{GPT_SOVITS_API_PORT}")
     }
 
-    fn wait_healthy(&mut self, timeout_secs: u64) -> Result<(), String> {
+    fn wait_healthy(&self, timeout_secs: u64) -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_secs(timeout_secs);
         let mut last_err = String::new();
 
         while Instant::now() < deadline {
-            if !self.check_alive() {
+            if let Some(status) = self.try_wait()? {
                 // Give reader threads a moment to flush remaining output.
                 std::thread::sleep(Duration::from_millis(300));
                 let captured = self.captured_logs();
                 let trimmed = captured.trim();
                 if trimmed.is_empty() {
-                    return Err(
-                        "Server process exited unexpectedly with no error output. \
-                         The Python install may be broken — try reinstalling via the installer.".to_string()
-                    );
+                    return Err(format!("TTS server exited ({status}) without producing any output."));
                 }
                 return Err(format!(
-                    "Server process exited unexpectedly. Output:\n────\n{trimmed}\n────"
+                    "TTS server exited ({status}). Output:\n────\n{trimmed}\n────"
                 ));
             }
 
@@ -444,16 +437,20 @@ impl Drop for GptSovitsServer {
 /// fall back to CPU at runtime — that's handled by the env var
 /// `PYTORCH_ENABLE_MPS_FALLBACK=1` set during process spawn.
 ///
-/// Everywhere else (Intel macOS, Windows, Linux) we default to CPU. CUDA
-/// is not auto-detected here because we don't ship a CUDA-enabled PyTorch
-/// in the bundled venv; users with NVIDIA hardware can override via the
-/// `device` parameter manually if they reinstall PyTorch with CUDA.
-pub(crate) fn recommended_device() -> &'static str {
+/// On Windows, try CUDA only after the installed runtime executes a GPU operation.
+pub(crate) fn recommended_device(_api_path: &Path) -> &'static str {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        "mps"
-    } else {
-        "cpu"
+        return "mps";
     }
+    #[cfg(windows)]
+    {
+        let venv = _api_path.join(super::installer::VENV_DIR_NAME);
+        let python = super::installer::venv_python_path(&venv);
+        if super::cuda::is_usable(&python, &venv) {
+            return "cuda";
+        }
+    }
+    "cpu"
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -467,13 +464,11 @@ fn spawn_log_reader<R: std::io::Read + Send + 'static>(
     stream_name: &'static str,
     buffer: Arc<Mutex<VecDeque<String>>>,
     app_handle: Option<AppHandle>,
-) {
+) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let reader = BufReader::new(pipe);
-        for line_result in reader.lines() {
-            let Ok(line) = line_result else {
-                break;
-            };
+        for bytes in reader.split(b'\n').map_while(Result::ok) {
+            let line = String::from_utf8_lossy(bytes.strip_suffix(b"\r").unwrap_or(&bytes));
             // Skip internal PyTorch/model noise that isn't useful during normal operation.
             if line.is_empty() { continue; }
             if line.contains("Removing weight norm") { continue; }
@@ -491,9 +486,28 @@ fn spawn_log_reader<R: std::io::Read + Send + 'static>(
             if let Some(ref app) = app_handle {
                 let _ = app.emit(
                     "tts-server-log",
-                    ServerLogPayload { stream: stream_name, line: line.clone() },
+                    ServerLogPayload { stream: stream_name, line: line.into_owned() },
                 );
             }
         }
-    });
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_log_bytes_do_not_hide_the_traceback() {
+        let buffer = Arc::new(Mutex::new(VecDeque::new()));
+        let pipe = &b"Startup \xff message\r\nTraceback: invalid checkpoint\n"[..];
+
+        spawn_log_reader(pipe, "stderr", Arc::clone(&buffer), None)
+            .join()
+            .unwrap();
+
+        let logs = buffer.lock().unwrap();
+        assert_eq!(logs[0], "[stderr] Startup \u{fffd} message");
+        assert_eq!(logs[1], "[stderr] Traceback: invalid checkpoint");
+    }
 }
