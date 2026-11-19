@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{BufRead, BufReader},
+    net::{Ipv4Addr, SocketAddrV4},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{Arc, Mutex},
@@ -10,7 +11,6 @@ use std::{
 use reqwest::blocking::Client;
 use tauri::{AppHandle, Emitter};
 
-pub(crate) const GPT_SOVITS_API_PORT: u16 = 9880;
 const HEALTH_CHECK_TIMEOUT_SECS: u64 = 90;
 const HEALTH_CHECK_INTERVAL_MS: u64 = 500;
 const LOG_BUFFER_MAX_LINES: usize = 1000;
@@ -19,6 +19,7 @@ pub(crate) struct GptSovitsServer {
     child: Option<Arc<Mutex<Option<Child>>>>,
     python_path: Option<String>,
     api_path: PathBuf,
+    address: Option<SocketAddrV4>,
     running: bool,
     log_buffer: Arc<Mutex<VecDeque<String>>>,
     /// The model version the server reported from its startup log
@@ -41,6 +42,7 @@ impl GptSovitsServer {
             child: None,
             python_path: None,
             api_path,
+            address: None,
             running: false,
             log_buffer: Arc::new(Mutex::new(VecDeque::new())),
             model_version: String::new(),
@@ -56,7 +58,11 @@ impl GptSovitsServer {
         self.half_precision
     }
 
-    pub(crate) fn start(&mut self, app_handle: Option<AppHandle>, device: &str, model_version: &str) -> Result<(), String> {
+    pub(crate) fn address(&self) -> Option<SocketAddrV4> {
+        self.address
+    }
+
+    pub(crate) fn start(&mut self, app_handle: Option<AppHandle>, device: &str, model_version: &str) -> Result<SocketAddrV4, String> {
         if self.child.is_some() {
             return Err("TTS server is already running".to_string());
         }
@@ -74,7 +80,8 @@ impl GptSovitsServer {
         let mut cmd = Command::new(&python);
         cmd.arg("api.py")
             .arg("-p")
-            .arg(GPT_SOVITS_API_PORT.to_string())
+            // Uvicorn binds port 0 directly, so the OS reserves the port for this child.
+            .arg("0")
             .arg("-a")
             // 只绑回环地址：所有客户端调用都走 127.0.0.1，绑 0.0.0.0 会把
             // GPT-SoVITS API（含 /set_model 等接受文件路径的端点）暴露给局域网。
@@ -168,7 +175,8 @@ impl GptSovitsServer {
 
         let child_arc = Arc::new(Mutex::new(Some(child)));
         self.child = Some(Arc::clone(&child_arc));
-        self.wait_healthy(HEALTH_CHECK_TIMEOUT_SECS)?;
+        let address = self.wait_healthy(HEALTH_CHECK_TIMEOUT_SECS)?;
+        self.address = Some(address);
         self.running = true;
 
         // Parse startup logs for model version and precision mode.
@@ -195,11 +203,14 @@ impl GptSovitsServer {
             });
         }
 
-        Ok(())
+        Ok(address)
     }
 
     pub(crate) fn stop(&mut self) -> Result<(), String> {
         self.running = false;
+        if let Some(address) = self.address.take() {
+            super::ws::invalidate_pool(address);
+        }
         let child_arc = match self.child.take() {
             Some(c) => c,
             None => return Ok(()),
@@ -266,31 +277,19 @@ impl GptSovitsServer {
             .map_err(|e| format!("Could not check the TTS server process: {e}"))
     }
 
-    pub(crate) fn health_check(&self) -> Result<(), String> {
+    fn wait_healthy(&self, timeout_secs: u64) -> Result<SocketAddrV4, String> {
         // Never hit `/?text=` — that is the synthesis endpoint and empty
         // text still wakes the model. `/health` is a no-op on patched api.py;
         // unpatched FastAPI returns 404, which is still proof the HTTP
         // server accepted a connection.
-        let url = format!("http://127.0.0.1:{GPT_SOVITS_API_PORT}/health");
         let client = Client::builder()
+            .no_proxy()
             .timeout(Duration::from_secs(2))
             .build()
             .map_err(|e| format!("HTTP client error: {e}"))?;
-
-        let _resp = client
-            .get(&url)
-            .send()
-            .map_err(|e| format!("Health check failed: {e}"))?;
-        Ok(())
-    }
-
-    pub(crate) fn api_base_url() -> String {
-        format!("http://127.0.0.1:{GPT_SOVITS_API_PORT}")
-    }
-
-    fn wait_healthy(&self, timeout_secs: u64) -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_secs(timeout_secs);
-        let mut last_err = String::new();
+        let mut address = None;
+        let mut last_err = "Uvicorn did not report a loopback listening address".to_string();
 
         while Instant::now() < deadline {
             if let Some(status) = self.try_wait()? {
@@ -306,9 +305,16 @@ impl GptSovitsServer {
                 ));
             }
 
-            match self.health_check() {
-                Ok(()) => return Ok(()),
-                Err(e) => last_err = e,
+            if address.is_none() {
+                address = self.log_buffer.lock().ok().and_then(|buf| {
+                    buf.iter().rev().find_map(|line| reported_api_address(line))
+                });
+            }
+            if let Some(address) = address {
+                match client.get(format!("http://{address}/health")).send() {
+                    Ok(_) => return Ok(address),
+                    Err(e) => last_err = e.to_string(),
+                }
             }
 
             std::thread::sleep(Duration::from_millis(HEALTH_CHECK_INTERVAL_MS));
@@ -430,6 +436,18 @@ impl Drop for GptSovitsServer {
     }
 }
 
+fn reported_api_address(line: &str) -> Option<SocketAddrV4> {
+    // Uvicorn announces the actual port after binding, including when -p 0 was passed.
+    let line = line.strip_prefix("[stderr] INFO:")?.trim_start();
+    let address: SocketAddrV4 = line
+        .strip_prefix("Uvicorn running on http://")?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    (address.ip() == &Ipv4Addr::LOCALHOST && address.port() != 0).then_some(address)
+}
+
 /// Pick the best PyTorch device argument for this platform.
 ///
 /// On Apple Silicon (`aarch64` macOS) we prefer Metal Performance Shaders
@@ -496,6 +514,22 @@ fn spawn_log_reader<R: std::io::Read + Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_only_a_bound_loopback_address_from_uvicorn() {
+        assert_eq!(
+            reported_api_address("[stderr] INFO:     Uvicorn running on http://127.0.0.1:54321 (Press CTRL+C to quit)"),
+            Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 54321)),
+        );
+        for line in [
+            "[stderr] INFO:     Application startup complete.",
+            "[stderr] INFO:     Uvicorn running on http://127.0.0.1:0 (Press CTRL+C to quit)",
+            "[stderr] INFO:     Uvicorn running on http://0.0.0.0:54321 (Press CTRL+C to quit)",
+            "[stderr] INFO:     Uvicorn running on http://127.0.0.1:99999 (Press CTRL+C to quit)",
+        ] {
+            assert_eq!(reported_api_address(line), None);
+        }
+    }
 
     #[test]
     fn invalid_log_bytes_do_not_hide_the_traceback() {

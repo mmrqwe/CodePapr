@@ -5,6 +5,7 @@ mod cuda;
 pub(crate) mod finetune;
 pub(crate) mod installer;
 pub(crate) mod player;
+mod reference;
 pub(crate) mod server;
 pub(crate) mod ws;
 
@@ -12,6 +13,7 @@ pub(crate) mod ws;
 mod tests;
 
 use std::io::Read;
+use std::net::SocketAddrV4;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -77,10 +79,11 @@ fn retain_live_tts_server(guard: &mut Option<GptSovitsServer>) -> bool {
     false
 }
 
-fn tts_server_is_live() -> Result<bool, String> {
+fn tts_server_address() -> Result<Option<SocketAddrV4>, String> {
     let lock = tts_server_lock();
     let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-    Ok(retain_live_tts_server(&mut guard))
+    retain_live_tts_server(&mut guard);
+    Ok(guard.as_ref().and_then(GptSovitsServer::address))
 }
 
 fn tts_player_lock() -> &'static Mutex<player::AudioPlayer> {
@@ -90,6 +93,7 @@ fn tts_player_lock() -> &'static Mutex<player::AudioPlayer> {
 fn tts_client() -> &'static Client {
     HTTP_CLIENT.get_or_init(|| {
         Client::builder()
+            .no_proxy()
             .timeout(std::time::Duration::from_secs(600))
             .pool_max_idle_per_host(2)
             .build()
@@ -146,235 +150,6 @@ fn voices_dir() -> PathBuf {
         .join("voices")
 }
 
-/// 判断端口上的进程是否是我们自己启动的 GPT-SoVITS 服务（python api.py）。
-/// 只有它才允许被 `kill_port_process` 清理；无法确认时一律视为「不是我们的」
-/// （安全方向）——绝不因端口冲突杀掉用户无关的进程。
-fn is_gpt_sovits_process(pid: &str) -> bool {
-    #[cfg(unix)]
-    {
-        let Ok(out) = std::process::Command::new("ps")
-            .args(["-p", pid, "-o", "command="])
-            .output()
-        else {
-            return false;
-        };
-        if !out.status.success() {
-            return false;
-        }
-        let cmd = String::from_utf8_lossy(&out.stdout).to_ascii_lowercase();
-        cmd.contains("python") && cmd.contains("api.py")
-    }
-    #[cfg(windows)]
-    {
-        let Ok(out) = std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-            .output()
-        else {
-            return false;
-        };
-        if !out.status.success() {
-            return false;
-        }
-        // tasklist 只能给出映像名（如 python.exe）：要求是 python 进程。
-        String::from_utf8_lossy(&out.stdout)
-            .to_ascii_lowercase()
-            .contains("python")
-    }
-}
-
-/// Forcefully free a TCP port by killing whatever process is bound to it.
-///
-/// Strategy: SIGTERM (polite) → wait up to 1.5s for graceful shutdown
-/// → SIGKILL (forceful) if still alive → verify port is free.
-///
-/// We need this because GPT-SoVITS api.py installs uvicorn signal handlers
-/// that try to gracefully drain the server on SIGTERM. That drain can hang
-/// indefinitely if PyTorch background threads or in-flight HTTP requests
-/// don't cooperate. The previous version of this function sent SIGTERM and
-/// hoped 500ms was enough — it usually wasn't, leaving zombie servers
-/// orphaned to launchd and blocking port 9880 for the next CodePapr launch.
-///
-/// Returns `true` if the port is confirmed free after the cleanup attempt.
-fn kill_port_process(port: u16) -> bool {
-    let pids = pids_on_port(port);
-    if pids.is_empty() {
-        return true;
-    }
-    // 只清理我们自己的 GPT-SoVITS 进程。端口被未知进程占用（用户自己的
-    // 9880 服务）时拒绝动手，返回 false 让调用方提示用户手动处理。
-    if !pids.iter().all(|pid| is_gpt_sovits_process(pid)) {
-        return false;
-    }
-
-    #[cfg(unix)]
-    {
-        // Round 1: polite shutdown.
-        for pid in &pids {
-            let _ = std::process::Command::new("kill").arg(pid).output();
-        }
-        // Wait up to ~1.5s for graceful exit, polling every 250ms.
-        for _ in 0..6 {
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            if pids_on_port(port).is_empty() {
-                return true;
-            }
-        }
-        // Round 2: SIGKILL anything still squatting on the port.
-        // 重新确认归属：等待期间端口可能被别的进程接管。
-        let stubborn = pids_on_port(port);
-        for pid in stubborn.iter().filter(|pid| is_gpt_sovits_process(pid)) {
-            let _ = std::process::Command::new("kill")
-                .args(["-9", pid])
-                .output();
-        }
-        // Final 500ms grace for the kernel to release the socket.
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        pids_on_port(port).is_empty()
-    }
-    #[cfg(windows)]
-    {
-        // On Windows, /F (forceful) is the default. Run twice with a short
-        // pause to handle the (rare) case where a child process is spawned
-        // between our enumeration and the kill.
-        for pid in &pids {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/PID", pid])
-                .output();
-        }
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let stubborn = pids_on_port(port);
-        for pid in stubborn.iter().filter(|pid| is_gpt_sovits_process(pid)) {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/PID", pid])
-                .output();
-        }
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        pids_on_port(port).is_empty()
-    }
-}
-
-#[cfg(windows)]
-fn pids_on_port(port: u16) -> Vec<String> {
-    let output = std::process::Command::new("cmd")
-        .args([
-            "/c",
-            &format!("for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :{port}') do @echo %a"),
-        ])
-        .output();
-    if let Ok(out) = output {
-        if out.status.success() {
-            return String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect();
-        }
-    }
-    Vec::new()
-}
-
-#[cfg(unix)]
-fn pids_on_port(port: u16) -> Vec<String> {
-    let output = std::process::Command::new("lsof")
-        .args(["-ti", &format!(":{port}")])
-        .output();
-    if let Ok(out) = output {
-        if out.status.success() {
-            return String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect();
-        }
-    }
-
-    // Fallback: some container/CI environments lack lsof.
-    // Try ss first, then netstat.
-    for cmd in &["ss", "netstat"] {
-        let output = std::process::Command::new(cmd).args(["-tlnp"]).output();
-        if let Ok(out) = output {
-            if out.status.success() {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let needle = &format!(":{port}");
-                return stdout
-                    .lines()
-                    .filter(|l| l.contains(needle))
-                    .filter_map(|l| {
-                        l.split_whitespace()
-                            .find(|w| w.contains('/'))
-                            .and_then(|w| w.split('/').next())
-                            .map(|s| s.to_string())
-                    })
-                    .collect();
-            }
-        }
-    }
-
-    Vec::new()
-}
-
-/// Convert an audio file to 16kHz mono WAV using ffmpeg.
-fn convert_to_wav(input: &std::path::Path, output: &std::path::Path) -> Result<(), String> {
-    let ffmpeg = find_ffmpeg().ok_or_else(|| "ffmpeg not found".to_string())?;
-    let status = std::process::Command::new(&ffmpeg)
-        .args([
-            "-y",
-            "-i",
-            &input.to_string_lossy(),
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-sample_fmt",
-            "s16",
-            &output.to_string_lossy(),
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .status()
-        .map_err(|e| format!("ffmpeg spawn error: {e}"))?;
-
-    if !status.success() {
-        return Err(format!("ffmpeg exited with status {}", status));
-    }
-    Ok(())
-}
-
-fn candidate_works(candidate: &str) -> bool {
-    std::process::Command::new(candidate)
-        .arg("-version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok()
-}
-
-fn find_ffmpeg() -> Option<String> {
-    let candidates: &[&str] = &[
-        "ffmpeg",
-        "/opt/homebrew/bin/ffmpeg",
-        "/usr/local/bin/ffmpeg",
-    ];
-    for candidate in candidates {
-        if candidate_works(candidate) {
-            return Some(candidate.to_string());
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            let exe = std::path::PathBuf::from(local_app_data)
-                .join("codepapr")
-                .join("bin")
-                .join("ffmpeg.exe");
-            if exe.exists() && candidate_works(&exe.to_string_lossy()) {
-                return Some(exe.to_string_lossy().to_string());
-            }
-        }
-    }
-    None
-}
-
 // ---- Server lifecycle ----
 
 #[tauri::command]
@@ -394,8 +169,7 @@ pub fn tts_server_start(
     // Reject concurrent / repeated start attempts. The user-visible scenario:
     // Python takes 30-60s to warm up on CPU, during which time `tts_server_status`
     // returns false and the UI may say "stopped". A frustrated user clicking
-    // again would otherwise spawn a second Python process — and our
-    // `kill_port_process` cleanup would then murder the first one.
+    // again would otherwise spawn a second Python process and load the models twice.
     if STARTING
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -429,37 +203,6 @@ pub fn tts_server_start(
     // The command returns immediately so the frontend doesn't freeze.
     std::thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // ── Pre-flight: make sure port 9880 is actually free ──
-            // A previous CodePapr session may have crashed and left its Python TTS
-            // server orphaned to launchd, holding port 9880 indefinitely. If we
-            // skip this check, every start attempt below will hit "address already
-            // in use" until the user manually kills the zombie. We proactively
-            // clean any squatter — including respecting the SIGTERM→SIGKILL
-            // escalation in `kill_port_process`.
-            if !pids_on_port(server::GPT_SOVITS_API_PORT).is_empty() {
-                let _ = app_handle_for_thread.emit(
-                "tts-server-log",
-                ServerLogEvent {
-                    stream: "system",
-                    line: format!(
-                        "Port {} is occupied by a stale process (likely a leftover from a previous CodePapr session). Cleaning up before starting...",
-                        server::GPT_SOVITS_API_PORT
-                    ),
-                },
-            );
-                let cleared = kill_port_process(server::GPT_SOVITS_API_PORT);
-                if !cleared {
-                    let msg = format!(
-                    "Could not free port {}: another process is holding it and refused to terminate. Please kill it manually:\n  lsof -ti :{} | xargs kill -9",
-                    server::GPT_SOVITS_API_PORT,
-                    server::GPT_SOVITS_API_PORT
-                );
-                    let _ = app_handle_for_thread.emit("tts-server-error", msg.clone());
-                    STARTING.store(false, Ordering::SeqCst);
-                    return;
-                }
-            }
-
             let device = server::recommended_device(&path);
             let _ = app_handle_for_thread.emit(
             "tts-server-log",
@@ -500,7 +243,7 @@ pub fn tts_server_start(
 
             let result = start_with_retry(path, app_handle_for_thread.clone(), &mv, device);
             match result {
-                Ok((srv, used_device)) => {
+                Ok((srv, address, used_device)) => {
                     let reported_version = srv.model_version().to_string();
                     let half_prec = srv.half_precision();
                     // New Python process has no refer/model state — reset caches
@@ -527,12 +270,11 @@ pub fn tts_server_start(
                                 },
                             );
                             let client = tts_client();
-                            let base_url = GptSovitsServer::api_base_url();
                             // GET + query matches the synthesis hot-path
                             // (`synthesize_blocking`) and api.py's `/set_model`
                             // handler — keep all set_model calls on one method.
                             if let Ok(resp) = client
-                                .get(format!("{base_url}/set_model"))
+                                .get(format!("http://{address}/set_model"))
                                 .query(&[("sovits_model_path", ft.as_str())])
                                 .send()
                             {
@@ -585,29 +327,20 @@ struct ServerStartedPayload {
     half_precision: bool,
 }
 
-/// Try to start the server with smart fallback.
-///
-/// Strategy:
-/// 1. Try the recommended device (MPS, CUDA, or CPU).
-/// 2. If port is already taken — `start_once` already retries once after
-///    cleaning the port; no extra fallback needed for that case.
-/// 3. If preferred device is non-cpu and start fails for some OTHER reason
-///    (driver issues, unsupported ops, model loading errors), fall back to
-///    full-precision CPU.
+/// Try the recommended device first, then fall back to full-precision CPU.
 fn start_with_retry(
     path: PathBuf,
     app_handle: tauri::AppHandle,
     model_version: &str,
     preferred: &str,
-) -> Result<(GptSovitsServer, String), String> {
-    match start_once(&path, &app_handle, preferred, model_version) {
-        Ok(srv) => Ok((srv, preferred.to_string())),
-        // If the failure was a port conflict, `start_once` already did its own
-        // cleanup-and-retry. If we're here with a port-conflict error it means
-        // the port is genuinely stuck — switching to CPU won't help.
-        Err(e) if is_port_in_use_error(&e) => Err(e),
-        // Real device failure (e.g. MPS not available, driver crash, OOM,
-        // unsupported operator). Fall back to CPU.
+) -> Result<(GptSovitsServer, SocketAddrV4, String), String> {
+    let start = |device: &str| -> Result<_, String> {
+        let mut srv = GptSovitsServer::new(path.clone());
+        let address = srv.start(Some(app_handle.clone()), device, model_version)?;
+        Ok((srv, address, device.to_string()))
+    };
+    match start(preferred) {
+        Ok(started) => Ok(started),
         Err(e) if preferred != "cpu" => {
             let _ = app_handle.emit(
                 "tts-server-log",
@@ -619,60 +352,13 @@ fn start_with_retry(
                     ),
                 },
             );
-            // Make sure the port is clean before the fallback attempt.
-            kill_port_process(server::GPT_SOVITS_API_PORT);
-            start_once(&path, &app_handle, "cpu", model_version)
-                .map(|srv| (srv, "cpu".to_string()))
-                .map_err(|e2| {
-                    format!(
-                        "Both {preferred} and cpu backends failed to start.\n\
-                         {preferred} error: {e}\n\
-                         cpu error: {e2}"
-                    )
-                })
-        }
-        Err(e) => Err(e),
-    }
-}
-
-/// Single-device start attempt with at most one retry on port conflict.
-fn start_once(
-    path: &PathBuf,
-    app_handle: &tauri::AppHandle,
-    device: &str,
-    model_version: &str,
-) -> Result<GptSovitsServer, String> {
-    let mut srv = GptSovitsServer::new(path.clone());
-    match srv.start(Some(app_handle.clone()), device, model_version) {
-        Ok(()) => Ok(srv),
-        Err(e) if is_port_in_use_error(&e) => {
-            // Stale Python from a previous session is squatting on port 9880.
-            let _ = app_handle.emit(
-                "tts-server-log",
-                ServerLogEvent {
-                    stream: "system",
-                    line: format!(
-                        "Port {} is in use by a stale process — escalating cleanup and retrying...",
-                        server::GPT_SOVITS_API_PORT
-                    ),
-                },
-            );
-            let cleared = kill_port_process(server::GPT_SOVITS_API_PORT);
-            if !cleared {
-                return Err(format!(
-                    "Port {} could not be freed after SIGKILL. There is a stuck process holding it. \
-                     Please run this in a terminal and try again:\n  \
-                     lsof -ti :{} | xargs kill -9\n\n\
-                     Original error: {}",
-                    server::GPT_SOVITS_API_PORT,
-                    server::GPT_SOVITS_API_PORT,
-                    e
-                ));
-            }
-            drop(srv);
-            let mut srv2 = GptSovitsServer::new(path.clone());
-            srv2.start(Some(app_handle.clone()), device, model_version)?;
-            Ok(srv2)
+            start("cpu").map_err(|e2| {
+                format!(
+                    "Both {preferred} and cpu backends failed to start.\n\
+                     {preferred} error: {e}\n\
+                     cpu error: {e2}"
+                )
+            })
         }
         Err(e) => Err(e),
     }
@@ -694,13 +380,6 @@ struct ServerLogEvent {
     line: String,
 }
 
-fn is_port_in_use_error(e: &str) -> bool {
-    let lower = e.to_ascii_lowercase();
-    lower.contains("address already in use")
-        || lower.contains("only one usage of each socket address")
-        || lower.contains("errno 48")
-}
-
 #[tauri::command]
 pub fn tts_server_stop(app_handle: tauri::AppHandle) -> Result<(), String> {
     let lock = tts_server_lock();
@@ -714,8 +393,7 @@ pub fn tts_server_stop(app_handle: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
-/// Stop the server without requiring an AppHandle. Used during application
-/// shutdown so we never leave a zombie Python process on port 9880.
+/// Stop the managed Python child during application shutdown.
 pub(crate) fn tts_server_stop_internal() {
     if let Some(lock) = TTS_SERVER.get() {
         if let Ok(mut guard) = lock.lock() {
@@ -728,7 +406,7 @@ pub(crate) fn tts_server_stop_internal() {
 
 #[tauri::command]
 pub fn tts_server_status() -> Result<bool, String> {
-    tts_server_is_live()
+    Ok(tts_server_address()?.is_some())
 }
 
 /// Synthesise a short dummy phrase to trigger Metal GPU kernel JIT
@@ -745,9 +423,7 @@ pub async fn tts_warmup_gpu(
     prompt_text: Option<String>,
     prompt_language: Option<String>,
 ) -> Result<(), String> {
-    if !tts_server_is_live()? {
-        return Err("TTS server is not running. Start it first.".to_string());
-    }
+    let address = tts_server_address()?.ok_or("TTS server is not running. Start it first.")?;
 
     let _ = app_handle.emit(
         "tts-server-log",
@@ -769,6 +445,7 @@ pub async fn tts_warmup_gpu(
                 .filter(|t| !t.trim().is_empty())
                 .unwrap_or_else(|| "嗯".to_string());
             synthesize_blocking(
+                address,
                 warmup_text,
                 None,
                 ref_audio_path,
@@ -842,19 +519,17 @@ pub fn tts_check_installed() -> Result<TtsInstallStatus, String> {
 #[tauri::command]
 pub async fn tts_set_model(model_name: String) -> Result<(), String> {
     run_blocking_workspace_task(move || {
-        if !tts_server_is_live()? {
-            return Err("TTS server is not running.".to_string());
-        }
+        let address = tts_server_address()?.ok_or("TTS server is not running.")?;
+        let model_url = format!("http://{address}/set_model");
         if model_name.is_empty() {
             // Reset to default v4 pretrained model.
             let default_path = DEFAULT_SOVITS_V4_PATH.get().cloned().unwrap_or_default();
             if default_path.is_empty() {
                 return Err("Default model path not set. Start the server first.".to_string());
             }
-            let base_url = GptSovitsServer::api_base_url();
             let client = tts_client();
             let resp = client
-                .get(format!("{base_url}/set_model"))
+                .get(&model_url)
                 .query(&[("sovits_model_path", default_path.as_str())])
                 .send()
                 .map_err(|e| format!("set_model request failed: {e}"))?;
@@ -867,10 +542,9 @@ pub async fn tts_set_model(model_name: String) -> Result<(), String> {
             }
             return Ok(());
         }
-        let base_url = GptSovitsServer::api_base_url();
         let client = tts_client();
         let resp = client
-            .get(format!("{base_url}/set_model"))
+            .get(&model_url)
             .query(&[("sovits_model_path", model_name.as_str())])
             .send()
             .map_err(|e| format!("set_model request failed: {e}"))?;
@@ -925,11 +599,8 @@ pub async fn tts_synthesize_and_play(
     // Fail fast if the server isn't running yet — otherwise we'd waste time
     // making an HTTP request to a dead port and surface a confusing
     // "request or response body error" from reqwest.
-    if !tts_server_is_live()? {
-        return Err(
-            "TTS server is not running. Click the speaker icon to start it.".to_string(),
-        );
-    }
+    let address = tts_server_address()?
+        .ok_or("TTS server is not running. Click the speaker icon to start it.")?;
     begin_synthesis();
 
     let mode = playback_mode
@@ -945,6 +616,7 @@ pub async fn tts_synthesize_and_play(
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let started = std::time::Instant::now();
             let result = synthesize_blocking(
+                address,
                 text,
                 model_name,
                 ref_audio_path,
@@ -1028,9 +700,7 @@ pub async fn tts_synthesize_batch_ws(
     temperature: Option<f64>,
     seq: u64,
 ) -> Result<(), String> {
-    if !tts_server_is_live()? {
-        return Err("TTS server is not running.".to_string());
-    }
+    let address = tts_server_address()?.ok_or("TTS server is not running.")?;
     begin_synthesis();
 
     let steps = sample_steps.unwrap_or(8).clamp(4, 32);
@@ -1052,6 +722,7 @@ pub async fn tts_synthesize_batch_ws(
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
         let result = match ws::synthesize_batch_ws(
+            address,
             sentences_clone.clone(),
             model_name,
             ref_audio_path,
@@ -1067,6 +738,7 @@ pub async fn tts_synthesize_batch_ws(
         ) {
             Ok(()) => Ok(()),
             Err(e) if ws::is_ws_unavailable(&e) => http_fallback_sentences(
+                address,
                 sentences_clone,
                 model_fb,
                 ref_fb,
@@ -1108,9 +780,7 @@ pub async fn tts_synthesize_batch_ws_nonblocking(
     temperature: Option<f64>,
     seq: u64,
 ) -> Result<(), String> {
-    if !tts_server_is_live()? {
-        return Err("TTS server is not running.".to_string());
-    }
+    let address = tts_server_address()?.ok_or("TTS server is not running.")?;
     begin_synthesis();
 
     let steps = sample_steps.unwrap_or(8).clamp(4, 32);
@@ -1124,6 +794,7 @@ pub async fn tts_synthesize_batch_ws_nonblocking(
     let temp = temperature.unwrap_or(1.0).clamp(0.0, 2.0) as f32;
 
     ws::synthesize_batch_ws_nonblocking(
+        address,
         sentences,
         model_name,
         ref_audio_path,
@@ -1144,6 +815,7 @@ pub async fn tts_synthesize_batch_ws_nonblocking(
 /// connection pool cannot be established. Each sentence is streamed into the
 /// shared rodio sink so playback still overlaps with later sentences.
 pub(crate) fn http_fallback_sentences(
+    address: SocketAddrV4,
     sentences: Vec<String>,
     model_name: Option<String>,
     ref_audio_path: Option<String>,
@@ -1158,6 +830,7 @@ pub(crate) fn http_fallback_sentences(
             return Err("Synthesis cancelled by user".to_string());
         }
         synthesize_blocking(
+            address,
             text,
             model_name.clone(),
             ref_audio_path.clone(),
@@ -1173,6 +846,7 @@ pub(crate) fn http_fallback_sentences(
 }
 
 fn synthesize_blocking(
+    address: SocketAddrV4,
     text: String,
     model_name: Option<String>,
     ref_audio_path: Option<String>,
@@ -1183,7 +857,7 @@ fn synthesize_blocking(
     sample_steps: u32,
     speed: f32,
 ) -> Result<(), String> {
-    let base_url = GptSovitsServer::api_base_url();
+    let base_url = format!("http://{address}");
     let client = tts_client();
 
     // /set_model — only when the model name actually changed.
@@ -1701,57 +1375,15 @@ fn sanitize_character_id(id: &str) -> Result<&str, String> {
 }
 
 #[tauri::command]
-pub fn tts_save_voice_file(
+pub async fn tts_save_voice_file(
     character_id: String,
     base64_data: String,
     extension: String,
 ) -> Result<String, String> {
-    sanitize_character_id(&character_id)?;
-
-    let dir = voices_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create voices dir: {e}"))?;
-
-    let ext_lower = extension.to_lowercase();
-    if ext_lower.is_empty()
-        || ext_lower.len() > 16
-        || !ext_lower.chars().all(|c| c.is_ascii_alphanumeric())
-    {
-        return Err("Invalid file extension".to_string());
-    }
-
-    let filename = format!("{character_id}_ref.{ext_lower}");
-    let path = dir.join(&filename);
-
-    // Decode base64 (strip data URL prefix if present).
-    let b64 = if let Some(idx) = base64_data.find(";base64,") {
-        &base64_data[idx + 8..]
-    } else {
-        &base64_data
-    };
-    use base64::Engine;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .map_err(|e| format!("Base64 decode error: {e}"))?;
-
-    std::fs::write(&path, &bytes).map_err(|e| format!("Write error: {e}"))?;
-
-    let validated = validate_voice_path(&path.to_string_lossy(), false)?;
-
-    // Convert non-WAV uploads to WAV so soundfile can read them.
-    if ext_lower != "wav" {
-        let wav_path = dir.join(format!("{character_id}_ref.wav"));
-        if let Err(e) = convert_to_wav(validated.as_path(), &wav_path) {
-            let _ = std::fs::remove_file(&validated);
-            return Err(format!(
-                "Could not convert reference audio to WAV ({e}). Install ffmpeg and upload again."
-            ));
-        }
-        let _ = std::fs::remove_file(&validated);
-        let wav_validated = validate_voice_path(&wav_path.to_string_lossy(), true)?;
-        return Ok(wav_validated.to_string_lossy().to_string());
-    }
-
-    Ok(validated.to_string_lossy().to_string())
+    run_blocking_workspace_task(move || {
+        reference::save_voice_file(&voices_dir(), &character_id, &base64_data, &extension)
+    })
+    .await
 }
 
 pub(crate) fn delete_character_voices_in(
@@ -2087,9 +1719,7 @@ pub fn tts_generate_training_data(
     force: Option<bool>,
 ) -> Result<(), String> {
     sanitize_character_id(&character_id)?;
-    if !tts_server_is_live()? {
-        return Err("TTS server is not running.".to_string());
-    }
+    let address = tts_server_address()?.ok_or("TTS server is not running.")?;
 
     let train_dir = voices_dir().join(&character_id).join("train");
     let meta_path = train_dir.join("metadata.list");
@@ -2148,7 +1778,7 @@ pub fn tts_generate_training_data(
     let ref_lang = prompt_language.clone();
 
     std::thread::spawn(move || {
-        let base_url = GptSovitsServer::api_base_url();
+        let base_url = format!("http://{address}");
         let client = tts_client();
         let mut metadata_lines: Vec<String> = Vec::new();
         let mut failed_count: u32 = 0;

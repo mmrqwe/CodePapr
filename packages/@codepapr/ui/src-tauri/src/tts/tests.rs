@@ -7,7 +7,7 @@
 //! - `sanitize_character_id` (S2: path traversal defense)
 //! - `validate_voice_path_in` (S1/S2: voices-dir confinement)
 //! - `refer_key`            (cache-key stability)
-//! - `first_line` / `is_port_in_use_error` (small utilities)
+//! - `first_line` (small utilities)
 //! - WS WAV index ordering + unavailable-error detection
 
 use std::collections::HashSet;
@@ -15,8 +15,8 @@ use std::fs;
 
 use super::ws::{is_ws_unavailable, place_wav_by_index, wavs_in_index_order};
 use super::{
-    decode_pcm_chunk, delete_character_voices_in, first_line, is_port_in_use_error, normalize_lang_code,
-    parse_wav_header, refer_key, sanitize_character_id, validate_voice_path_in,
+    decode_pcm_chunk, delete_character_voices_in, first_line, normalize_lang_code, parse_wav_header,
+    refer_key, sanitize_character_id, validate_voice_path_in,
 };
 
 // -------- normalize_lang_code (B11) --------
@@ -447,21 +447,6 @@ fn first_line_handles_crlf() {
     let result = first_line("hello\r\nworld");
     assert!(result.starts_with("hello"));
     assert!(!result.contains("world"));
-}
-
-// -------- is_port_in_use_error --------
-
-#[test]
-fn is_port_in_use_error_detects_known_phrases() {
-    assert!(is_port_in_use_error("error: address already in use"));
-    assert!(is_port_in_use_error("Address already in use"));
-}
-
-#[test]
-fn is_port_in_use_error_rejects_unrelated() {
-    assert!(!is_port_in_use_error("connection refused"));
-    assert!(!is_port_in_use_error("timeout"));
-    assert!(!is_port_in_use_error(""));
 }
 
 // Small inline tempdir replacement to avoid pulling a new dep.

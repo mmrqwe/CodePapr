@@ -30,6 +30,7 @@ interface CharacterModalProps {
 
 type LangCode = 'all_zh' | 'all_yue' | 'en' | 'all_ja' | 'all_ko' | 'zh' | 'ja' | 'auto';
 const DEFAULT_REFERENCE_LANG = 'all_zh';
+const VOICE_LANGUAGE_SELECT_CLASS = 'cursor-pointer rounded border border-line bg-base px-1.5 py-0.5 text-[10px] text-fg focus:border-accent focus:outline-none';
 const LANG_CONFIG: Record<LangCode, { name: string; instruction: string }> = {
   all_zh:  { name: '中文',   instruction: '生成中文独白或对话文本，每句以。！？结尾。' },
   all_yue: { name: '粤语',   instruction: '用粤语（广东话）生成独白或对话文本，使用口语化粤语表达。每句以。！？结尾。' },
@@ -58,6 +59,8 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   const [importError, setImportError] = useState<string>('');
   const [voiceTab, setVoiceTab] = useState<'basic' | 'voice'>('basic');
   const [voicePreviewUrl, setVoicePreviewUrl] = useState<string | null>(null);
+  const [voiceUploading, setVoiceUploading] = useState(false);
+  const [voiceUploadError, setVoiceUploadError] = useState<{ characterId: string; message: string } | null>(null);
   const [testVoiceError, setTestVoiceError] = useState<string | null>(null);
   const [testVoicePlaying, setTestVoicePlaying] = useState(false);
   const [warmupRunning, setWarmupRunning] = useState(false);
@@ -338,9 +341,9 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
     setEditing((current) => (current ? { ...current, ...patch } : current));
   };
 
-  const updateVoiceField = useCallback((patch: Partial<VoiceConfig>) => {
+  const updateVoiceField = useCallback((patch: Partial<VoiceConfig>, characterId?: string) => {
     setEditing((current) =>
-      current
+      current && (!characterId || current.id === characterId)
         ? { ...current, voice: { ...current.voice ?? { enabled: false, engine: 'gpt-sovits', speed: 1.0 }, ...patch } }
         : current
     );
@@ -537,29 +540,37 @@ Requirements:
   const handleVoiceSampleChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
+    if (!file || voiceUploading) return;
     if (!editing || !characters.some((c) => c.id === editing.id)) {
       toast.warning(t.characterSaveFirstForVoice);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = typeof reader.result === 'string' ? reader.result : undefined;
-      if (!dataUrl || !editing) return;
-      setVoicePreviewUrl(dataUrl);
-      const ext = file.name.split('.').pop() || 'mp3';
-      try {
-        const path = await invoke<string>('tts_save_voice_file', {
-          characterId: editing.id,
-          base64Data: dataUrl,
-          extension: ext,
-        });
-        updateVoiceField({ referenceSamplePath: path });
-      } catch (e) {
-        console.error('Failed to save voice file:', e);
+    const characterId = editing.id;
+    setVoiceUploading(true);
+    setVoiceUploadError(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error);
+        reader.onload = () => resolve(String(reader.result));
+        reader.readAsDataURL(file);
+      });
+      const path = await invoke<string>('tts_save_voice_file', {
+        characterId,
+        base64Data: dataUrl,
+        extension: file.name.split('.').pop() ?? '',
+      });
+      const preview = await invoke<string>('tts_read_voice_file', { filePath: path }).catch(() => dataUrl);
+      if (editingRef.current?.id === characterId) {
+        setVoicePreviewUrl(preview);
+        setTestVoiceError(null);
+        updateVoiceField({ referenceSamplePath: path }, characterId);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (error) {
+      setVoiceUploadError({ characterId, message: errorMessage(error) });
+    } finally {
+      setVoiceUploading(false);
+    }
   };
 
   const getTestTextForLang = (lang: string): string => {
@@ -1360,11 +1371,12 @@ Requirements:
                           <p className="text-[10px] text-fg-muted">{t.voiceFinetuneDataExistsHint}</p>
                         )}
                         <div className="flex items-center gap-2">
-                          <label className="text-[10px] text-fg-muted whitespace-nowrap">{t.voiceFinetuneTrainingLanguage}</label>
+                          <label htmlFor="voice-training-language" className="text-[10px] text-fg-muted whitespace-nowrap">{t.voiceFinetuneTrainingLanguage}</label>
                           <select
+                            id="voice-training-language"
                             value={editing?.voice?.trainingLanguage || 'all_zh'}
                             onChange={(e) => updateVoiceField({ trainingLanguage: e.target.value })}
-                            className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
+                            className={VOICE_LANGUAGE_SELECT_CLASS}
                           >
                             <option value="all_zh">{t.voiceLangZh}</option>
                             <option value="all_yue">{t.voiceLangYue}</option>
@@ -1466,17 +1478,18 @@ Requirements:
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
+                                disabled={voiceUploading}
                                 onClick={() => updateVoiceField({ referenceSamplePath: undefined, referenceText: '' })}
-                                className="rounded-lg border border-danger-bg px-2.5 py-1 text-[11px] font-medium text-danger hover:border-danger"
+                                className="rounded-lg border border-danger-bg px-2.5 py-1 text-[11px] font-medium text-danger hover:border-danger disabled:opacity-50"
                               >
                                 {t.voiceSampleRemove}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => { void handleTestVoice(); }}
-                                disabled={testVoicePlaying}
+                                disabled={testVoicePlaying || voiceUploading}
                                 className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                                  testVoicePlaying
+                                  testVoicePlaying || voiceUploading
                                     ? 'border-slate-500/30 bg-slate-500/10 text-fg-muted cursor-not-allowed'
                                     : 'border-accent-soft bg-accent-soft text-accent-text hover:bg-accent-soft'
                                 }`}
@@ -1500,7 +1513,7 @@ Requirements:
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            disabled={!isPersisted}
+                            disabled={!isPersisted || voiceUploading}
                             title={isPersisted ? undefined : t.characterSaveFirstForVoice}
                             onClick={() => {
                               if (!isPersisted) {
@@ -1511,16 +1524,21 @@ Requirements:
                             }}
                             className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {editing?.voice?.referenceSamplePath ? t.voiceSampleReplace : t.voiceSampleUpload}
+                            {voiceUploading ? t.voiceSampleUploading : editing?.voice?.referenceSamplePath ? t.voiceSampleReplace : t.voiceSampleUpload}
                           </button>
                           <input
                             ref={voiceSampleInputRef}
                             type="file"
-                            accept="audio/wav,audio/mpeg,audio/mp3,audio/x-wav,audio/aac,audio/x-m4a"
+                            accept=".wav,.mp3,.m4a,.aac,audio/wav,audio/mpeg,audio/mp3,audio/x-wav,audio/aac,audio/x-m4a"
                             onChange={handleVoiceSampleChange}
                             className="hidden"
                           />
                         </div>
+                        {voiceUploadError && voiceUploadError.characterId === editing?.id && (
+                          <p role="alert" className="break-words text-xs text-danger">
+                            {t.voiceSampleUploadFailed} {voiceUploadError.message}
+                          </p>
+                        )}
                       </div>
                     </FieldRow>
 
@@ -1535,8 +1553,9 @@ Requirements:
                         />
                         <p className="mt-1 text-[11px] text-fg-muted">{t.voiceReferenceTextHint}</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <label className="text-[10px] text-fg-muted whitespace-nowrap">{t.voiceRefLang}</label>
+                          <label htmlFor="voice-reference-language" className="text-[10px] text-fg-muted whitespace-nowrap">{t.voiceRefLang}</label>
                           <select
+                            id="voice-reference-language"
                             value={editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG}
                             onChange={(e) => {
                               const newRefLang = e.target.value;
@@ -1550,7 +1569,7 @@ Requirements:
                                 updateVoiceField({ referenceTextLanguage: newRefLang });
                               }
                             }}
-                            className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
+                            className={VOICE_LANGUAGE_SELECT_CLASS}
                           >
                             <option value="all_zh">{t.voiceLangZh}</option>
                             <option value="all_yue">{t.voiceLangYue}</option>
@@ -1560,11 +1579,12 @@ Requirements:
                           </select>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
-                          <label className="text-[10px] text-fg-muted whitespace-nowrap">{t.voiceSpeakLang}</label>
+                          <label htmlFor="voice-speaking-language" className="text-[10px] text-fg-muted whitespace-nowrap">{t.voiceSpeakLang}</label>
                           <select
+                            id="voice-speaking-language"
                             value={editing?.voice?.textLanguage || editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG}
                             onChange={(e) => updateVoiceField({ textLanguage: e.target.value })}
-                            className="text-[10px] bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-fg-soft"
+                            className={VOICE_LANGUAGE_SELECT_CLASS}
                           >
                             <option value="all_zh">{t.voiceLangZh}</option>
                             <option value="all_yue">{t.voiceLangYue}</option>
@@ -1623,7 +1643,7 @@ Requirements:
           <button
             type="button"
             onClick={handleSave}
-            disabled={!editing || !editing.name.trim() || saving}
+            disabled={!editing || !editing.name.trim() || saving || voiceUploading}
             className="rounded-xl border border-accent-soft bg-accent-soft px-4 py-2 text-sm font-medium text-accent-text transition-colors hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? t.characterSaving : savedFlash ? t.characterSavedState : t.characterSave}

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::net::SocketAddrV4;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -10,7 +11,6 @@ use tokio_tungstenite::tungstenite::Message;
 
 use super::tts_player_lock;
 use codepapr_core::shared::lock;
-use crate::tts::server::GPT_SOVITS_API_PORT;
 
 static WS_APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
 
@@ -26,10 +26,6 @@ pub(crate) fn set_ws_app_handle(handle: tauri::AppHandle) {
 }
 
 pub(crate) const WS_PATH: &str = "/ws/synthesize";
-
-pub(crate) fn ws_base_url() -> String {
-    format!("ws://127.0.0.1:{GPT_SOVITS_API_PORT}{WS_PATH}")
-}
 
 pub(crate) fn is_ws_unavailable(e: &str) -> bool {
     let lower = e.to_ascii_lowercase();
@@ -78,7 +74,7 @@ const WS_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(30);
 async fn collect_ws_audio(
     ws: &mut WsStream,
     sentence_count: usize,
-    invalidate_on_transport_err: bool,
+    address: SocketAddrV4,
 ) -> Result<Vec<Vec<u8>>, String> {
     let mut received_count: usize = 0;
     let mut seen_indices: HashSet<usize> = HashSet::new();
@@ -93,9 +89,7 @@ async fn collect_ws_audio(
         match tokio::time::timeout(Duration::from_millis(200), ws.next()).await {
             Err(_elapsed) => {
                 if last_activity.elapsed() > WS_INACTIVITY_TIMEOUT {
-                    if invalidate_on_transport_err {
-                        invalidate_pool();
-                    }
+                    invalidate_pool(address);
                     break Err(format!(
                         "Synthesis stalled: no server data for {}s",
                         WS_INACTIVITY_TIMEOUT.as_secs()
@@ -133,9 +127,7 @@ async fn collect_ws_audio(
                                 received_count += 1;
                                 continue;
                             }
-                            if invalidate_on_transport_err {
-                                invalidate_pool();
-                            }
+                            invalidate_pool(address);
                             break Err(format!("TTS server error: {err}"));
                         }
                         if v.get("done").is_some() {
@@ -144,18 +136,14 @@ async fn collect_ws_audio(
                         eprintln!("[tts-ws] unrecognised text frame: {txt}");
                     }
                     Some(Ok(Message::Close(_))) => {
-                        if invalidate_on_transport_err {
-                            invalidate_pool();
-                        }
+                        invalidate_pool(address);
                         if received_count > 0 {
                             break Ok(received_count);
                         }
                         break Err("WebSocket closed by server before any data received".to_string());
                     }
                     Some(Err(e)) => {
-                        if invalidate_on_transport_err {
-                            invalidate_pool();
-                        }
+                        invalidate_pool(address);
                         if received_count > 0 {
                             break Ok(received_count);
                         }
@@ -273,16 +261,14 @@ static WS_POOL_RR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsi
 /// dedicated background thread with its own mpsc channel.
 ///
 /// Lazy-initialised on first use.
-static WS_POOL: std::sync::OnceLock<Mutex<Vec<mpsc::UnboundedSender<WsRequest>>>> =
-    std::sync::OnceLock::new();
+struct WsPool {
+    address: SocketAddrV4,
+    senders: Vec<mpsc::UnboundedSender<WsRequest>>,
+}
 
-fn get_or_init_pool() -> Result<(), String> {
-    let lock = WS_POOL.get_or_init(|| Mutex::new(Vec::new()));
-    let mut guard = lock.lock().map_err(|e| format!("WS pool lock error: {e}"))?;
-    if !guard.is_empty() {
-        return Ok(());
-    }
+static WS_POOL: Mutex<Option<WsPool>> = Mutex::new(None);
 
+fn start_pool(address: SocketAddrV4) -> WsPool {
     let mut senders: Vec<mpsc::UnboundedSender<WsRequest>> = Vec::with_capacity(WS_POOL_SIZE);
 
     for i in 0..WS_POOL_SIZE {
@@ -291,7 +277,7 @@ fn get_or_init_pool() -> Result<(), String> {
         std::thread::spawn(move || {
             let rt = new_current_thread_runtime();
             let _ = rt.block_on(async move {
-                let url = ws_base_url();
+                let url = format!("ws://{address}{WS_PATH}");
                 let (ws, _) = match connect_async(&url).await {
                     Ok(c) => c,
                     Err(e) => {
@@ -313,6 +299,7 @@ fn get_or_init_pool() -> Result<(), String> {
                             // silently: fall back to HTTP and advance the
                             // reorder sequence, exactly like the dispatcher.
                             let _ = super::http_fallback_sentences(
+                                address,
                                 req.sentences,
                                 req.model_name,
                                 req.ref_audio_path,
@@ -327,7 +314,7 @@ fn get_or_init_pool() -> Result<(), String> {
                         return;
                     }
                 };
-                run_pool_loop(ws, &mut rx).await;
+                run_pool_loop(address, ws, &mut rx).await;
                 while let Ok(req) = rx.try_recv() {
                     if let Some(tx) = req.done_tx {
                         let _ = tx.send(Err("WebSocket pool closed".to_string()));
@@ -341,11 +328,11 @@ fn get_or_init_pool() -> Result<(), String> {
         senders.push(tx);
     }
 
-    *guard = senders;
-    Ok(())
+    WsPool { address, senders }
 }
 
 async fn run_pool_loop(
+    address: SocketAddrV4,
     mut ws: tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
@@ -361,7 +348,7 @@ async fn run_pool_loop(
             }
             continue;
         }
-        let result = process_one_request(&mut ws, &req).await;
+        let result = process_one_request(address, &mut ws, &req).await;
         match &result {
             Ok(wavs) => insert_and_drain(req.seq, wavs.clone(), gen),
             Err(_) => insert_and_drain(req.seq, vec![], gen),
@@ -373,6 +360,7 @@ async fn run_pool_loop(
 }
 
 async fn process_one_request(
+    address: SocketAddrV4,
     ws: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
@@ -463,22 +451,23 @@ async fn process_one_request(
     ws.send(Message::Text(json))
         .await
         .map_err(|e| {
-            invalidate_pool();
+            invalidate_pool(address);
             format!("WebSocket send failed: {e}")
         })?;
 
-    collect_ws_audio(ws, req.sentences.len(), true).await
+    collect_ws_audio(ws, req.sentences.len(), address).await
 }
 
-fn invalidate_pool() {
-    if let Some(lock) = WS_POOL.get() {
-        if let Ok(mut guard) = lock.lock() {
-            guard.clear();
+pub(super) fn invalidate_pool(address: SocketAddrV4) {
+    if let Ok(mut guard) = WS_POOL.lock() {
+        if guard.as_ref().is_some_and(|pool| pool.address == address) {
+            *guard = None;
         }
     }
 }
 
 fn send_to_pool(
+    address: SocketAddrV4,
     sentences: Vec<String>,
     model_name: Option<String>,
     ref_audio_path: Option<String>,
@@ -494,14 +483,15 @@ fn send_to_pool(
     generation: u64,
     done_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
 ) -> Result<(), String> {
-    get_or_init_pool()?;
-    let lock = WS_POOL.get().ok_or("WS pool not initialised")?;
-    let guard = lock.lock().map_err(|e| format!("WS pool lock error: {e}"))?;
-    if guard.is_empty() {
-        return Err("WS pool is empty".to_string());
-    }
-    let idx = WS_POOL_RR.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % guard.len();
-    let tx = &guard[idx];
+    let tx = {
+        let mut guard = WS_POOL.lock().map_err(|e| format!("WS pool lock error: {e}"))?;
+        if guard.as_ref().is_some_and(|pool| pool.address != address) {
+            *guard = None;
+        }
+        let pool = guard.get_or_insert_with(|| start_pool(address));
+        let idx = WS_POOL_RR.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % pool.senders.len();
+        pool.senders[idx].clone()
+    };
     let req = WsRequest {
         sentences,
         model_name,
@@ -519,7 +509,7 @@ fn send_to_pool(
         done_tx,
     };
     tx.send(req).map_err(|_| {
-        invalidate_pool();
+        invalidate_pool(address);
         "WebSocket pool channel closed".to_string()
     })
 }
@@ -531,6 +521,7 @@ fn send_to_pool(
 /// between conversations), invalidates the pool and retries once on a
 /// fresh connection.
 pub(crate) fn synthesize_batch_ws(
+    address: SocketAddrV4,
     sentences: Vec<String>,
     model_name: Option<String>,
     ref_audio_path: Option<String>,
@@ -545,6 +536,7 @@ pub(crate) fn synthesize_batch_ws(
     seq: u64,
 ) -> Result<(), String> {
     fn do_send(
+        address: SocketAddrV4,
         sentences: &Vec<String>,
         model_name: &Option<String>,
         ref_audio_path: &Option<String>,
@@ -561,6 +553,7 @@ pub(crate) fn synthesize_batch_ws(
     ) -> Result<tokio::sync::oneshot::Receiver<Result<(), String>>, String> {
         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
         send_to_pool(
+            address,
             sentences.clone(),
             model_name.clone(),
             ref_audio_path.clone(),
@@ -581,7 +574,7 @@ pub(crate) fn synthesize_batch_ws(
 
     let gen = lock(reorder_buffer()).generation;
     let rx = do_send(
-        &sentences, &model_name, &ref_audio_path,
+        address, &sentences, &model_name, &ref_audio_path,
         &prompt_text, &prompt_language, &text_language, sample_steps, speed,
         top_k, top_p, temperature, seq, gen,
     )?;
@@ -590,10 +583,10 @@ pub(crate) fn synthesize_batch_ws(
             if result.is_err() {
                 let err = result.as_ref().unwrap_err();
                 if err.contains("closed") || err.contains("failed") || err.contains("pipe") || err.contains("Broken") {
-                    invalidate_pool();
+                    invalidate_pool(address);
                     let retry_gen = lock(reorder_buffer()).generation;
                     let rx2 = do_send(
-                        &sentences, &model_name, &ref_audio_path,
+                        address, &sentences, &model_name, &ref_audio_path,
                         &prompt_text, &prompt_language, &text_language, sample_steps, speed,
                         top_k, top_p, temperature, seq, retry_gen,
                     )?;
@@ -613,6 +606,7 @@ pub(crate) fn synthesize_batch_ws(
 /// in a background thread with its own tokio runtime. Multiple chunks
 /// can synthesise in parallel while earlier audio is still playing.
 pub(crate) fn synthesize_batch_ws_nonblocking(
+    address: SocketAddrV4,
     sentences: Vec<String>,
     model_name: Option<String>,
     ref_audio_path: Option<String>,
@@ -634,6 +628,7 @@ pub(crate) fn synthesize_batch_ws_nonblocking(
     // multi-second silence heard between chunks. The pool serialises
     // synthesis, which also matches the single-threaded uvicorn worker.
     if let Err(e) = send_to_pool(
+        address,
         sentences.clone(),
         model_name.clone(),
         ref_audio_path.clone(),
@@ -658,6 +653,7 @@ pub(crate) fn synthesize_batch_ws_nonblocking(
             // chunk in the meantime.
             if lock(reorder_buffer()).generation == gen {
                 let _ = super::http_fallback_sentences(
+                    address,
                     sentences,
                     model_name,
                     ref_audio_path,
