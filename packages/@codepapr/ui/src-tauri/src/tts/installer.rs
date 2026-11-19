@@ -380,7 +380,14 @@ pub(crate) fn install(app: AppHandle, source: Option<String>) {
     // Post-install: deploy fully patched api.py (soundfile + WS + bug fixes).
     deploy_patched_api_py(&app, &target_path);
     // Post-install: deploy the fine-tuning script.
-    deploy_finetune_script(&app, &target_path);
+    let finetune_status = match deploy_finetune_script(&target_path) {
+        Ok(true) => Some("Deployed fine-tuning script".to_string()),
+        Ok(false) => None,
+        Err(error) => Some(format!("Warning: {error}")),
+    };
+    if let Some(status) = finetune_status {
+        emit(&app, &InstallProgress::running("install-deps", "Installing Python packages", &status));
+    }
     // Post-install: patch load_audio to use soundfile (no ffmpeg dependency).
     apply_load_audio_patch(&app, &target_path);
 
@@ -1187,31 +1194,16 @@ fn extract_api_version(content: &str) -> Option<u32> {
     num_str[..end].parse().ok()
 }
 
-fn deploy_finetune_script(app: &AppHandle, target_path: &Path) {
+pub(super) fn deploy_finetune_script(target_path: &Path) -> Result<bool, String> {
     let script_path = target_path.join("codepapr_finetune.py");
     let script_content = include_str!("../../resources/codepapr_finetune.py");
 
-    let needs_write = match std::fs::read_to_string(&script_path) {
-        Ok(existing) => existing != script_content,
-        Err(_) => true,
-    };
-
-    if needs_write {
-        match std::fs::write(&script_path, script_content) {
-            Ok(()) => {
-                emit(app, &InstallProgress::running(
-                    "install-deps", "Installing Python packages",
-                    "Deployed fine-tuning script",
-                ));
-            }
-            Err(e) => {
-                emit(app, &InstallProgress::running(
-                    "install-deps", "Installing Python packages",
-                    &format!("Warning: could not deploy fine-tuning script: {e}"),
-                ));
-            }
-        }
+    if std::fs::read_to_string(&script_path).is_ok_and(|existing| existing == script_content) {
+        return Ok(false);
     }
+    std::fs::write(&script_path, script_content)
+        .map_err(|error| format!("Could not deploy fine-tuning script: {error}"))?;
+    Ok(true)
 }
 
 /// Patches `tools/my_utils.py` to use `soundfile` as primary audio

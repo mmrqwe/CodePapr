@@ -1782,7 +1782,6 @@ pub fn tts_generate_training_data(
         let client = tts_client();
         let mut metadata_lines: Vec<String> = Vec::new();
         let mut failed_count: u32 = 0;
-        let clean_lang = normalize_lang_code(&text_lang);
 
         for (i, sentence) in sentences.iter().enumerate() {
             let _ = app.emit(
@@ -1822,7 +1821,7 @@ pub fn tts_generate_training_data(
                             .map(|ch| if ch == '|' { '｜' } else { ch })
                             .filter(|ch| !ch.is_control())
                             .collect();
-                        metadata_lines.push(format!("{filename}|default|{clean_lang}|{safe_sentence}"));
+                        metadata_lines.push(format!("{filename}|default|{text_lang}|{safe_sentence}"));
                     }
                 }
                 _ => {

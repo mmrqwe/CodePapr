@@ -4,7 +4,66 @@ CodePapr fine-tuning script — replicates the GPT-SoVITS WebUI training flow.
 Usage:
     python3 codepapr_finetune.py --train_dir ... --output_dir ... --epochs 30
 """
-import argparse, json, os, shutil, subprocess, sys, tempfile
+import argparse, json, os, shutil, subprocess, sys
+
+
+def training_device(requested, torch):
+    if requested == "auto":
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+    available = {
+        "cuda": torch.cuda.is_available,
+        "mps": torch.backends.mps.is_available,
+    }
+    if requested in available and not available[requested]():
+        raise RuntimeError(f"Requested training device {requested} is unavailable")
+    return requested
+
+
+def run_trainer():
+    requested, config = sys.argv[1:]
+    sys.argv = ["s2_train_v3_lora.py", "--config", config]
+    import s2_train_v3_lora as trainer
+    import torch
+
+    device = training_device(requested, torch)
+    if device == "cuda":
+        print(f"[codepapr] LoRA training on CUDA: {torch.cuda.get_device_name(0)}", flush=True)
+    else:
+        print(f"[codepapr] LoRA training on {device.upper()}", flush=True)
+    # The upstream trainer already moves its model and batches to this device
+    # on the non-CUDA path. It defaults to CPU even when MPS is available.
+    trainer.device = device
+    trainer.run(0, 1, trainer.hps)
+
+
+def training_phones(text, language, version):
+    from text.cleaner import clean_text
+    from text.LangSegmenter import LangSegmenter
+
+    language = language.strip().lower()
+    lang = language.removeprefix("all_")
+    if lang == "en":
+        return clean_text(text, lang, version)[0]
+    if lang not in {"zh", "yue", "ja", "ko", "auto", "auto_yue"}:
+        raise ValueError(f"Unsupported training language: {language}")
+    if language.startswith("all_") and lang in {"zh", "yue", "ja", "ko"}:
+        segments = LangSegmenter.getTexts(text, "zh" if lang == "yue" else lang)
+    else:
+        segments = LangSegmenter.getTexts(text)
+    phones = []
+    for segment in segments:
+        segment_lang = segment["lang"]
+        if lang == "auto_yue" and segment_lang == "zh":
+            segment_lang = "yue"
+        elif lang not in {"auto", "auto_yue"} and segment_lang != "en":
+            segment_lang = lang
+        phones.extend(clean_text(segment["text"], segment_lang, version)[0])
+    return phones
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -12,6 +71,7 @@ def main():
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default="auto")
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -39,23 +99,19 @@ def main():
         print(f"ERROR: Need at least 5 training samples, got {len(lines)}", flush=True)
         sys.exit(1)
 
-    import json as _json
     def emit_progress(step, percent):
-        print(f"PROGRESS::{_json.dumps({'step': step, 'percent': percent})}", flush=True)
+        print(f"PROGRESS::{json.dumps({'step': step, 'percent': percent, 'device': device})}", flush=True)
+
+    import torch
+    device = training_device(args.device, torch)
+    print(f"[codepapr] Fine-tuning device: {device.upper()}", flush=True)
 
     print(f"[codepapr] {len(lines)} training samples loaded", flush=True)
-
-    # Import phoneme converter
-    try:
-        from GPT_SoVITS.text.cleaner import clean_text
-    except Exception:
-        clean_text = None
 
     # Import model configs
     try:
         from config import (
             pretrained_sovits_name, cnhubert_path,
-            SoVITS_weight_version2root,
         )
     except Exception as e:
         print(f"ERROR: Cannot import config: {e}", flush=True)
@@ -66,10 +122,10 @@ def main():
     if pretrained_s2G and not os.path.exists(os.path.join(script_dir, pretrained_s2G)):
         pretrained_s2G = ""
     pretrained_s2D = ""  # No discriminator pretrained for v4
-    save_weight_dir = SoVITS_weight_version2root.get(version, "SoVITS_weights_v4")
     exp_name = "codepapr_tune"
-    exp_root = args.output_dir
+    exp_root = os.path.abspath(args.output_dir)
     s2_dir = os.path.join(exp_root, exp_name)
+    save_weight_dir = os.path.join(s2_dir, "weights")
 
     # Step 1: Preprocess
     print("[codepapr] Step 1/4: Preprocessing audio...", flush=True)
@@ -80,9 +136,10 @@ def main():
     os.makedirs(wav32k_dir, exist_ok=True)
     os.makedirs(hubert_dir, exist_ok=True)
 
-    import librosa, soundfile as sf, numpy as np, torch
+    import soundfile as sf, numpy as np
     from scipy import signal as scipy_signal
     name2text_lines = []
+    usable_wavs = []
     for parts in lines:
         wav_name, speaker, lang, text = parts[0], parts[1], parts[2], parts[3]
         wav_path = os.path.join(args.train_dir, wav_name)
@@ -107,14 +164,16 @@ def main():
                 print(f"  Resample failed {wav_name}: {e}", flush=True)
                 continue
 
-        phonemes = text
-        if clean_text:
-            try:
-                phones, word2ph, norm_text = clean_text(text, lang, version)
-                phonemes = " ".join(phones)
-            except Exception:
-                pass
+        try:
+            phones = training_phones(text, lang, version)
+            if not phones:
+                raise ValueError("No phonemes for this sample")
+        except Exception as e:
+            print(f"  Phoneme conversion failed for {wav_name} ({lang}): {e}", flush=True)
+            continue
+        phonemes = " ".join(phones)
         name2text_lines.append(f"{base}\t{phonemes}\t{speaker}\t{text}")
+        usable_wavs.append(wav_name)
 
     if not name2text_lines:
         print("ERROR: No valid training samples", flush=True)
@@ -132,18 +191,15 @@ def main():
         from GPT_SoVITS.feature_extractor.cnhubert import CNHubert
         cnhubert = CNHubert(base_path=cnhubert_path)
         cnhubert.eval()
-        device = "cpu"
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            device = "mps"
         cnhubert = cnhubert.to(device)
+        print(f"[codepapr] HuBERT feature extraction on {next(cnhubert.parameters()).device}", flush=True)
 
-        for i, parts in enumerate(lines):
-            wav_name = parts[0]
+        feature_count = 0
+        for i, wav_name in enumerate(usable_wavs):
             base = os.path.splitext(wav_name)[0]
             hubert_path = os.path.join(hubert_dir, f"{base}.pt")
             if os.path.exists(hubert_path):
+                feature_count += 1
                 continue
             wav_path = os.path.join(wav32k_dir, base)
             try:
@@ -155,20 +211,28 @@ def main():
                     num_samples = int(len(data) * 16000 / sr)
                     data = scipy_signal.resample(data.astype(float), num_samples)
                 data = data.astype(np.float32)
-                audio_tensor = torch.from_numpy(data).float().to(device)
                 with torch.no_grad():
-                    features = cnhubert(audio_tensor)
+                    inputs = cnhubert.feature_extractor(data, sampling_rate=16000, return_tensors="pt")
+                    features = cnhubert.model(inputs.input_values.to(device)).last_hidden_state
                 # Transpose to [batch, hidden, seq] as expected by V4 loader
-                features = features.transpose(1, 2)
-                torch.save(features.cpu(), hubert_path)
+                torch.save(features.transpose(1, 2).cpu(), hubert_path)
+                feature_count += 1
                 if (i + 1) % 5 == 0:
-                    print(f"  HuBERT: {i+1}/{len(lines)}", flush=True)
+                    print(f"  HuBERT: {i+1}/{len(usable_wavs)}", flush=True)
             except Exception as e:
                 print(f"  HuBERT failed {base}: {e}", flush=True)
-        print(f"  HuBERT features extracted to {hubert_dir}", flush=True)
+        if feature_count == 0:
+            raise RuntimeError("No usable HuBERT features were produced")
+        print(f"  {feature_count} HuBERT feature files in {hubert_dir}", flush=True)
         emit_progress("hubert", 14)
     except Exception as e:
-        print(f"  HuBERT init failed: {e}, but training can continue", flush=True)
+        raise RuntimeError(f"Cannot extract HuBERT features on {device}: {e}") from e
+    # Release the feature model's GPU memory before starting LoRA.
+    del cnhubert
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    elif device == "mps":
+        torch.mps.empty_cache()
 
     # Step 3: Create config (matching WebUI exactly)
     print("[codepapr] Step 3/4: Creating training config...", flush=True)
@@ -186,10 +250,10 @@ def main():
     data["train"]["if_save_latest"] = True
     data["train"]["if_save_every_weights"] = True  # inference model via savee()
     data["train"]["save_every_epoch"] = 1
-    data["train"]["gpu_numbers"] = "0"
+    data["train"]["gpu_numbers"] = os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0] if device == "cuda" else ""
     data["train"]["grad_ckpt"] = False
     data["train"]["lora_rank"] = 4
-    data["train"]["fp16_run"] = True
+    data["train"]["fp16_run"] = device == "cuda"
     data["model"]["version"] = version
     data["data"]["exp_dir"] = data["s2_ckpt_dir"] = s2_dir
     data["data"]["n_speakers"] = 1
@@ -199,12 +263,7 @@ def main():
     data["model_dir"] = s2_dir
 
     os.makedirs(os.path.join(s2_dir, f"logs_s2_{version}"), exist_ok=True)
-    # Create save_weight_dir so savee() can write the inference model
-    save_weight_abs = os.path.join(script_dir, save_weight_dir)
-    os.makedirs(save_weight_abs, exist_ok=True)
-    # Remove previous run's artifacts to prevent lexicographic cross-contamination
-    for old_pth in [f for f in os.listdir(save_weight_abs) if f.endswith(".pth")]:
-        os.remove(os.path.join(save_weight_abs, old_pth))
+    os.makedirs(save_weight_dir, exist_ok=True)
 
     tmp_config = os.path.join(s2_dir, "tmp_s2.json")
     with open(tmp_config, "w") as f:
@@ -214,22 +273,23 @@ def main():
     # Step 4: Run training
     print("[codepapr] Step 4/4: Starting LoRA fine-tuning...", flush=True)
     emit_progress("train", 20)
-    train_script = os.path.join(gpt_sovits_dir, "s2_train_v3_lora.py")
-
     python_exe = sys.executable
     env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
     env["PYTHONPATH"] = script_dir + os.pathsep + gpt_sovits_dir + os.pathsep + env.get("PYTHONPATH", "")
     env["TOKENIZERS_PARALLELISM"] = "false"
+    if device != "cuda":
+        env["CUDA_VISIBLE_DEVICES"] = ""
 
     # Run as subprocess
-    cmd = [python_exe, "-u", train_script, "--config", tmp_config]
+    cmd = [python_exe, "-u", "-c", "from codepapr_finetune import run_trainer; run_trainer()", device, tmp_config]
     print(f"  Running: {' '.join(cmd)}", flush=True)
 
     proc = subprocess.Popen(
         cmd, cwd=script_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        env=env, text=True, bufsize=1,
+        env=env, text=True, encoding="utf-8", errors="replace", bufsize=1,
     )
 
     total_epochs = args.epochs
@@ -254,23 +314,14 @@ def main():
     # Find the inference model saved by savee() into save_weight_dir.
     # These are pure weight files (no optimizer state), half-precision,
     # ready for inference. Naming pattern: {name}_e{epoch}_s{step}_l{rank}.pth
-    found = False
-    if os.path.isdir(save_weight_abs):
-        candidates = sorted(
-            [f for f in os.listdir(save_weight_abs) if f.endswith(".pth")],
-            reverse=True,
-        )
-        for f in candidates:
-            src = os.path.join(save_weight_abs, f)
-            dst = os.path.join(args.output_dir, "s2Gv4.pth")
-            shutil.copy2(src, dst)
-            size_mb = os.path.getsize(dst) / 1024 / 1024
-            print(f"[codepapr] Inference model saved to {dst} ({size_mb:.0f} MB)", flush=True)
-            found = True
-            break
-    if not found:
-        print("[codepapr] WARNING: Could not find inference model in save_weight_dir.", flush=True)
-        print(f"[codepapr] Checked: {save_weight_abs}", flush=True)
+    checkpoints = [os.path.join(save_weight_dir, f) for f in os.listdir(save_weight_dir) if f.endswith(".pth")]
+    if not checkpoints:
+        raise RuntimeError(f"Training produced no inference model in {save_weight_dir}")
+    src = max(checkpoints, key=os.path.getmtime)
+    dst = os.path.join(exp_root, "s2Gv4.pth")
+    shutil.copy2(src, dst)
+    size_mb = os.path.getsize(dst) / 1024 / 1024
+    print(f"[codepapr] Inference model saved to {dst} ({size_mb:.0f} MB)", flush=True)
 
 if __name__ == "__main__":
     main()

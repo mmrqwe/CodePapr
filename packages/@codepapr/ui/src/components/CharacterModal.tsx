@@ -71,6 +71,7 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   const [finetuneRunning, setFinetuneRunning] = useState(false);
   const [finetuneDone, setFinetuneDone] = useState(false);
   const [finetuneStep, setFinetuneStep] = useState('');
+  const [finetuneDevice, setFinetuneDevice] = useState('');
 
   const [generateRunning, setGenerateRunning] = useState(false);
   const [generateDone, setGenerateDone] = useState(false);
@@ -368,13 +369,14 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
       }).catch(() => undefined);
     };
 
-    bind<{ character_id: string; step: string; percent: number; log_line: string }>(
+    bind<{ character_id: string; step: string; percent: number; log_line: string; device?: string }>(
       'tts-finetune-progress',
       (event) => {
         if (event.payload.character_id === charId) {
           setFinetuneProgress(event.payload.percent);
-          setFinetuneLog(event.payload.log_line);
+          if (event.payload.log_line) setFinetuneLog(event.payload.log_line);
           setFinetuneStep(event.payload.step);
+          if (event.payload.device) setFinetuneDevice(event.payload.device);
         }
       },
     );
@@ -407,7 +409,7 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
       (event) => {
         if (event.payload.character_id === charId) {
           setFinetuneRunning(false);
-          setFinetuneLog(event.payload.error);
+          setGenerateError(event.payload.error);
         }
       },
     );
@@ -618,6 +620,8 @@ Requirements:
     setFinetuneProgress(0);
     setFinetuneLog('');
     setFinetuneStep('');
+    setFinetuneDevice('');
+    setGenerateError('');
     setGenerateDone(false);
     try {
       if (generatedTrainDir) {
@@ -632,7 +636,7 @@ Requirements:
       }
     } catch (e) {
       setFinetuneRunning(false);
-      setFinetuneLog(String(e));
+      setGenerateError(errorMessage(e));
     }
   };
 
@@ -1295,6 +1299,7 @@ Requirements:
                           <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
                           <span className="text-xs text-accent-text font-medium">
                             {finetuneStep === 'preprocess' ? t.voiceFinetunePreprocessStatus : finetuneStep === 'train' ? t.voiceFinetuneTrainStatus : t.voiceFinetunePreparingStatus}
+                            {finetuneDevice && ` · ${finetuneDevice.toUpperCase()}`}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">

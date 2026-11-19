@@ -6,7 +6,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter};
 use crate::tts::{default_gpt_sovits_path, voices_dir};
-use crate::tts::installer::VENV_DIR_NAME;
+use crate::tts::installer::{self, VENV_DIR_NAME};
 
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_PID: Mutex<Option<u32>> = Mutex::new(None);
@@ -39,6 +39,8 @@ pub(crate) struct FinetuneProgress {
     pub step: String,
     pub percent: u8,
     pub log_line: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
 }
 
 impl FinetuneProgress {
@@ -48,6 +50,7 @@ impl FinetuneProgress {
             step: step.to_string(),
             percent,
             log_line: log_line.to_string(),
+            device: None,
         }
     }
 }
@@ -79,19 +82,11 @@ pub(crate) fn start_finetune(
     }
 
     let gpt_sovits_path = default_gpt_sovits_path();
-    let venv_python = if cfg!(target_os = "windows") {
-        gpt_sovits_path.join(VENV_DIR_NAME).join("Scripts").join("python.exe")
-    } else {
-        gpt_sovits_path.join(VENV_DIR_NAME).join("bin").join("python3")
-    };
+    let venv_path = gpt_sovits_path.join(VENV_DIR_NAME);
+    let venv_python = installer::venv_python_path(&venv_path);
 
     if !venv_python.exists() {
         return Err("GPT-SoVITS not installed. Please install TTS first.".to_string());
-    }
-
-    let finetune_script = gpt_sovits_path.join("codepapr_finetune.py");
-    if !finetune_script.exists() {
-        return Err(format!("Fine-tuning script not found at {}", finetune_script.display()));
     }
 
     let output_dir = voices_dir().join(&character_id);
@@ -122,6 +117,9 @@ pub(crate) fn start_finetune(
         return Err("Training data must contain metadata.list. Generate training data first.".to_string());
     };
 
+    installer::deploy_finetune_script(&gpt_sovits_path)?;
+    let finetune_script = gpt_sovits_path.join("codepapr_finetune.py");
+
     let cid = character_id.clone();
     let app_clone = app.clone();
 
@@ -136,6 +134,16 @@ pub(crate) fn start_finetune(
             .current_dir(&gpt_sovits_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        #[cfg(any(windows, target_os = "macos"))]
+        {
+            let device = super::server::recommended_device(&gpt_sovits_path);
+            #[cfg(windows)]
+            if device == "cuda" {
+                super::cuda::configure_python(&mut cmd, &venv_path);
+            }
+            cmd.arg("--device").arg(device);
+        }
+        cmd.env("PYTHONIOENCODING", "utf-8");
         cmd.env("PYTHONUNBUFFERED", "1");
         cmd.env("PYTORCH_ENABLE_MPS_FALLBACK", "1");
         cmd.env("TOKENIZERS_PARALLELISM", "false");
@@ -171,8 +179,9 @@ pub(crate) fn start_finetune(
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
                         let step = parsed.get("step").and_then(|s| s.as_str()).unwrap_or("preprocess");
                         let percent = parsed.get("percent").and_then(|p| p.as_u64()).unwrap_or(0) as u8;
-                        let log_line = format!("[structured] step={step}");
-                        emit_progress(&app_out, &cid_out, step, percent, &log_line);
+                        let mut progress = FinetuneProgress::new(&cid_out, step, percent, "");
+                        progress.device = parsed.get("device").and_then(|value| value.as_str()).map(str::to_string);
+                        let _ = app_out.emit("tts-finetune-progress", progress);
                         continue 'lines;
                     }
                 }

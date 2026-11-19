@@ -450,15 +450,22 @@ fn reported_api_address(line: &str) -> Option<SocketAddrV4> {
 
 /// Pick the best PyTorch device argument for this platform.
 ///
-/// On Apple Silicon (`aarch64` macOS) we prefer Metal Performance Shaders
-/// which gives 3-5x speedup over CPU for v4 inference. Some operators may
-/// fall back to CPU at runtime — that's handled by the env var
-/// `PYTORCH_ENABLE_MPS_FALLBACK=1` set during process spawn.
-///
-/// On Windows, try CUDA only after the installed runtime executes a GPU operation.
+/// Use a GPU backend when the installed PyTorch can execute an operation on it.
 pub(crate) fn recommended_device(_api_path: &Path) -> &'static str {
-    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        return "mps";
+    #[cfg(target_os = "macos")]
+    {
+        let venv = _api_path.join(super::installer::VENV_DIR_NAME);
+        let python = super::installer::venv_python_path(&venv);
+        let mps_works = Command::new(python)
+            .args(["-c", "import torch; x = torch.ones(1, device='mps', dtype=torch.float16); (x + 1).item()"])
+            .env_remove("PYTORCH_ENABLE_MPS_FALLBACK")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if mps_works {
+            return "mps";
+        }
     }
     #[cfg(windows)]
     {
