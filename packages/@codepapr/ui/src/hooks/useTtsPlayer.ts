@@ -29,32 +29,6 @@ function safeListen<T = unknown>(event: string, handler: (event: { payload: T })
   return listen(event, handler);
 }
 
-/**
- * Max queued chunks drained into a single ws-batch WebSocket request.
- *
- * The consumer loop splices at most this many chunks per iteration so that
- * `isLast` (queue empty AFTER the splice) is meaningful: while text is still
- * streaming in and the queue has more than this many chunks pending, the
- * non-final batches use the non-blocking WS path and synthesise in parallel
- * with playback of the current batch. Draining the whole queue at once (the
- * previous behaviour) made `isLast` always true and turned the non-blocking
- * pipeline into dead code. Kept modest so playback order stays stable in the
- * common case (a single batch → blocking → strictly ordered).
- */
-const WS_BATCH_CHUNKS = 1;
-
-function isWsUnavailableError(e: unknown): boolean {
-  const msg = String(e).toLowerCase();
-  return (
-    msg.includes('ws connect')
-    || msg.includes('websocket connection failed')
-    || msg.includes('websocket connect')
-    || msg.includes('pool is empty')
-    || msg.includes('pool channel closed')
-    || msg.includes('pool closed')
-  );
-}
-
 export type TtsServerStatus = 'unknown' | 'starting' | 'running' | 'stopped' | 'error';
 
 export interface TtsInstallStatus {
@@ -125,7 +99,7 @@ export interface UseTtsPlayerReturn {
   setVolume: (volume: number) => void;
   /** Re-open the default output device after headphones are swapped. */
   resetAudioDevice: () => Promise<void>;
-  /** Trigger GPU warmup synthesis (Metal kernel pre-compilation). */
+  /** Warm up the running CUDA or MPS synthesis backend. */
   warmupGpu: () => Promise<void>;
   /** Clone a voice: send reference audio + text to GPT-SoVITS */
   cloneVoice: (characterId: string, text: string) => Promise<void>;
@@ -179,8 +153,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   const speedRef = useRef<number>(1.0);
   const sentencesPerChunkRef = useRef<number>(3);
   const pcmFallbackWarnedRef = useRef(false);
-  const wsFallbackRef = useRef(false);
-  const batchSeqRef = useRef(0);
+  const pendingStopRef = useRef<Promise<unknown> | null>(null);
   const startSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The startup status-poll interval. Kept on a ref (like the safety timer)
   // so it can be cleared on unmount — otherwise a start begun mid-lifecycle
@@ -216,7 +189,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
   }, []);
 
   const setSentencesPerChunk = useCallback((n: number) => {
-    sentencesPerChunkRef.current = Math.max(1, Math.min(5, n));
+    sentencesPerChunkRef.current = Number.isFinite(n) ? Math.max(1, Math.min(5, n)) : 3;
   }, []);
 
   const clearError = useCallback(() => setLastError(null), []);
@@ -347,7 +320,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
     await safeInvoke('tts_warmup_gpu');
   }, []);
 
-  const synthesize = useCallback(async (text: string) => {
+  const synthesize = useCallback(async (parts: string[], mode: TtsPlaybackMode) => {
     if (!firstSynthHintShownRef.current && serverDeviceRef.current === 'mps') {
       firstSynthHintShownRef.current = true;
       toast.info(getTranslation(useAgentStore.getState().settings.lang).ttsFirstSynthHint, {
@@ -355,8 +328,7 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       });
     }
     const baseArgs: Record<string, unknown> = {
-      text,
-      sampleSteps: pickSteps(text, sampleStepsRef.current),
+      sampleSteps: Math.max(...parts.map((part) => pickSteps(part, sampleStepsRef.current))),
       speed: speedRef.current,
     };
     if (fineTunedModelRef.current) {
@@ -370,18 +342,25 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       baseArgs.promptLanguage = promptLangRef.current;
       baseArgs.textLanguage = textLangRef.current;
     }
-    const requestedMode = playbackModeRef.current;
+    if (mode === 'ws-batch') {
+      await safeInvoke('tts_synthesize_batch_ws', { ...baseArgs, sentences: parts });
+      return;
+    }
+
+    const text = parts[0];
+    const reset = pendingStopRef.current;
     try {
-      await safeInvoke('tts_synthesize_and_play', { ...baseArgs, playbackMode: requestedMode });
+      await safeInvoke('tts_synthesize_and_play', { ...baseArgs, text, playbackMode: mode });
     } catch (e) {
       // streamed-pcm is experimental — fall back to streamed-pipeline on error.
-      if (requestedMode === 'streamed-pcm') {
+      if (mode === 'streamed-pcm' && pendingStopRef.current === reset) {
         if (!pcmFallbackWarnedRef.current) {
           pcmFallbackWarnedRef.current = true;
           console.warn('[tts] streamed-pcm failed, falling back to streamed-pipeline:', e);
         }
         await safeInvoke('tts_synthesize_and_play', {
           ...baseArgs,
+          text,
           playbackMode: 'streamed-pipeline',
         });
       } else {
@@ -432,139 +411,24 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
         .catch(() => {});
     };
 
-    if (playbackModeRef.current === 'ws-batch') {
-      while (queueRef.current.length > 0) {
-        if (abortedRef.current) {
-          queueRef.current = [];
-          break;
-        }
-        const batch = queueRef.current.splice(0, WS_BATCH_CHUNKS);
-        if (batch.length === 0) break;
-        const isLast = queueRef.current.length === 0;
-
-        const maxSteps = Math.max(...batch.map((s) => pickSteps(s, sampleStepsRef.current)));
-        const baseArgs: Record<string, unknown> = {
-          sentences: batch,
-          sampleSteps: maxSteps,
-          speed: speedRef.current,
-          seq: batchSeqRef.current++,
-        };
-        if (fineTunedModelRef.current) {
-          baseArgs.modelName = fineTunedModelRef.current;
-        } else if (voiceModelRef.current) {
-          baseArgs.modelName = voiceModelRef.current;
-        }
-        if (refAudioPathRef.current) {
-          baseArgs.refAudioPath = refAudioPathRef.current;
-          baseArgs.promptText = promptTextRef.current;
-          baseArgs.promptLanguage = promptLangRef.current;
-          baseArgs.textLanguage = textLangRef.current;
-        }
-
-        if (wsFallbackRef.current) {
-          let batchFailed = false;
-          for (const sentence of batch) {
-            if (abortedRef.current) break;
-            try {
-              await synthesize(sentence);
-              errorCountRef.current = 0;
-              skipRef.current = false;
-            } catch (e) {
-              if (skipRef.current) {
-                skipRef.current = false;
-                errorCountRef.current = 0;
-                continue;
-              }
-              errorCountRef.current++;
-              batchFailed = true;
-              if (errorCountRef.current <= 1) {
-                setLastError(String(e));
-              }
-              if (errorCountRef.current >= 3) {
-                queueRef.current = [];
-                setServerStatus('error');
-                errorCooldownUntilRef.current = Date.now() + 10_000;
-                break;
-              }
-            }
-          }
-          if (batchFailed && errorCountRef.current >= 3) break;
-          continue;
-        }
-
-        const cmd = isLast ? 'tts_synthesize_batch_ws' : 'tts_synthesize_batch_ws_nonblocking';
-        try {
-          await safeInvoke(cmd, baseArgs);
-          errorCountRef.current = 0;
-          skipRef.current = false;
-        } catch (e) {
-          if (skipRef.current) {
-            skipRef.current = false;
-            errorCountRef.current = 0;
-            continue;
-          }
-          if (isWsUnavailableError(e)) {
-            wsFallbackRef.current = true;
-            try {
-              for (const sentence of batch) {
-                if (abortedRef.current) break;
-                await synthesize(sentence);
-              }
-              errorCountRef.current = 0;
-              skipRef.current = false;
-              continue;
-            } catch (httpErr) {
-              if (skipRef.current) {
-                skipRef.current = false;
-                errorCountRef.current = 0;
-                continue;
-              }
-              errorCountRef.current++;
-              if (errorCountRef.current <= 1) {
-                setLastError(String(httpErr));
-              }
-              if (errorCountRef.current >= 3) {
-                queueRef.current = [];
-                setServerStatus('error');
-                errorCooldownUntilRef.current = Date.now() + 10_000;
-                break;
-              }
-              continue;
-            }
-          }
-          errorCountRef.current++;
-          if (errorCountRef.current <= 1) {
-            setLastError(String(e));
-          }
-          if (errorCountRef.current >= 3) {
-            queueRef.current = [];
-            setServerStatus('error');
-            errorCooldownUntilRef.current = Date.now() + 10_000;
-            break;
-          }
-        }
-      }
-      releaseAndMaybeContinue();
-      return;
-    }
-
-    // Process sequentially.
     while (queueRef.current.length > 0) {
-      if (abortedRef.current) {
-        queueRef.current = [];
-        break;
-      }
-      const sentence = queueRef.current.shift()!;
+      if (pendingStopRef.current) await pendingStopRef.current;
+      if (abortedRef.current || queueRef.current.length === 0) break;
+
+      const mode = playbackModeRef.current;
+      const count = mode === 'ws-batch' ? sentencesPerChunkRef.current : 1;
+      const batch = queueRef.current.splice(0, count);
 
       try {
-        await synthesize(sentence);
+        await synthesize(batch, mode);
         errorCountRef.current = 0;
         skipRef.current = false;
       } catch (e) {
+        if (abortedRef.current) break;
         // A skip aborts the in-flight synthesis via tts_stop_playback; treat
         // it as "advance to the next sentence", not a failure, so repeated
         // skips don't trip the consecutive-error circuit breaker.
-        if (skipRef.current) {
+        if (skipRef.current || String(e).includes('Synthesis cancelled by user')) {
           skipRef.current = false;
           errorCountRef.current = 0;
           continue;
@@ -666,122 +530,56 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       const remainder = cleaned.slice(lastEnd).trim();
       if (remainder) sentences.push(remainder);
 
-      const merged = mergeShortSentences(sentences);
-
-      const perChunk = sentencesPerChunkRef.current;
-      if (perChunk > 1 && playbackModeRef.current === 'ws-batch') {
-        const chunks: string[] = [];
-        for (let i = 0; i < merged.length; i += perChunk) {
-          const group = merged.slice(i, i + perChunk);
-          chunks.push(group.join(''));
-        }
-        enqueue(chunks);
-      } else {
-        enqueue(merged);
-      }
+      enqueue(mergeShortSentences(sentences));
     },
     [enqueue],
   );
 
+  const resetPlayback = useCallback(() => {
+    const pending = safeInvoke('tts_stop_playback').catch(() => {});
+    pendingStopRef.current = pending;
+    return pending;
+  }, []);
+
   const stop = useCallback(() => {
     abortedRef.current = true;
-    // A full stop is not a skip — clear any pending skip flag so a later
-    // genuine error is still counted.
     skipRef.current = false;
-    // Remember which message was stopped so late streaming frames for the
-    // SAME message are ignored (otherwise resetting feedState below makes
-    // the next frame look new and playback restarts from the top).
+    // Ignore late streaming frames for the message the user stopped.
     stoppedMessageIdRef.current = feedStateRef.current.lastMessageId;
     queueRef.current = [];
     feedStateRef.current = createFeedState();
-    batchSeqRef.current = 0;
-    safeInvoke('tts_stop_playback').catch(() => {});
     setIsPlaying(false);
-  }, []);
+    return resetPlayback();
+  }, [resetPlayback]);
 
   const skip = useCallback(() => {
-    // Arm the skip flag BEFORE stopping so the consumer loop attributes the
-    // resulting synthesis abort to the user (advance) rather than to an
-    // error. The backend auto-clears its cancel flag after one abort, so the
-    // next sentence synthesises normally.
-    skipRef.current = true;
-    // tts_stop_playback bumps reorder generation and zeros expected_seq.
-    // Reset the frontend seq so the next sentence is not stuck in pending.
-    batchSeqRef.current = 0;
-    safeInvoke('tts_stop_playback').catch(() => {});
-  }, []);
+    skipRef.current = processingRef.current;
+    void resetPlayback();
+  }, [resetPlayback]);
 
-  const replayLast = useCallback(() => {
-    const text = lastSpokenTextRef.current;
-    if (!text) return;
-    // Full abort of any in-flight synthesis + queue before re-enqueuing,
-    // otherwise a still-awaiting `synthesize()` from the previous run can
-    // resume and overlap the replay.
-    abortedRef.current = true;
-    stoppedMessageIdRef.current = undefined;
-    queueRef.current = [];
-    feedStateRef.current = createFeedState();
-    safeInvoke('tts_stop_playback').catch(() => {});
+  const replayText = useCallback((text: string) => {
     const cleaned = sanitizeForSpeech(text, interactionModeRef.current);
     if (!cleaned) return;
-    // Defer one tick so the in-flight processQueue iteration sees
-    // abortedRef=true, releases processingRef, and exits cleanly before
-    // we push fresh items.
-    setTimeout(() => {
+
+    const reset = stop();
+    void reset.then(() => {
+      if (pendingStopRef.current !== reset || !abortedRef.current) return;
       abortedRef.current = false;
+      if (playbackModeRef.current === 'whole') {
+        enqueue([cleaned]);
+        return;
+      }
       const { sentences, lastEnd } = splitSentences(cleaned);
       const remainder = cleaned.slice(lastEnd).trim();
       if (remainder) sentences.push(remainder);
-      enqueue(sentences);
-    }, 0);
-  }, [enqueue]);
+      enqueue(mergeShortSentences(sentences));
+    });
+  }, [stop, enqueue]);
 
-  const replayText = useCallback((text: string) => {
-    if (!text) return;
-    // Full abort, mirror replayLast — replayText bypasses the queue and
-    // calls the backend directly, so a queued item from a prior session
-    // would otherwise play right after the bypass.
-    abortedRef.current = true;
-    stoppedMessageIdRef.current = undefined;
-    queueRef.current = [];
-    feedStateRef.current = createFeedState();
-    safeInvoke('tts_stop_playback').catch(() => {});
-    const cleaned = sanitizeForSpeech(text, interactionModeRef.current);
-    if (!cleaned) return;
-
-    const baseArgs: Record<string, unknown> = {
-      text: cleaned,
-      sampleSteps: pickSteps(cleaned, sampleStepsRef.current),
-      speed: speedRef.current,
-    };
-    if (fineTunedModelRef.current) {
-      baseArgs.modelName = fineTunedModelRef.current;
-    } else if (voiceModelRef.current) {
-      baseArgs.modelName = voiceModelRef.current;
-    }
-    if (refAudioPathRef.current) {
-      baseArgs.refAudioPath = refAudioPathRef.current;
-      baseArgs.promptText = promptTextRef.current;
-      baseArgs.promptLanguage = promptLangRef.current;
-      baseArgs.textLanguage = textLangRef.current;
-    }
-    const requestedMode = playbackModeRef.current;
-    safeInvoke('tts_synthesize_and_play', { ...baseArgs, playbackMode: requestedMode })
-      .catch((e) => {
-        if (requestedMode === 'streamed-pcm') {
-          if (!pcmFallbackWarnedRef.current) {
-            pcmFallbackWarnedRef.current = true;
-            console.warn('[tts] streamed-pcm replay failed, fallback to streamed-pipeline:', e);
-          }
-          return safeInvoke('tts_synthesize_and_play', {
-            ...baseArgs,
-            playbackMode: 'streamed-pipeline',
-          });
-        }
-        throw e;
-      })
-      .catch(() => {});
-  }, []);
+  const replayLast = useCallback(() => {
+    const text = lastSpokenTextRef.current;
+    if (text) replayText(text);
+  }, [replayText]);
 
   const setVoiceConfig = useCallback((refPath: string, promptText: string, promptLang: string) => {
     refAudioPathRef.current = refPath;
@@ -848,16 +646,12 @@ export function useTtsPlayer(): UseTtsPlayerReturn {
       // re-shows the hint (Metal kernel cache is per-process).
       firstSynthHintShownRef.current = false;
       modelPreloadedRef.current = false;
-      wsFallbackRef.current = false;
       setServerStatus('running');
     }));
     track(safeListen('tts-playback-ended', () => {
       if (queueRef.current.length === 0 && !processingRef.current && !abortedRef.current) {
         setIsPlaying(false);
       }
-    }));
-    track(safeListen('tts-ws-unavailable', () => {
-      wsFallbackRef.current = true;
     }));
     track(safeListen('tts-server-error', (event: { payload: string }) => {
       const msg = typeof event.payload === 'string' ? event.payload : 'Unknown error';

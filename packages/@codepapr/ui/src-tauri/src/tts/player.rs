@@ -194,14 +194,11 @@ impl AudioPlayer {
         if !(channels == 1 || channels == 2) {
             return Err(format!("Unsupported channel count: {channels}"));
         }
-        let handle = current_output_handle()?;
-        let format_changed = self.pcm_format != Some((sample_rate, channels));
-        if self.sink.is_none() || format_changed {
+        if self.sink.is_none() {
+            let handle = current_output_handle()?;
             let sink = Sink::try_new(&handle).map_err(|e| format!("Audio sink error: {e}"))?;
             sink.set_volume(self.volume);
-            if let Some(old) = self.sink.replace(sink) {
-                old.stop();
-            }
+            self.sink = Some(sink);
         }
         self.pcm_format = Some((sample_rate, channels));
         Ok(())
@@ -245,7 +242,7 @@ impl AudioPlayer {
 
 #[cfg(test)]
 mod tests {
-    use super::AudioPlayer;
+    use super::{AudioPlayer, SamplesBuffer, Sink};
 
     #[test]
     fn new_audio_player_is_not_playing() {
@@ -268,6 +265,19 @@ mod tests {
             result.is_err(),
             "push_pcm_samples must reject when pcm_format is None"
         );
+    }
+
+    #[test]
+    fn starting_pcm_with_a_different_format_keeps_queued_audio() {
+        let mut player = AudioPlayer::new();
+        let (sink, _output) = Sink::new_idle();
+        sink.append(SamplesBuffer::new(1, 48_000, vec![1i16; 48]));
+        player.sink = Some(sink);
+
+        player.start_pcm_stream_inner(16_000, 2).unwrap();
+        player.push_pcm_samples(vec![1i16; 32]).unwrap();
+
+        assert_eq!(player.sink.as_ref().unwrap().len(), 2);
     }
 
     #[test]

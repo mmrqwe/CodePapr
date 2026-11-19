@@ -64,7 +64,7 @@ export function CharacterModal({ onClose }: CharacterModalProps) {
   const [testVoiceError, setTestVoiceError] = useState<string | null>(null);
   const [testVoicePlaying, setTestVoicePlaying] = useState(false);
   const [warmupRunning, setWarmupRunning] = useState(false);
-  const [warmupResult, setWarmupResult] = useState<'idle' | 'success' | 'error'>('idle');
+  const [warmupBackend, setWarmupBackend] = useState<string | null>(null);
   const [warmupError, setWarmupError] = useState<string | null>(null);
   const [finetuneProgress, setFinetuneProgress] = useState(0);
   const [finetuneLog, setFinetuneLog] = useState('');
@@ -1197,9 +1197,9 @@ Requirements:
                       <div>
                         <div className="text-sm font-medium text-fg">{t.voiceWarmupTitle}</div>
                         <div className="mt-0.5 text-xs text-fg-muted">{t.voiceWarmupHint}</div>
-                        {warmupResult !== 'idle' && (
-                          <div className={`mt-1 text-[11px] ${warmupResult === 'success' ? 'text-ok' : 'text-danger'}`}>
-                            {warmupResult === 'success' ? t.voiceWarmupSuccess : (warmupError || t.voiceWarmupFailed)}
+                        {(warmupBackend || warmupError) && (
+                          <div className={`mt-1 text-[11px] ${warmupBackend ? 'text-ok' : 'text-danger'}`}>
+                            {warmupBackend ? t.voiceWarmupSuccess.replace('{{backend}}', warmupBackend) : warmupError}
                           </div>
                         )}
                       </div>
@@ -1208,7 +1208,7 @@ Requirements:
                         disabled={warmupRunning}
                         onClick={async () => {
                           setWarmupRunning(true);
-                          setWarmupResult('idle');
+                          setWarmupBackend(null);
                           setWarmupError(null);
                           try {
                             const running = await invoke<boolean>('tts_server_status').catch(() => false);
@@ -1220,15 +1220,14 @@ Requirements:
                               throw new Error(t.voiceWarmupNoRefAudio);
                             }
                             const wmPromptLang = editing?.voice?.referenceTextLanguage || DEFAULT_REFERENCE_LANG;
-                            await invoke('tts_warmup_gpu', {
+                            const backend = await invoke<string>('tts_warmup_gpu', {
                               refAudioPath: refPath,
                               promptText: editing?.voice?.referenceText ?? '',
                               promptLanguage: wmPromptLang,
                             });
-                            setWarmupResult('success');
+                            setWarmupBackend(backend);
                           } catch (e) {
-                            setWarmupResult('error');
-                            setWarmupError(String(e));
+                            setWarmupError(errorMessage(e) || t.voiceWarmupFailed);
                           } finally {
                             setWarmupRunning(false);
                           }

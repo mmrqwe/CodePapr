@@ -15,21 +15,8 @@ mod tests;
 use std::io::Read;
 use std::net::SocketAddrV4;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-pub(crate) fn synthesis_is_cancelled() -> bool {
-    SYNTHESIS_CANCELLED.load(Ordering::Relaxed)
-}
-
-pub(crate) fn take_synthesis_cancelled() -> bool {
-    SYNTHESIS_CANCELLED.swap(false, Ordering::Relaxed)
-}
-
-/// Clear the cancel flag so a new synthesis (including skip → next sentence)
-/// is not immediately aborted by a previous `tts_stop_playback`.
-fn begin_synthesis() {
-    SYNTHESIS_CANCELLED.store(false, Ordering::Relaxed);
-}
 use std::sync::Mutex;
 
 use reqwest::blocking::Client;
@@ -42,9 +29,7 @@ static TTS_SERVER: std::sync::OnceLock<Mutex<Option<GptSovitsServer>>> = std::sy
 static AUDIO_PLAYER: std::sync::OnceLock<Mutex<player::AudioPlayer>> = std::sync::OnceLock::new();
 static STARTING: AtomicBool = AtomicBool::new(false);
 static FIRST_SYNTH_COMPLETED: AtomicBool = AtomicBool::new(false);
-/// Set by `tts_stop_playback` so long-running HTTP response readers can
-/// abort early instead of consuming a thread for the full timeout.
-static SYNTHESIS_CANCELLED: AtomicBool = AtomicBool::new(false);
+static SYNTHESIS_GENERATION: AtomicU64 = AtomicU64::new(0);
 static PLAYBACK_WATCH_STARTED: AtomicBool = AtomicBool::new(false);
 /// Persistent HTTP client with connection pooling for GPT-SoVITS requests.
 /// Avoids TCP handshake per synthesis call.
@@ -57,6 +42,21 @@ static LAST_MODEL_NAME: std::sync::OnceLock<Mutex<Option<String>>> = std::sync::
 /// Default v4 SoVITS model path, set during server start. Used to reset
 /// the model when switching from a fine-tuned character to one without.
 static DEFAULT_SOVITS_V4_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn synthesis_generation() -> u64 {
+    SYNTHESIS_GENERATION.load(Ordering::SeqCst)
+}
+
+fn cancel_synthesis() {
+    SYNTHESIS_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
+fn check_generation(generation: u64) -> Result<(), String> {
+    if generation != synthesis_generation() {
+        return Err("Synthesis cancelled by user".to_string());
+    }
+    Ok(())
+}
 
 fn tts_server_lock() -> &'static Mutex<Option<GptSovitsServer>> {
     TTS_SERVER.get_or_init(|| Mutex::new(None))
@@ -159,7 +159,6 @@ pub fn tts_server_start(
     model_version: Option<String>,
     fine_tuned_model_path: Option<String>,
 ) -> Result<(), String> {
-    ws::set_ws_app_handle(app_handle.clone());
     ensure_playback_watch(app_handle.clone());
     // Each new server lifecycle starts with a fresh "first synthesis" flag
     // so the perf-warning heuristic correctly treats the first request after
@@ -382,6 +381,7 @@ struct ServerLogEvent {
 
 #[tauri::command]
 pub fn tts_server_stop(app_handle: tauri::AppHandle) -> Result<(), String> {
+    tts_stop_playback()?;
     let lock = tts_server_lock();
     let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
     if let Some(mut srv) = guard.take() {
@@ -409,9 +409,7 @@ pub fn tts_server_status() -> Result<bool, String> {
     Ok(tts_server_address()?.is_some())
 }
 
-/// Synthesise a short dummy phrase to trigger Metal GPU kernel JIT
-/// compilation before the first real synthesis. This avoids the 5-15s
-/// first-sentence penalty on Apple Silicon.
+/// Perform a synthesis on the running CUDA or MPS backend to reduce first-use latency.
 ///
 /// GPT-SoVITS v4 requires a reference audio — pass `ref_audio_path` from
 /// the character's voice config. If the user hasn't uploaded one yet,
@@ -422,15 +420,22 @@ pub async fn tts_warmup_gpu(
     ref_audio_path: Option<String>,
     prompt_text: Option<String>,
     prompt_language: Option<String>,
-) -> Result<(), String> {
-    let address = tts_server_address()?.ok_or("TTS server is not running. Start it first.")?;
+) -> Result<&'static str, String> {
+    let (address, backend) = {
+        let mut server = tts_server_lock().lock().map_err(|e| format!("Lock error: {e}"))?;
+        retain_live_tts_server(&mut server);
+        let server = server.as_ref().ok_or("TTS server is not running. Start it first.")?;
+        let address = server.address().ok_or("TTS server is not running. Start it first.")?;
+        let backend = server.gpu_backend().ok_or("GPU warm-up requires a TTS server running on CUDA or MPS.")?;
+        (address, backend)
+    };
+    let generation = synthesis_generation();
 
     let _ = app_handle.emit(
         "tts-server-log",
         ServerLogEvent {
             stream: "system",
-            line: "GPU warmup: triggering Metal kernel compilation with a dummy phrase..."
-                .to_string(),
+            line: format!("Warming up {backend} with a synthesis request..."),
         },
     );
 
@@ -444,7 +449,7 @@ pub async fn tts_warmup_gpu(
                 .clone()
                 .filter(|t| !t.trim().is_empty())
                 .unwrap_or_else(|| "嗯".to_string());
-            synthesize_blocking(
+            let mut response = request_audio(
                 address,
                 warmup_text,
                 None,
@@ -452,10 +457,14 @@ pub async fn tts_warmup_gpu(
                 prompt_text,
                 prompt_language.clone(),
                 prompt_language,
-                MODE_STREAMED_PIPELINE,
-                4,   // minimum steps — just want the kernel compiled
+                4,   // minimum steps to warm up the synthesis path
                 1.0, // default speed
-            )
+            )?;
+            let wav = read_response_to_end(&mut response, generation)?;
+            if wav.len() <= 44 {
+                return Err("GPU warm-up returned no audio".to_string());
+            }
+            Ok(())
         }));
         let _ = tx.send(match result {
             Ok(r) => r,
@@ -469,11 +478,11 @@ pub async fn tts_warmup_gpu(
                 "tts-server-log",
                 ServerLogEvent {
                     stream: "system",
-                    line: "GPU warmup complete — Metal kernels are now compiled and cached for this session.".to_string(),
+                    line: format!("GPU warm-up complete ({backend})."),
                 },
             );
             FIRST_SYNTH_COMPLETED.store(true, Ordering::SeqCst);
-            Ok(())
+            Ok(backend)
         }
         Ok(Err(e)) => Err(format!("GPU warmup failed: {e}")),
         Err(_) => Err("GPU warmup cancelled".to_string()),
@@ -575,9 +584,8 @@ const MODE_STREAMED_PCM: &str = "streamed-pcm";
 ///
 /// `playback_mode` selects the strategy:
 /// * `"whole"` — read the full WAV, then `play_wav` (rebuild sink).
-/// * `"streamed-pipeline"` (default) — read the full WAV, then
-///   `enqueue_wav` (append to shared sink for seamless joins).
-/// * `"streamed-pcm"` — experimental PCM direct push; may fall back.
+/// * `"streamed-pipeline"` (default) and `"streamed-pcm"` — append PCM
+///   samples to the shared sink as the HTTP response arrives.
 ///
 /// `sample_steps` is the GPT-SoVITS v4 diffusion step count. Lower values
 /// trade some quality for substantial speed gains. Range 4-32, default 8.
@@ -601,7 +609,7 @@ pub async fn tts_synthesize_and_play(
     // "request or response body error" from reqwest.
     let address = tts_server_address()?
         .ok_or("TTS server is not running. Click the speaker icon to start it.")?;
-    begin_synthesis();
+    let generation = synthesis_generation();
 
     let mode = playback_mode
         .as_deref()
@@ -626,6 +634,7 @@ pub async fn tts_synthesize_and_play(
                 &mode,
                 steps,
                 spd,
+                generation,
             );
             // Telemetry: a successful synthesis that takes longer than this is
             // probably running on CPU even though we asked for MPS. Surface it
@@ -676,17 +685,10 @@ pub async fn tts_synthesize_and_play(
     }
 }
 
-/// Batch-synthesise multiple sentences via a single WebSocket connection.
-///
-/// The frontend groups consecutive sentences into chunks (`sentencesPerChunk`)
-/// and each batch item is sent in one JSON message; WAV audio comes back per
-/// item (prefixed with a 4-byte big-endian index) and is enqueued to the
-/// audio player via `enqueue_wav` for seamless in-memory playback.
-///
-/// Falls back to HTTP per-sentence synthesis when the WebSocket path is
-/// unavailable (e.g. api.py hasn't been patched yet).
+/// Play an ordered batch over the persistent WebSocket connection.
 #[tauri::command]
 pub async fn tts_synthesize_batch_ws(
+    app_handle: tauri::AppHandle,
     sentences: Vec<String>,
     model_name: Option<String>,
     ref_audio_path: Option<String>,
@@ -698,150 +700,36 @@ pub async fn tts_synthesize_batch_ws(
     top_k: Option<u32>,
     top_p: Option<f64>,
     temperature: Option<f64>,
-    seq: u64,
 ) -> Result<(), String> {
     let address = tts_server_address()?.ok_or("TTS server is not running.")?;
-    begin_synthesis();
-
     let steps = sample_steps.unwrap_or(8).clamp(4, 32);
-    let spd = speed.unwrap_or(1.0).clamp(0.5, 2.0);
-    // top_p=1.0 / temperature=1.0: benchmarked 9x faster than 0.6/0.6 on
-    // Japanese text (all_ja frontend). The T2S model converges to EOS
-    // much faster with wider sampling. No prompt-text leakage observed
-    // in 20-sentence real-data test (all audio durations within bounds).
-    let tk = top_k.unwrap_or(15).max(1);
-    let tp = top_p.unwrap_or(1.0).clamp(0.0, 1.0) as f32;
-    let temp = temperature.unwrap_or(1.0).clamp(0.0, 2.0) as f32;
-
-    let sentences_clone = sentences.clone();
-    let model_fb = model_name.clone();
-    let ref_fb = ref_audio_path.clone();
-    let prompt_fb = prompt_text.clone();
-    let prompt_lang_fb = prompt_language.clone();
-    let text_lang_fb = text_language.clone();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    std::thread::spawn(move || {
-        let result = match ws::synthesize_batch_ws(
-            address,
-            sentences_clone.clone(),
-            model_name,
-            ref_audio_path,
-            prompt_text,
-            prompt_language,
-            text_language,
-            steps,
-            spd,
-            tk,
-            tp,
-            temp,
-            seq,
-        ) {
-            Ok(()) => Ok(()),
-            Err(e) if ws::is_ws_unavailable(&e) => http_fallback_sentences(
-                address,
-                sentences_clone,
-                model_fb,
-                ref_fb,
-                prompt_fb,
-                prompt_lang_fb,
-                text_lang_fb,
-                steps,
-                spd,
-            ),
-            Err(e) => Err(e),
-        };
-        let _ = tx.send(result);
-    });
-    match rx.await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e),
-        Err(_) => Err("Batch synthesis cancelled unexpectedly".to_string()),
+    let prompt_lang = normalize_lang_code(prompt_language.as_deref().unwrap_or("zh"));
+    let text_lang = normalize_lang_code(text_language.as_deref().unwrap_or(prompt_lang));
+    let texts: Vec<_> = sentences.into_iter().filter(|text| !text.trim().is_empty()).collect();
+    let count = texts.len();
+    if count == 0 {
+        return Ok(());
     }
-}
 
-/// Non-blocking batch WebSocket synthesis.
-///
-/// Spawns a background task that connects via WebSocket, sends all
-/// sentences, and enqueues each received WAV to the audio player.
-/// Returns immediately — the caller doesn't wait for synthesis to
-/// complete. Used for concurrent chunk streaming.
-#[tauri::command]
-pub async fn tts_synthesize_batch_ws_nonblocking(
-    sentences: Vec<String>,
-    model_name: Option<String>,
-    ref_audio_path: Option<String>,
-    prompt_text: Option<String>,
-    prompt_language: Option<String>,
-    text_language: Option<String>,
-    sample_steps: Option<u32>,
-    speed: Option<f32>,
-    top_k: Option<u32>,
-    top_p: Option<f64>,
-    temperature: Option<f64>,
-    seq: u64,
-) -> Result<(), String> {
-    let address = tts_server_address()?.ok_or("TTS server is not running.")?;
-    begin_synthesis();
-
-    let steps = sample_steps.unwrap_or(8).clamp(4, 32);
-    let spd = speed.unwrap_or(1.0).clamp(0.5, 2.0);
-    // top_p=1.0 / temperature=1.0: benchmarked 9x faster than 0.6/0.6 on
-    // Japanese text (all_ja frontend). 0.6/0.6 causes GPT to generate
-    // degenerate super-long token sequences on complex grammar. No leakage
-    // observed in 20-sentence real-data test with fine-tuned models.
-    let tk = top_k.unwrap_or(15).max(1);
-    let tp = top_p.unwrap_or(1.0).clamp(0.0, 1.0) as f32;
-    let temp = temperature.unwrap_or(1.0).clamp(0.0, 2.0) as f32;
-
-    ws::synthesize_batch_ws_nonblocking(
-        address,
-        sentences,
+    let recovered = ws::synthesize(address, ws::Batch {
+        texts,
+        sample_steps: steps,
+        speed_factor: speed.unwrap_or(1.0).clamp(0.5, 2.0),
+        top_k: top_k.unwrap_or(15).max(1),
+        top_p: top_p.unwrap_or(1.0).clamp(0.0, 1.0) as f32,
+        temperature: temperature.unwrap_or(1.0).clamp(0.0, 2.0) as f32,
         model_name,
-        ref_audio_path,
-        prompt_text,
-        prompt_language,
-        text_language,
-        steps,
-        spd,
-        tk,
-        tp,
-        temp,
-        seq,
-    );
-    Ok(())
-}
-
-/// Per-sentence HTTP synthesis used when `/ws/synthesize` is missing or the
-/// connection pool cannot be established. Each sentence is streamed into the
-/// shared rodio sink so playback still overlaps with later sentences.
-pub(crate) fn http_fallback_sentences(
-    address: SocketAddrV4,
-    sentences: Vec<String>,
-    model_name: Option<String>,
-    ref_audio_path: Option<String>,
-    prompt_text: Option<String>,
-    prompt_language: Option<String>,
-    text_language: Option<String>,
-    sample_steps: u32,
-    speed: f32,
-) -> Result<(), String> {
-    for text in sentences {
-        if synthesis_is_cancelled() {
-            return Err("Synthesis cancelled by user".to_string());
-        }
-        synthesize_blocking(
-            address,
-            text,
-            model_name.clone(),
-            ref_audio_path.clone(),
-            prompt_text.clone(),
-            prompt_language.clone(),
-            text_language.clone(),
-            MODE_STREAMED_PIPELINE,
-            sample_steps,
-            speed,
-        )?;
-    }
+        reference: ws::Reference {
+            refer_wav_path: ref_audio_path,
+            prompt_text,
+            prompt_language: prompt_lang.to_string(),
+            text_language: text_lang.to_string(),
+        },
+    }).await?;
+    let _ = app_handle.emit("tts-server-log", ServerLogEvent {
+        stream: "system",
+        line: format!("WebSocket playback queued {count} sentence(s) (sample_steps={steps}, HTTP recovery={recovered})"),
+    });
     Ok(())
 }
 
@@ -856,7 +744,55 @@ fn synthesize_blocking(
     mode: &str,
     sample_steps: u32,
     speed: f32,
+    generation: u64,
 ) -> Result<(), String> {
+    check_generation(generation)?;
+    let mut resp = request_audio(
+        address, text, model_name, ref_audio_path, prompt_text,
+        prompt_language, text_language, sample_steps, speed,
+    )?;
+
+    // Dispatch on playback mode.
+    // Modes B and F: stream PCM directly from HTTP response into rodio,
+    // bypassing full-WAV buffer → decode → play. No intermediate WAV file.
+    // Mode A: read the full WAV and play_wav (hard sink reset).
+    if mode == MODE_STREAMED_PIPELINE || mode == MODE_STREAMED_PCM {
+        return synthesize_streaming_pcm(&mut resp, generation);
+    }
+
+    // Mode A: read the whole WAV body.
+    let all_bytes = read_response_to_end(&mut resp, generation)?;
+    if all_bytes.len() < 44 {
+        return Err(format!(
+            "TTS API returned an incomplete WAV (only {} bytes){}",
+            all_bytes.len(),
+            server_log_excerpt(),
+        ));
+    }
+
+    {
+        let lock = tts_player_lock();
+        let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
+        check_generation(generation)?;
+        guard
+            .play_wav(&all_bytes)
+            .map_err(|e| format!("Play error: {e}{}", server_log_excerpt()))?;
+    }
+
+    Ok(())
+}
+
+fn request_audio(
+    address: SocketAddrV4,
+    text: String,
+    model_name: Option<String>,
+    ref_audio_path: Option<String>,
+    prompt_text: Option<String>,
+    prompt_language: Option<String>,
+    text_language: Option<String>,
+    sample_steps: u32,
+    speed: f32,
+) -> Result<reqwest::blocking::Response, String> {
     let base_url = format!("http://{address}");
     let client = tts_client();
 
@@ -892,6 +828,7 @@ fn synthesize_blocking(
     let text_lang = normalize_lang_code(text_language.as_deref().unwrap_or("zh")).to_string();
     let mut params: Vec<(&str, String)> = vec![
         ("text", text),
+        ("cut_punc", "?!。？！".to_string()),
         ("text_language", text_lang.clone()),
         ("sample_steps", sample_steps_str),
         ("speed_factor", format!("{:.2}", speed)),
@@ -940,7 +877,7 @@ fn synthesize_blocking(
         .map(|(k, v)| (k.as_ref(), v.as_str()))
         .collect();
 
-    let mut resp = client
+    let resp = client
         .get(format!("{base_url}/"))
         .query(&query_params)
         .send()
@@ -953,43 +890,20 @@ fn synthesize_blocking(
         return Err(format!("TTS API returned status {status}. Body: {body}"));
     }
 
-    // Dispatch on playback mode.
-    // Modes B and F: stream PCM directly from HTTP response into rodio,
-    // bypassing full-WAV buffer → decode → play. No intermediate WAV file.
-    // Mode A: read the full WAV and play_wav (hard sink reset).
-    if mode == MODE_STREAMED_PIPELINE || mode == MODE_STREAMED_PCM {
-        return synthesize_streaming_pcm(&mut resp);
-    }
-
-    // Mode A: read the whole WAV body.
-    let all_bytes = read_response_to_end(&mut resp)?;
-    if all_bytes.len() < 44 {
-        return Err(format!(
-            "TTS API returned an incomplete WAV (only {} bytes){}",
-            all_bytes.len(),
-            server_log_excerpt(),
-        ));
-    }
-
-    {
-        let lock = tts_player_lock();
-        let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
-        guard.stop();
-        guard
-            .play_wav(&all_bytes)
-            .map_err(|e| format!("Play error: {e}{}", server_log_excerpt()))?;
-    }
-
-    Ok(())
+    Ok(resp)
 }
 
-/// Read the full response body. Used only by Mode A (whole-passage synthesis).
-fn read_response_to_end(resp: &mut reqwest::blocking::Response) -> Result<Vec<u8>, String> {
+/// Read a complete WAV for whole-passage playback or WebSocket recovery.
+fn read_response_to_end(
+    resp: &mut reqwest::blocking::Response,
+    generation: u64,
+) -> Result<Vec<u8>, String> {
     const MAX_BYTES: u64 = 50 * 1024 * 1024;
     let mut all_bytes = Vec::with_capacity(64 * 1024);
     let mut buf = [0u8; 16384];
     let mut total: u64 = 0;
     loop {
+        check_generation(generation)?;
         let n = resp
             .read(&mut buf)
             .map_err(|e| format!("Read error: {e}{}", server_log_excerpt()))?;
@@ -1014,7 +928,10 @@ fn read_response_to_end(resp: &mut reqwest::blocking::Response) -> Result<Vec<u8
 /// PCM `data` sub-chunk, parse the format from the `fmt ` chunk, then
 /// initialise the player's PCM stream. Subsequent bytes are interpreted
 /// as raw 16-bit PCM samples and pushed straight into the sink.
-fn synthesize_streaming_pcm(resp: &mut reqwest::blocking::Response) -> Result<(), String> {
+fn synthesize_streaming_pcm(
+    resp: &mut reqwest::blocking::Response,
+    generation: u64,
+) -> Result<(), String> {
     const MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
     let mut buf = [0u8; 16384];
     let mut header_buf: Vec<u8> = Vec::with_capacity(4096);
@@ -1023,9 +940,7 @@ fn synthesize_streaming_pcm(resp: &mut reqwest::blocking::Response) -> Result<()
     let mut total: u64 = 0;
 
     loop {
-        if take_synthesis_cancelled() {
-            return Err("Synthesis cancelled by user".to_string());
-        }
+        check_generation(generation)?;
         let n = resp
             .read(&mut buf)
             .map_err(|e| format!("Read error: {e}{}", server_log_excerpt()))?;
@@ -1051,13 +966,14 @@ fn synthesize_streaming_pcm(resp: &mut reqwest::blocking::Response) -> Result<()
                     {
                         let lock = tts_player_lock();
                         let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
+                        check_generation(generation)?;
                         guard
                             .start_pcm_stream(parsed.sample_rate, parsed.channels)
                             .map_err(|e| format!("PCM init error: {e}{}", server_log_excerpt()))?;
                     }
                     // Push the PCM that was already read past the header.
                     let pcm_tail = &header_buf[parsed.data_offset..];
-                    push_pcm_chunk(pcm_tail, &mut leftover_byte)?;
+                    push_pcm_chunk(pcm_tail, &mut leftover_byte, generation)?;
                     header_parsed = true;
                     // Drop the header buffer to free memory; we don't need
                     // it any more for routing.
@@ -1077,7 +993,7 @@ fn synthesize_streaming_pcm(resp: &mut reqwest::blocking::Response) -> Result<()
                 }
             }
         } else {
-            push_pcm_chunk(chunk, &mut leftover_byte)?;
+            push_pcm_chunk(chunk, &mut leftover_byte, generation)?;
         }
     }
 
@@ -1130,7 +1046,11 @@ fn decode_pcm_chunk(chunk: &[u8], leftover_byte: &mut Option<u8>) -> Vec<i16> {
 /// Convert a chunk of raw bytes into 16-bit PCM samples and push them to
 /// the player. Carries a single odd-length byte across chunk boundaries
 /// so we never split a 16-bit sample.
-fn push_pcm_chunk(chunk: &[u8], leftover_byte: &mut Option<u8>) -> Result<(), String> {
+fn push_pcm_chunk(
+    chunk: &[u8],
+    leftover_byte: &mut Option<u8>,
+    generation: u64,
+) -> Result<(), String> {
     let samples = decode_pcm_chunk(chunk, leftover_byte);
     if samples.is_empty() {
         return Ok(());
@@ -1138,6 +1058,7 @@ fn push_pcm_chunk(chunk: &[u8], leftover_byte: &mut Option<u8>) -> Result<(), St
 
     let lock = tts_player_lock();
     let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
+    check_generation(generation)?;
     guard
         .push_pcm_samples(samples)
         .map_err(|e| format!("PCM push error: {e}{}", server_log_excerpt()))?;
@@ -1252,8 +1173,7 @@ fn server_log_excerpt() -> String {
 
 #[tauri::command]
 pub fn tts_stop_playback() -> Result<(), String> {
-    SYNTHESIS_CANCELLED.store(true, Ordering::Relaxed);
-    ws::clear_reorder_buffer();
+    cancel_synthesis();
     let lock = tts_player_lock();
     let mut guard = lock.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.stop();

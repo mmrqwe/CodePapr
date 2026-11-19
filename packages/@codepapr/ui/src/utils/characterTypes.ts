@@ -29,9 +29,7 @@ export interface VoiceConfig {
   useFineTuned?: boolean;
   speed: number;
   /**
-   * Number of sentences to merge into a single TTS synthesis chunk.
-   * Higher values = fewer HTTP/WS round-trips = faster, but slightly
-   * more latency before the first word is heard. Range 1-5, default 3.
+   * Maximum sentences sent in one WebSocket request. Range 1-5, default 3.
    */
   sentencesPerChunk?: number;
   /**
@@ -52,13 +50,11 @@ export interface VoiceConfig {
    *   HTTP response into the shared rodio sink. Bypasses full-WAV decode.
    * - `'streamed-pcm'`: same PCM direct path as streamed-pipeline; kept
    *   for backward compatibility.
- * - `'ws-batch'` (default, fastest): synthesise over a persistent
- *   WebSocket connection; sentences are merged per `sentencesPerChunk`
- *   and each chunk goes out as one batch request, eliminating
- *   per-sentence HTTP round-trip overhead. ~1-2s to first word.
+   * - `'ws-batch'` (default): send batches of up to `sentencesPerChunk` over
+   *   one WebSocket connection. Each sentence is synthesized and played
+   *   individually, with HTTP recovery for missing audio.
    *
- * Optional for backwards compatibility — characters created before
- * this field existed default to `'ws-batch'` at runtime.
+   * Characters created before this field existed default to `'ws-batch'`.
    */
   playbackMode?: TtsPlaybackMode;
 }

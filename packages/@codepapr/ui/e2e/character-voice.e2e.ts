@@ -1,23 +1,9 @@
-import { test, expect } from './fixtures';
+import { test, expect, configureVoiceTest } from './fixtures';
 
-test('reference uploads show progress and errors, and language controls follow the theme', async ({ page }) => {
+test('character voice controls report upload progress and the actual GPU, and follow the theme', async ({ page }) => {
+  await configureVoiceTest(page);
   await page.goto('/');
-  await page.evaluate(async () => {
-    const agentModule = '/src/store/agentStore.ts';
-    const characterModule = '/src/store/charactersStore.ts';
-    const profileModule = '/src/utils/characterTypes.ts';
-    const { useAgentStore } = await import(agentModule);
-    const { useCharactersStore } = await import(characterModule);
-    const { createEmptyCharacter } = await import(profileModule);
-    useAgentStore.setState({
-      settingsLoaded: false,
-      settings: {
-        ...useAgentStore.getState().settings,
-        lang: 'en', experimentalCharacters: true, experimentalVoice: true,
-        followSystem: false, themeMode: 'light',
-      },
-    });
-    useCharactersStore.setState({ loaded: true, characters: [{ ...createEmptyCharacter(), name: 'Voice test' }] });
+  await page.evaluate(() => {
     // @ts-expect-error injected by tauriMock
     const mock = window.__CODEPAPR_E2E__;
     mock.setHandler('tts_save_voice_file', () => {
@@ -52,6 +38,17 @@ test('reference uploads show progress and errors, and language controls follow t
   await expect(page.getByText('Reference audio loaded')).toBeVisible();
   await expect(page.locator('audio')).toHaveAttribute('src', /^data:audio\/wav/);
   await expect(page.getByRole('alert')).toHaveCount(0);
+
+  for (const backend of ['CUDA', 'MPS']) {
+    await page.evaluate((backend) => {
+      // @ts-expect-error injected by tauriMock
+      const mock = window.__CODEPAPR_E2E__;
+      mock.setHandler('tts_server_status', () => true);
+      mock.setHandler('tts_warmup_gpu', () => backend);
+    }, backend);
+    await page.getByRole('button', { name: 'Warm Up GPU' }).click();
+    await expect(page.getByText(`GPU warm-up complete (${backend}).`, { exact: true })).toBeVisible();
+  }
 
   const languageControls = page.locator('#voice-training-language, #voice-reference-language, #voice-speaking-language');
   await expect(languageControls).toHaveCount(3);

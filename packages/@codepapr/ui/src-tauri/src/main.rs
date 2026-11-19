@@ -305,7 +305,6 @@ fn main() {
             tts::tts_warmup_gpu,
             tts::tts_synthesize_and_play,
             tts::tts_synthesize_batch_ws,
-            tts::tts_synthesize_batch_ws_nonblocking,
             tts::tts_stop_playback,
             tts::tts_is_playing,
             tts::tts_set_volume,

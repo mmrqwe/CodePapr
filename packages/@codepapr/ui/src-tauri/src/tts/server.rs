@@ -20,6 +20,7 @@ pub(crate) struct GptSovitsServer {
     python_path: Option<String>,
     api_path: PathBuf,
     address: Option<SocketAddrV4>,
+    gpu_backend: Option<&'static str>,
     running: bool,
     log_buffer: Arc<Mutex<VecDeque<String>>>,
     /// The model version the server reported from its startup log
@@ -43,6 +44,7 @@ impl GptSovitsServer {
             python_path: None,
             api_path,
             address: None,
+            gpu_backend: None,
             running: false,
             log_buffer: Arc::new(Mutex::new(VecDeque::new())),
             model_version: String::new(),
@@ -60,6 +62,10 @@ impl GptSovitsServer {
 
     pub(crate) fn address(&self) -> Option<SocketAddrV4> {
         self.address
+    }
+
+    pub(crate) fn gpu_backend(&self) -> Option<&'static str> {
+        self.gpu_backend
     }
 
     pub(crate) fn start(&mut self, app_handle: Option<AppHandle>, device: &str, model_version: &str) -> Result<SocketAddrV4, String> {
@@ -177,6 +183,11 @@ impl GptSovitsServer {
         self.child = Some(Arc::clone(&child_arc));
         let address = self.wait_healthy(HEALTH_CHECK_TIMEOUT_SECS)?;
         self.address = Some(address);
+        self.gpu_backend = match device {
+            "cuda" => Some("CUDA"),
+            "mps" => Some("MPS"),
+            _ => None,
+        };
         self.running = true;
 
         // Parse startup logs for model version and precision mode.
@@ -208,8 +219,9 @@ impl GptSovitsServer {
 
     pub(crate) fn stop(&mut self) -> Result<(), String> {
         self.running = false;
+        self.gpu_backend = None;
         if let Some(address) = self.address.take() {
-            super::ws::invalidate_pool(address);
+            super::ws::disconnect(address);
         }
         let child_arc = match self.child.take() {
             Some(c) => c,
