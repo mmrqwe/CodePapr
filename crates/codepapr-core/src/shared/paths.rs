@@ -624,10 +624,38 @@ mod tests {
 
     #[test]
     fn once_grants_pass_gate_and_expire_on_clear() {
-        let base = test_base("once-grant");
-        let workspace = test_base("once-workspace");
-        let external_file = base.join("victim.txt");
-        std::fs::write(&external_file, b"x").expect("external file");
+        use crate::test_helpers::TestWorkspace;
+
+        let fixture = TestWorkspace::new("once-grant");
+        // Windows normally puts temporary directories under protected LOCALAPPDATA.
+        #[cfg(windows)]
+        let fixture = if is_protected_external_path(
+            &fixture.path.canonicalize().expect("accessible test fixture"),
+        ) {
+            let profile = env::var_os("USERPROFILE").expect("Windows user profile");
+            let name = fixture.path.file_name().expect("unique fixture name");
+            let path = PathBuf::from(profile).join(name);
+            fs::create_dir(&path).expect("test fixture outside protected AppData");
+            TestWorkspace { path }
+        } else {
+            fixture
+        };
+        let root = fixture.path.canonicalize().expect("accessible test fixture");
+        assert!(
+            !is_protected_external_path(&root),
+            "once-grant fixture needs an unprotected location: {}",
+            root.display()
+        );
+
+        let workspace = root.join("workspace");
+        let base = root.join("external");
+        let protected_dir = base.join(".ssh");
+        fs::create_dir(&workspace).expect("test workspace");
+        fs::create_dir_all(&protected_dir).expect("protected test subdirectory");
+        let external_file = base.join("ordinary.txt");
+        let protected_file = protected_dir.join("fixture.txt");
+        fs::write(&external_file, b"x").expect("write ordinary test file");
+        fs::write(&protected_file, b"x").expect("write protected test file");
         let policy = crate::db::ExternalAccessPolicy {
             yolo: false,
             allowed_dirs: vec![],
@@ -635,27 +663,21 @@ mod tests {
         };
 
         clear_once_grants();
-        assert!(
-            ensure_path_accessible_with_policy(&workspace, &external_file, &policy).is_err(),
-            "ungranted external path must fail"
-        );
+        let ungranted = ensure_path_accessible_with_policy(&workspace, &external_file, &policy)
+            .expect_err("ungranted external path must fail");
+        assert!(ungranted.contains("外部路径未获授权"), "{ungranted}");
 
-        // "once" grant on the ancestor dir passes children within this request
         arm_once_grant(&base);
-        assert!(
-            ensure_path_accessible_with_policy(&workspace, &external_file, &policy).is_ok(),
-            "armed once grant must pass the enforcement gate"
-        );
+        ensure_path_accessible_with_policy(&workspace, &external_file, &policy)
+            .expect("armed once grant must pass the enforcement gate");
+        let protected = ensure_path_accessible_with_policy(&workspace, &protected_file, &policy)
+            .expect_err("a once grant must not authorize protected paths");
+        assert!(protected.contains("安全限制"), "{protected}");
 
-        // cleared when the tool request ends: nothing persists, nothing leaks
         clear_once_grants();
-        assert!(
-            ensure_path_accessible_with_policy(&workspace, &external_file, &policy).is_err(),
-            "once grants must not outlive the request"
-        );
-
-        let _ = std::fs::remove_dir_all(&base);
-        let _ = std::fs::remove_dir_all(&workspace);
+        let expired = ensure_path_accessible_with_policy(&workspace, &external_file, &policy)
+            .expect_err("once grants must not outlive the request");
+        assert!(expired.contains("外部路径未获授权"), "{expired}");
     }
 
     #[test]
