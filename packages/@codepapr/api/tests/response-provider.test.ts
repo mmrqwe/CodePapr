@@ -14,10 +14,169 @@ function createMockStream(chunks: string[]): ReadableStream<Uint8Array> {
   });
 }
 
+function sseResponse(...events: unknown[]): Response {
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+
 describe('ResponseProvider', () => {
   it('instantiates with default base url', () => {
     const provider = new ResponseProvider({ apiKey: 'test-key' });
     expect(provider.name).toBe('response');
+  });
+
+  it('omits sampling in streamed Luna requests that use the default reasoning effort', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(
+      sseResponse({ type: 'response.completed', response: { status: 'completed' } }),
+    );
+    const provider = new ResponseProvider({ apiKey: 'test-key', fetchFn });
+
+    await provider.streamChat({
+      model: 'gpt-6-luna',
+      messages: [],
+      temperature: 0.7,
+      topP: 0.9,
+    }, vi.fn());
+
+    const payload = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(payload).not.toHaveProperty('temperature');
+    expect(payload).not.toHaveProperty('top_p');
+  });
+
+  it('uses Luna’s low effort for the legacy minimal preset', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ status: 'completed', output: [] }));
+    const provider = new ResponseProvider({ apiKey: 'test-key', fetchFn });
+
+    await provider.chat({
+      model: 'gpt-6-luna',
+      messages: [],
+      thinking: { type: 'enabled', reasoningEffort: 'minimal' },
+    });
+
+    const payload = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(payload.reasoning).toEqual({ effort: 'low', summary: 'auto' });
+  });
+
+  it.each([
+    {
+      event: {
+        type: 'response.failed',
+        response: { status: 'failed', error: { code: 'model_not_found', message: 'Model missing' } },
+      },
+      message: 'model_not_found: Model missing',
+    },
+    {
+      event: { type: 'error', code: 'context_length_exceeded', message: 'Input is too long' },
+      message: 'context_length_exceeded: Input is too long',
+    },
+    {
+      event: {
+        type: 'response.incomplete',
+        response: { status: 'incomplete', incomplete_details: { reason: 'content_filter' } },
+      },
+      message: 'Responses API response was incomplete: content_filter',
+    },
+    {
+      event: { type: 'response.done', response: { status: 'cancelled' } },
+      message: 'Responses API response was cancelled by the server',
+    },
+  ])('ends on $event.type without reconnecting on a permanent error', async ({ event, message }) => {
+    const fetchFn = vi.fn<typeof fetch>().mockImplementation(async () => sseResponse(event));
+    const provider = new ResponseProvider({
+      apiKey: 'test-key', fetchFn, streamMaxRetries: 1, streamRetryDelayMs: () => 0,
+    });
+    const onEvent = vi.fn();
+
+    await expect(provider.streamChat({ model: 'gpt-4o', messages: [] }, onEvent))
+      .rejects.toMatchObject({ message, retriable: false });
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it('reconnects on a native transient Responses error', async () => {
+    const fetchFn = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(sseResponse({
+        type: 'response.failed',
+        response: { status: 'failed', error: { code: 'server_error', message: 'Try again' } },
+      }))
+      .mockResolvedValueOnce(sseResponse({ type: 'response.completed', response: { status: 'completed' } }));
+    const provider = new ResponseProvider({
+      apiKey: 'test-key', fetchFn, streamMaxRetries: 1, streamRetryDelayMs: () => 0,
+    });
+    const onEvent = vi.fn();
+
+    await expect(provider.streamChat({ model: 'gpt-4o', messages: [] }, onEvent))
+      .resolves.toMatchObject({ choices: [{ finishReason: 'stop' }] });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'stream-restart', attempt: 1 }));
+  });
+
+  it('ends both retry layers immediately on a quota-related HTTP 429', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({
+      error: { code: 'project_spend_limit_exceeded', message: 'Project spend limit reached' },
+    }, { status: 429 }));
+    const provider = new ResponseProvider({
+      apiKey: 'test-key', fetchFn, maxRetries: 2, requestRetryDelayMs: () => 0,
+      streamMaxRetries: 1, streamRetryDelayMs: () => 0,
+    });
+    const onEvent = vi.fn();
+
+    await expect(provider.streamChat({ model: 'gpt-4o', messages: [] }, onEvent))
+      .rejects.toMatchObject({ status: 429, retriable: false, attempts: 1 });
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it('preserves the partial answer on response.incomplete and drops truncated tool calls', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(sseResponse(
+      { type: 'response.output_text.delta', delta: 'Partial answer' },
+      { type: 'response.output_item.added', item: { type: 'function_call', call_id: 'call-1', name: 'test' } },
+      {
+        type: 'response.incomplete',
+        response: {
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_output_tokens' },
+          usage: { output_tokens: 128 },
+        },
+      },
+    ));
+    const provider = new ResponseProvider({ apiKey: 'test-key', fetchFn, streamMaxRetries: 0 });
+
+    const response = await provider.streamChat({ model: 'gpt-4o', messages: [] }, vi.fn());
+
+    expect(response.choices[0]).toMatchObject({ finishReason: 'length', message: { content: 'Partial answer' } });
+    expect(response.choices[0].message.toolCalls).toBeUndefined();
+    expect(response.usage?.output_tokens).toBe(128);
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it.each([true, false])('preserves refusal text exactly once when streamed=%s', async (stream) => {
+    const refusal = 'I cannot do that.';
+    const completed = {
+      status: 'completed',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'refusal', refusal }] }],
+    };
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(stream
+      ? sseResponse(
+        { type: 'response.refusal.delta', delta: 'I cannot ' },
+        { type: 'response.refusal.delta', delta: 'do that.' },
+        { type: 'response.refusal.done', refusal },
+        { type: 'response.completed', response: completed },
+      )
+      : Response.json(completed));
+    const provider = new ResponseProvider({ apiKey: 'test-key', fetchFn });
+    const onEvent = vi.fn<(event: IChatStreamEvent) => void>();
+    const request = { model: 'gpt-4o', messages: [] };
+
+    const response = stream ? await provider.streamChat(request, onEvent) : await provider.chat(request);
+
+    expect(response.choices[0]).toMatchObject({ finishReason: 'stop', message: { content: refusal } });
+    if (stream) {
+      const deltas = onEvent.mock.calls.map(([event]) => event)
+        .filter((event) => event.type === 'content-delta');
+      expect(deltas.map((event) => event.delta).join('')).toBe(refusal);
+    }
   });
 
   it('performs non-streaming chat request and transforms response correctly', async () => {

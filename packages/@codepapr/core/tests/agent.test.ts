@@ -979,7 +979,7 @@ describe('Agent completion-quality guards (no silent stops)', () => {
 
   function createGuardedAgent(
     provider: ILLMProvider,
-    providerName: 'deepseek' | 'openai' | 'claude',
+    providerName: 'deepseek' | 'openai' | 'claude' | 'response',
     buildSpy: (opts: { suffixMessages?: IMessage[]; thinking?: unknown }) => void,
     parameters: Record<string, unknown> = { temperature: 0.7, topP: 0.9, maxTokens: 1000 },
   ): Agent {
@@ -1048,9 +1048,12 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     expect(events).toEqual([{ type: 'round-retry', reason: 'length-continue' }]);
   });
 
-  it('disables thinking on continuation attempts (deepseek)', async () => {
+  it.each([
+    ['deepseek', 'thinking'],
+    ['response', 'reasoning'],
+  ] as const)('disables thinking on continuation attempts (%s)', async (providerName, payload) => {
     const provider: ILLMProvider = {
-      name: 'deepseek',
+      name: providerName,
       models: ['test-model'],
       validate: () => true,
       chat: vi
@@ -1061,15 +1064,14 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     const builds: Array<{ thinking?: unknown }> = [];
     const agent = createGuardedAgent(
       provider,
-      'deepseek',
+      providerName,
       (opts) => builds.push({ thinking: opts.thinking }),
       { temperature: 0.7, topP: 0.9, maxTokens: 1000, thinkingEnabled: true },
     );
 
     await agent.chat('请回答');
 
-    expect(builds[0]?.thinking).toEqual({ type: 'enabled', payload: 'thinking' });
-    // DeepSeek 省略 thinking 会默认开启思考，续写必须显式 disabled
+    expect(builds[0]?.thinking).toEqual({ type: 'enabled', payload });
     expect(builds[1]?.thinking).toEqual({ type: 'disabled' });
   });
 

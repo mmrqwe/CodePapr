@@ -342,6 +342,7 @@ export const MessageList = memo(function MessageList({
       {activeSessionId && taskChecklists[activeSessionId] ? (
         <div className="mx-3 mb-4 rounded-2xl border border-line bg-base">
           <TaskChecklist
+            key={activeSessionId}
             checklist={taskChecklists[activeSessionId]!}
             lang={lang}
             isLoading={isActiveLoading}

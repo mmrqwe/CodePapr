@@ -1022,7 +1022,7 @@ name: 'web_download_file',
         },
         replace: {
           type: 'string',
-          description: '替换后的文本块。',
+          description: '替换后的文本块。传空字符串可删除匹配内容。',
         },
         replaceAll: {
           type: 'boolean',
@@ -1077,7 +1077,7 @@ name: 'web_download_file',
               },
               replace: {
                 type: 'string',
-                description: '替换后的文本块。',
+                description: '替换后的文本块。传空字符串可删除匹配内容。',
               },
               replaceAll: {
                 type: 'boolean',

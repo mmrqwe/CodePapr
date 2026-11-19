@@ -11,40 +11,26 @@ interface TaskChecklistProps {
 export function TaskChecklist({ checklist, lang, isLoading }: TaskChecklistProps) {
   const t = getTranslation(lang);
   const [collapsed, setCollapsed] = useState(false);
-  const prevUpdatedAt = useRef(checklist.updatedAt);
-  const collapsedRef = useRef(false);
-
-  collapsedRef.current = collapsed;
+  const previousChecklist = useRef(checklist);
+  const wasLoading = useRef(isLoading);
 
   const done = checklist.items.filter((i) => i.status === 'completed' || i.status === 'failed').length;
   const total = checklist.items.length;
   const allDone = checklist.status === 'completed';
 
-  // 新对话开始 → 收起旧清单（除非同一轮中已有新清单到达）
-  const currentTurnHasTodo = useRef(false);
-
   useEffect(() => {
-    if (isLoading) {
-      currentTurnHasTodo.current = false;
+    const updated = previousChecklist.current !== checklist;
+    const startedTurn = isLoading && !wasLoading.current;
+    previousChecklist.current = checklist;
+    wasLoading.current = isLoading;
+
+    // Each commit produces a new checklist, even for updates in the same millisecond.
+    if (updated) {
+      setCollapsed(allDone && !isLoading);
+    } else if (startedTurn) {
       setCollapsed(true);
     }
-  }, [isLoading]);
-
-  // ── updatedAt 变了 → 有新进展 ──
-  const hasNewUpdate = prevUpdatedAt.current !== checklist.updatedAt;
-
-  useEffect(() => {
-    if (!hasNewUpdate) return;
-    prevUpdatedAt.current = checklist.updatedAt;
-
-    if (allDone && !isLoading) {
-      setCollapsed(true);
-    } else {
-      currentTurnHasTodo.current = true;
-      setCollapsed(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- D-4 ratchet：接入插件时的存量欠账，勿新增
-  }, [hasNewUpdate, allDone, isLoading]);
+  }, [checklist, allDone, isLoading]);
 
   // ── 折叠摘要条 ──
   if (collapsed) {
@@ -113,19 +99,26 @@ export function TaskChecklist({ checklist, lang, isLoading }: TaskChecklistProps
           return (
             <div
               key={item.id}
-              className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 ${
+              className={`flex items-start gap-2 rounded-md px-2.5 py-1.5 ${
                 isRunning ? 'bg-warn-bg border border-warn-bg' :
                 isFailed ? 'bg-danger-bg border border-danger-bg' :
                 isDone ? 'bg-ok-bg' :
                 'bg-base'
               }`}
             >
-              <span className={`flex-shrink-0 text-[11px] ${isDone ? 'text-ok' : isFailed ? 'text-danger' : isRunning ? 'text-warn animate-pulse' : 'text-fg-dim'}`}>
+              <span className={`flex-shrink-0 text-[11px] leading-snug ${isDone ? 'text-ok' : isFailed ? 'text-danger' : isRunning ? 'text-warn animate-pulse' : 'text-fg-dim'}`}>
                 {isDone ? '\u2713' : isFailed ? '\u2717' : isRunning ? '\u25B6' : '\u25CB'}
               </span>
-              <span className={`min-w-0 flex-1 truncate text-[11px] leading-snug ${isDone ? 'text-fg-muted line-through' : isFailed ? 'text-danger' : isRunning ? 'text-warn' : 'text-fg-muted'}`}>
-                {item.title}
-              </span>
+              <div className="min-w-0 flex-1">
+                <span className={`block truncate text-[11px] leading-snug ${isDone ? 'text-fg-muted line-through' : isFailed ? 'text-danger' : isRunning ? 'text-warn' : 'text-fg-muted'}`}>
+                  {item.title}
+                </span>
+                {item.summary && (
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-snug text-fg-soft">
+                    {item.summary}
+                  </p>
+                )}
+              </div>
             </div>
           );
         })}

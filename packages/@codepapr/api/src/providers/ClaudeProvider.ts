@@ -226,8 +226,8 @@ function normalizeStopReason(stopReason: string | null | undefined): string {
 
 function buildAdaptiveThinkingOptions(request: IChatRequest, model: string) {
   if (request.thinking?.type === 'enabled') {
-    const effort = request.thinking.reasoningEffort?.trim();
-    const supportsEffort = effort && /^(?:low|medium|high|xhigh|max)$/.test(effort) &&
+    const effort = request.thinking.reasoningEffort?.trim().toLowerCase();
+    const supportsEffort = effort && CLAUDE_ADAPTIVE_EFFORTS.includes(effort) &&
       !(effort === 'xhigh' && model.startsWith('claude-mythos-preview'));
     return {
       thinking: { type: 'adaptive', display: 'summarized' },
@@ -240,6 +240,14 @@ function buildAdaptiveThinkingOptions(request: IChatRequest, model: string) {
   }
   return {};
 }
+
+export function usesClaudeAdaptiveThinking(model: string): boolean {
+  return /^claude-(?:(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]\d*|4-[7-9])|mythos-preview)(?:-|$)/i.test(model.trim());
+}
+
+export const CLAUDE_ADAPTIVE_EFFORTS: readonly string[] = [
+  'low', 'medium', 'high', 'xhigh', 'max',
+];
 
 export class ClaudeProvider extends BaseLLMProvider {
   name = 'claude';
@@ -553,8 +561,7 @@ export class ClaudeProvider extends BaseLLMProvider {
     const systemPrompt = getClaudeSystemPrompt(request);
     const applyPromptCache = shouldApplyPromptCache(request);
     const model = request.model.trim().toLowerCase();
-    const usesAdaptiveThinking = this.usesOfficialApi &&
-      /^claude-(?:(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]\d*|4-[7-9])|mythos-preview)(?:-|$)/.test(model);
+    const usesAdaptiveThinking = this.usesOfficialApi && usesClaudeAdaptiveThinking(model);
     const maxTokens = request.maxTokens ?? DEFAULT_MAX_TOKENS;
     const thinkingEnabled = request.thinking?.type === 'enabled';
     const manualThinking = !usesAdaptiveThinking && thinkingEnabled &&

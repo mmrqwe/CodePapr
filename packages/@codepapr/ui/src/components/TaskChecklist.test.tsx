@@ -2,10 +2,16 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskChecklist } from './TaskChecklist';
 import type { TaskChecklist as TaskChecklistType } from '../utils/taskChecklistTypes';
 
+import { ToolRegistry } from '@codepapr/core';
+import { useAgentStore } from '../store/agentStore';
+import { registerTodoListTools } from '../tools/todoListTool';
+import { openTodoCreationWindow, resetTodoListContext } from '../tools/todoListRegistry';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 
 function fixture(updatedAt: number, currentTaskId: string | null): TaskChecklistType {
@@ -85,5 +91,70 @@ describe('TaskChecklist', () => {
     });
     expect(iconOf('任务 C')).toBe('\u25B6');
     expect(iconOf('任务 A')).toBe('\u25CB');
+  });
+});
+
+const sessionId = 'checklist-render-test';
+const tasks = [{ id: 'Verify_Tests', title: 'Run the tests', description: 'Verify suites' }];
+
+describe('TaskChecklist tool updates', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  let registry: ToolRegistry;
+
+  beforeEach(async () => {
+    container = document.createElement('div');
+    root = createRoot(container);
+    registry = new ToolRegistry();
+    registerTodoListTools(registry, sessionId);
+    openTodoCreationWindow(sessionId, 'Test progress');
+    await registry.execute('todo', { tasks });
+  });
+
+  afterEach(async () => {
+    await act(() => root.unmount());
+    resetTodoListContext(sessionId);
+    vi.restoreAllMocks();
+  });
+
+  function render(isLoading: boolean) {
+    const checklist = useAgentStore.getState()._taskChecklists[sessionId]!;
+    return act(() => root.render(<TaskChecklist checklist={checklist} lang="en" isLoading={isLoading} />));
+  }
+
+  it('keeps the first checklist visible when it appears during a running turn', async () => {
+    await render(true);
+
+    expect(container.textContent).toContain('Run the tests');
+    expect(container.textContent).not.toContain('Expand');
+  });
+
+  it('reopens the checklist for an actual update with the same timestamp', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    openTodoCreationWindow(sessionId);
+    await registry.execute('todo', { tasks });
+    await render(false);
+    await render(true);
+    expect(container.textContent).toContain('Expand');
+
+    await registry.execute('todo', {
+      updates: [{ id: 'Verify_Tests', status: 'running', summary: '3 suites passed' }],
+    });
+    await render(true);
+
+    expect(container.textContent).toContain('Run the tests');
+    expect(container.textContent).toContain('3 suites passed');
+    expect(container.textContent).not.toContain('Expand');
+  });
+
+  it('displays a summary-only update while the status stays the same', async () => {
+    await registry.execute('todo', { updates: [{ id: 'verify-tests', status: 'running' }] });
+    await render(true);
+
+    await registry.execute('todo', { updates: [{ id: 'verify-tests', summary: '4 suites passed' }] });
+    await render(true);
+
+    expect(container.textContent).toContain('0/1');
+    expect(container.textContent).toContain('4 suites passed');
   });
 });

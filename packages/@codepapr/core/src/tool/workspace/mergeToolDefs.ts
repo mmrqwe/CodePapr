@@ -46,7 +46,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
       properties: {
         relativePath: { type: 'string', description: '文件相对路径。' },
         search: { type: 'string', description: '要精确匹配的原始文本块。' },
-        replace: { type: 'string', description: '替换后的文本块。' },
+        replace: { type: 'string', description: '替换后的文本块。传空字符串可删除匹配内容。' },
         replaceAll: { type: 'boolean', description: '是否替换全部匹配。' },
         expectedOccurrences: { type: 'number', description: '预期匹配次数，用于安全校验。' },
       },
@@ -68,7 +68,7 @@ export const NEW_TOOL_DEFINITIONS: IToolDefinition[] = [
             properties: {
               relativePath: { type: 'string', description: '文件相对路径。' },
               search: { type: 'string', description: '要精确匹配的原始文本块。' },
-              replace: { type: 'string', description: '替换后的文本块。' },
+              replace: { type: 'string', description: '替换后的文本块。传空字符串可删除匹配内容。' },
               replaceAll: { type: 'boolean' },
               expectedOccurrences: { type: 'number' },
             },

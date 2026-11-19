@@ -17,7 +17,7 @@
  *    桌面 handler 与 headless harness 共用，避免双实现漂移。
  */
 
-import type { AgentTask, TaskStatus, TodoListContext, IToolDefinition } from '@codepapr/types';
+import type { AgentTask, TaskStatus, TodoListContext, IToolCall, IToolDefinition } from '@codepapr/types';
 
 export const TODO_TOOL_NAME = 'todo' as const;
 
@@ -26,6 +26,45 @@ export const TODO_CREATE_REJECTED_NOTICE =
   '[todo] 本回合的任务清单已创建过，这次 tasks 全量覆盖被拒绝：清单保持原样。'
   + '请用 updates 推进现有任务（标记进度/完成/失败）；只有用户发来新消息才会再次开启创建窗口。'
   + '如果你发现当前清单确实不再适用于目标，把它写进本轮回答或对应任务的 summary，等下一条用户消息再重排。';
+
+function isTodoProgressCall({ name, arguments: args }: IToolCall): boolean {
+  if (name !== TODO_TOOL_NAME || args._parseError) return false;
+  if (Array.isArray(args.tasks)) {
+    return args.tasks.length > 0 && args.tasks.every((task: unknown) =>
+      !!task && typeof task === 'object' &&
+      (!('status' in task) || task.status === 'pending' || task.status === 'running')
+    );
+  }
+  return Array.isArray(args.updates) && args.updates.length > 0 &&
+    args.updates.every((update: unknown) => {
+      if (!update || typeof update !== 'object') return false;
+      const patch = update as Partial<TodoUpdatePatch>;
+      return typeof patch.id === 'string' && !!patch.id.trim() && !patch.errorLog &&
+        (patch.status === 'running' ||
+          (patch.status === undefined && typeof patch.summary === 'string' && !!patch.summary.trim()));
+    });
+}
+
+/** Publish in-progress checklist changes before slow tools in the same batch.
+ * Preserve the order of todo writes and keep questions as execution barriers. */
+export function prioritizeTodoProgress(calls: readonly IToolCall[]): readonly IToolCall[] {
+  const ordered: IToolCall[] = [];
+  const progress: IToolCall[] = [];
+  const work: IToolCall[] = [];
+  for (const call of calls) {
+    if (isTodoProgressCall(call)) {
+      progress.push(call);
+    } else if (call.name === TODO_TOOL_NAME || call.name === 'question') {
+      ordered.push(...progress, ...work, call);
+      progress.length = 0;
+      work.length = 0;
+    } else {
+      work.push(call);
+    }
+  }
+  ordered.push(...progress, ...work);
+  return ordered;
+}
 
 function normalizeId(value: unknown, fallback: string): string {
   if (typeof value !== 'string') {
@@ -262,8 +301,17 @@ export function updateTodoList(
   if (patches.length === 0) {
     return previous;
   }
+  const taskIds = new Set(previous.tasks.map((task) => task.id));
+  const patchesById = new Map<string, TodoUpdatePatch>();
+  for (const patch of patches) {
+    // Some persisted lists can contain IDs that were never normalized.
+    const id = taskIds.has(patch.id) ? patch.id : normalizeId(patch.id, '');
+    if (taskIds.has(id) && !patchesById.has(id)) {
+      patchesById.set(id, patch);
+    }
+  }
   const tasks = previous.tasks.map((task) => {
-    const patch = patches.find((p) => p.id === task.id);
+    const patch = patchesById.get(task.id);
     if (!patch) return task;
 
     const touched = patch.touchedArtifacts !== undefined
@@ -370,6 +418,7 @@ export function buildTodoToolDefinition(): IToolDefinition {
       + '1. tasks 参数 → 创建任务清单（全量覆盖）。**每个用户回合至多一次**：'
       + '本回合已经创建过（或旧清单仍然有效）时，再发 tasks 会被直接拒绝，清单保持原样。\n'
       + '2. updates 参数 → 部分更新已有任务（进度/完成/失败/重开），回合内不限次数。\n\n'
+      + '长耗时工作开始前可用 running 或 summary 汇报进度；收到工具结果后再标记 completed 或 failed。'
       + '纪律：新消息带来全新目标时才创建清单；同一目标继续推进时沿用现有清单的 id，'
       + '用 updates 更新状态（completed 可改回 pending/running 表示重开工作，这是允许的诚实汇报）。'
       + '任务状态变化后 current 标记由系统自动重算，无需（也无法）手动设置。'

@@ -10,6 +10,32 @@ function jsonResponse(payload: unknown): Response {
   });
 }
 
+it.each([
+  { model: 'claude-opus-4-7', thinking: { type: 'enabled' as const, reasoningEffort: 'xhigh', budgetTokens: 2048 } },
+  { model: 'claude-opus-4-8', thinking: undefined },
+])('uses supported parameters for $model', async ({ model, thinking }) => {
+  const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+    id: 'message-1',
+    content: [{ type: 'text', text: 'ok' }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 1, output_tokens: 1 },
+  }));
+  const provider = new ClaudeProvider({ apiKey: 'test-key', fetchFn });
+
+  await provider.chat({ model, messages: [], thinking, temperature: 0.7, topP: 0.9 });
+
+  const payload = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+  expect(payload).not.toHaveProperty('temperature');
+  expect(payload).not.toHaveProperty('top_p');
+  if (thinking) {
+    expect(payload.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+    expect(payload.output_config).toEqual({ effort: 'xhigh' });
+  } else {
+    expect(payload).not.toHaveProperty('thinking');
+    expect(payload).not.toHaveProperty('output_config');
+  }
+});
+
 /** SSE response whose body breaks mid-stream (reqwest surfaces connection
  *  resets as "error decoding response body"). The optional chunk is delivered
  *  first; the break happens on the following read. */

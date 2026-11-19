@@ -521,16 +521,20 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     expect(primary?.maxContextTokens).toBe(180_000);
   });
 
-  it('旧默认值 500k 和 220k 自动迁移至 200k', () => {
-    const settings500k = normalizeSettings({
-      maxContextTokens: 500_000,
-    });
-    expect(settings500k.maxContextTokens).toBe(200_000);
+  it.each([500_000, 220_000])('保留明确设置的上下文上限 %i', (maxContextTokens) => {
+    const legacy = normalizeSettings({ maxContextTokens });
+    expect(legacy.maxContextTokens).toBe(maxContextTokens);
+    expect(resolvePrimaryProfile(legacy)?.maxContextTokens).toBe(maxContextTokens);
 
-    const settings220k = normalizeSettings({
-      maxContextTokens: 220_000,
-    });
-    expect(settings220k.maxContextTokens).toBe(200_000);
+    const profile: ModelProfile = {
+      ...createDefaultProfile('Responses API'),
+      apiFormat: 'response',
+      maxContextTokens,
+    };
+    const settings = normalizeSettings({ modelProfiles: [profile] });
+    expect(settings.maxContextTokens).toBe(maxContextTokens);
+    expect(resolvePrimaryProfile(settings)?.maxContextTokens).toBe(maxContextTokens);
+    expect(resolvePrimaryProfile(normalizeSettings(settings))?.maxContextTokens).toBe(maxContextTokens);
   });
 
   it('编辑非槽位 profile（local）往返 normalize 不被遗留 per-mode 配置覆盖', () => {

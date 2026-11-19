@@ -524,20 +524,8 @@ fn dispatch_tool_inner(
                     "文件 {path} 超过 20MB 上限，请改用 write 工具重写整个文件"
                 ));
             }
-            let search = arg_string_req(args, &["search"])?;
-            // 歧义预检（对齐 TS describeAmbiguousMatches）：多匹配时报出各自行号与所在符号
-            if arg_bool(args, "replaceAll") != Some(true) {
-                if let Some(message) = describe_ambiguous_matches(&path, &current.content, &search) {
-                    return Err(message);
-                }
-            }
-            let patched = apply_search_replace(
-                &current.content,
-                &search,
-                &arg_string_req(args, &["replace"])?,
-                arg_bool(args, "replaceAll"),
-                arg_usize(args, "expectedOccurrences"),
-            )?;
+            let patched = apply_patch_args(&path, &current.content, args)
+                .map_err(|err| format!("{path}: {err}"))?;
             let mut notes: Vec<String> = Vec::new();
             let (rejected, ast_note) = ast_pre_check(&path, &current.content, &patched.content);
             if let Some(rejected) = rejected {
@@ -906,53 +894,35 @@ fn apply_multi_patch(
         .arguments
         .get("patches")
         .and_then(Value::as_array)
-        .ok_or_else(|| "patches 必须是数组".to_string())?;
+        .filter(|patches| !patches.is_empty())
+        .ok_or_else(|| "patches 必须是非空数组".to_string())?;
     let mut planned: Vec<PlannedPatchWrite> = Vec::new();
-    for patch in patches {
+    for (index, patch) in patches.iter().enumerate() {
         let path = require_path(patch)?;
-        ensure_codepapr_access(&path, "write", &ctx.mode, allow_codepapr_apps(ctx, req))?;
-        ensure_external_allowed(sink, runtime_id, ctx, req, &path, "write", cancel)?;
-        let current = workspace_fs::read::read_text_file_impl(
-            ctx.workspace_path.clone(),
-            path.clone(),
-            Some(20_000_000),
-            None,
-            None,
-            None,
-            None,
-        )?;
-        if current.truncated_by_bytes {
-            return Err(format!(
-                "文件 {path} 超过 20MB 上限，无法打补丁，请改用 write 工具重写整个文件"
-            ));
-        }
-        let base = match planned.iter().find(|p| p.path == path) {
-            Some(existing) => existing.after.clone(),
-            None => current.content.clone(),
-        };
-        // 歧义预检（对齐 TS：逐 patch 对原始内容检查，路径前缀定位）
-        if arg_bool(patch, "replaceAll") != Some(true) {
-            let search = arg_string_req(patch, &["search"])?;
-            if let Some(message) = describe_ambiguous_matches(&path, &current.content, &search) {
-                return Err(format!("{path}: {message}"));
+        let file_index = match planned.iter().position(|entry| entry.path == path) {
+            Some(file_index) => file_index,
+            None => {
+                ensure_codepapr_access(&path, "write", &ctx.mode, allow_codepapr_apps(ctx, req))?;
+                ensure_external_allowed(sink, runtime_id, ctx, req, &path, "write", cancel)?;
+                let current = workspace_fs::read::read_text_file_impl(
+                    ctx.workspace_path.clone(), path.clone(), Some(20_000_000),
+                    None, None, None, None,
+                )?;
+                if current.truncated_by_bytes {
+                    return Err(format!("文件 {path} 超过 20MB 上限，无法打补丁"));
+                }
+                planned.push(PlannedPatchWrite {
+                    path: path.clone(),
+                    before: Some(current.content.clone()),
+                    after: current.content,
+                });
+                planned.len() - 1
             }
-        }
-        let patched = apply_search_replace(
-            &base,
-            &arg_string_req(patch, &["search"])?,
-            &arg_string_req(patch, &["replace"])?,
-            arg_bool(patch, "replaceAll"),
-            arg_usize(patch, "expectedOccurrences"),
-        )?;
-        if let Some(existing) = planned.iter_mut().find(|p| p.path == path) {
-            existing.after = patched.content;
-        } else {
-            planned.push(PlannedPatchWrite {
-                path,
-                before: Some(current.content),
-                after: patched.content,
-            });
-        }
+        };
+        let entry = &mut planned[file_index];
+        let patched = apply_patch_args(&path, &entry.after, patch)
+            .map_err(|err| format!("补丁 {} ({path}) 应用失败: {err}", index + 1))?;
+        entry.after = patched.content;
     }
     // 前置 AST 语法预检：任一文件引入新语法错误则整体拦截、全部不落盘（对齐 TS #25）
     let mut notes: Vec<String> = Vec::new();
@@ -2105,6 +2075,27 @@ pub(crate) struct PatchedContent {
     replacements: usize,
 }
 
+fn apply_patch_args(path: &str, content: &str, args: &Value) -> Result<PatchedContent, String> {
+    let text = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("{key} 必须是字符串"))
+    };
+    let search = text("search")?;
+    if arg_bool(args, "replaceAll") != Some(true) {
+        if let Some(message) = describe_ambiguous_matches(path, content, search) {
+            return Err(message);
+        }
+    }
+    apply_search_replace(
+        content,
+        search,
+        text("replace")?,
+        arg_bool(args, "replaceAll"),
+        arg_usize(args, "expectedOccurrences"),
+    )
+}
+
 pub(crate) fn apply_search_replace(
     content: &str,
     search: &str,
@@ -2125,16 +2116,7 @@ pub(crate) fn apply_search_replace(
     };
     let occurrences = content_lf.matches(&search_lf).count();
     if occurrences == 0 {
-        let hint = if search.contains("\r\n") && !file_has_crlf {
-            "（文件使用 LF 换行，但 search 使用了 CRLF）"
-        } else if !search.contains("\r\n") && file_has_crlf {
-            "（文件使用 CRLF 换行，但 search 使用了 LF）"
-        } else {
-            ""
-        };
-        return Err(format!(
-            "未找到要替换的文本块{hint}。请核对 search 与文件当前内容是否一致（含缩进、空白与结尾换行），必要时先用 read 读取后再试"
-        ));
+        return Err("未找到要替换的文本块，请用 read 重新读取文件并核对 search 的内容和空白".to_string());
     }
     if let Some(expected) = expected_occurrences {
         if expected != occurrences {
@@ -2153,25 +2135,62 @@ pub(crate) fn apply_search_replace(
             "匹配到 {occurrences} 处文本块，请改用更精确的 search 或设置 replaceAll=true{extra}"
         ));
     }
-    let replacements = if replace_all == Some(true) {
-        occurrences
+    let mixed_eol = file_has_crlf
+        && content.bytes().enumerate().any(|(index, byte)| {
+            byte == b'\n' && (index == 0 || content.as_bytes()[index - 1] != b'\r')
+        });
+    let content = if mixed_eol {
+        splice_mixed_eol(content, &content_lf, &search_lf, &replace_lf)
     } else {
-        1
-    };
-    let patched_lf = if replace_all == Some(true) {
-        content_lf.replace(&search_lf, &replace_lf)
-    } else {
-        content_lf.replacen(&search_lf, &replace_lf, 1)
-    };
-    let content = if file_has_crlf {
-        patched_lf.replace('\n', "\r\n")
-    } else {
-        patched_lf
+        let patched_lf = content_lf.replace(&search_lf, &replace_lf);
+        if file_has_crlf {
+            patched_lf.replace('\n', "\r\n")
+        } else {
+            patched_lf
+        }
     };
     Ok(PatchedContent {
         content,
-        replacements,
+        replacements: occurrences,
     })
+}
+
+fn splice_mixed_eol(original: &str, content_lf: &str, search: &str, replace: &str) -> String {
+    // 每个 CRLF 在匹配文本中少一个字节；映射回原文时，换行偏移指向 CR。
+    let crlf_offsets: Vec<usize> = original
+        .match_indices("\r\n")
+        .enumerate()
+        .map(|(removed, (index, _))| index - removed)
+        .collect();
+    let original_offset = |offset| offset + crlf_offsets.partition_point(|&cr| cr < offset);
+    let mut matches = content_lf
+        .match_indices(search)
+        .map(|(start, _)| start)
+        .peekable();
+    let first_start = *matches.peek().expect("mixed-EOL splice requires a match");
+    let eol = match content_lf[first_start..].find('\n') {
+        Some(index) if crlf_offsets.binary_search(&(first_start + index)).is_ok() => "\r\n",
+        None if crlf_offsets.len() > content_lf.matches('\n').count() - crlf_offsets.len() => "\r\n",
+        _ => "\n",
+    };
+    let replace = replace.replace('\n', eol);
+    let mut output = String::with_capacity(original.len());
+    let mut cursor = 0;
+    while let Some(start) = matches.next() {
+        let end = start + search.len();
+        output.push_str(&original[cursor..original_offset(start)]);
+        output.push_str(&replace);
+        // 匹配末行的行尾跟随替换文本，除非这处换行已经属于下一段匹配。
+        let include_eol = !search.ends_with('\n')
+            && content_lf.as_bytes().get(end) == Some(&b'\n')
+            && matches.peek() != Some(&end);
+        if include_eol {
+            output.push_str(eol);
+        }
+        cursor = original_offset(end + usize::from(include_eol));
+    }
+    output.push_str(&original[cursor..]);
+    output
 }
 
 pub(crate) fn is_memory_file_path(relative_path: &str) -> bool {
@@ -2633,6 +2652,88 @@ mod tests {
         assert_eq!(all.replacements, 2);
         let err = apply_search_replace("hello", "missing", "x", None, None).unwrap_err();
         assert!(err.contains("未找到"));
+    }
+
+    fn run_patch_tool(workspace: &str, tool_name: &str, arguments: Value) -> HostedOutcome {
+        let sink: SharedEventSink = Arc::new(crate::events::NoopEventSink);
+        let request = ToolRequest {
+            request_id: "test".into(),
+            tool_request_id: "test-patch".into(),
+            tool_name: tool_name.into(),
+            arguments,
+            app_access: None,
+        };
+        dispatch_tool(
+            &sink,
+            "test",
+            &test_tool_ctx(workspace),
+            &request,
+            &Arc::new(AtomicBool::new(false)),
+        )
+    }
+
+    #[test]
+    fn edit_preserves_search_whitespace_and_accepts_empty_replacement() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-edit-delete");
+        let path = ws.file_path("note.txt");
+        std::fs::write(&path, "    work();\r\nwork();\r\n").unwrap();
+
+        let outcome = run_patch_tool(&ws.workspace_arg(), "edit", json!({
+            "relativePath": "note.txt",
+            "search": "    work();\n",
+            "replace": "",
+        }));
+
+        assert_eq!(outcome.result.unwrap()["replacements"], 1);
+        assert_eq!(std::fs::read(&path).unwrap(), b"work();\r\n");
+    }
+
+    #[test]
+    fn patch_preserves_replacement_whitespace_for_later_patches() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-patch-sequence");
+        let path = ws.file_path("note.txt");
+        std::fs::write(&path, "keep LF\nmode=old\r\nnext=1\r\nkeep CRLF\r\n").unwrap();
+
+        let outcome = run_patch_tool(&ws.workspace_arg(), "patch", json!({
+            "patches": [
+                {"relativePath": "note.txt", "search": "mode=old", "replace": "  mode=new \n"},
+                {"relativePath": "note.txt", "search": "  mode=new \n\nnext=1\n", "replace": "  mode=ok\n"},
+            ],
+        }));
+
+        assert_eq!(outcome.result.unwrap()["totalPatches"], 2);
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep LF\n  mode=ok\r\nkeep CRLF\r\n");
+    }
+
+    #[test]
+    fn patch_reports_failing_file_and_index_before_writing() {
+        let ws = crate::test_helpers::TestWorkspace::new("sidecar-patch-error");
+        let first = ws.file_path("first.txt");
+        let second = ws.file_path("second.txt");
+        std::fs::write(&first, "old\n").unwrap();
+        std::fs::write(&second, "one\r\ntwo\r\n").unwrap();
+
+        let outcome = run_patch_tool(&ws.workspace_arg(), "patch", json!({
+            "patches": [
+                {"relativePath": "first.txt", "search": "old", "replace": "new"},
+                {"relativePath": "second.txt", "search": "one\nchanged", "replace": "new"},
+            ],
+        }));
+
+        let error = outcome.result.unwrap_err();
+        assert!(error.starts_with("补丁 2 (second.txt) 应用失败: 未找到要替换的文本块"), "{error}");
+        assert!(!error.contains("CRLF"), "{error}");
+        assert!(outcome.mutated.is_empty());
+        assert_eq!(std::fs::read(&first).unwrap(), b"old\n");
+        assert_eq!(std::fs::read(&second).unwrap(), b"one\r\ntwo\r\n");
+    }
+
+    #[test]
+    fn adjacent_mixed_eol_matches_consume_their_own_newlines() {
+        let result =
+            apply_search_replace("保留\n头\r\nx\r\nx\n尾\r\n", "\nx", "Y", Some(true), None).unwrap();
+        assert_eq!(result.content, "保留\n头YY\r\n尾\r\n");
+        assert_eq!(result.replacements, 2);
     }
 
     #[test]

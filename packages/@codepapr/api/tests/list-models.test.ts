@@ -7,6 +7,7 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('parseModelCatalog', () => {
@@ -29,6 +30,48 @@ describe('parseModelCatalog', () => {
 });
 
 describe('listModels', () => {
+  it('fetches the model catalog beside the full Responses endpoint', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [{ id: 'gpt-6-luna' }] }));
+
+    await expect(listModels({ baseURL: 'https://example.com/v1/responses/', fetchFn }))
+      .resolves.toEqual(['gpt-6-luna']);
+    expect(fetchFn).toHaveBeenCalledWith('https://example.com/v1/models', expect.objectContaining({ method: 'GET' }));
+  });
+
+  it.each([200, 503])('times out reading a stalled HTTP %i response body', async (status) => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn<typeof fetch>().mockImplementation(async (_url, init) =>
+      new Response(new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener('abort', () => controller.error('Transport aborted'), { once: true });
+        },
+      }), { status }),
+    );
+    const pending = listModels({ baseURL: 'https://example.com/v1', timeoutMs: 100, fetchFn });
+    const assertion = expect(pending).rejects.toMatchObject({ kind: 'network', message: 'Request timed out' });
+
+    await vi.advanceTimersByTimeAsync(100);
+    await assertion;
+  });
+
+  it('propagates caller cancellation while reading the catalog body', async () => {
+    const controller = new AbortController();
+    const fetchFn = vi.fn<typeof fetch>().mockImplementation(async (_url, init) =>
+      new Response(new ReadableStream({
+        start(body) {
+          init?.signal?.addEventListener('abort', () => body.error('Transport aborted'), { once: true });
+        },
+      })),
+    );
+    const pending = listModels({ baseURL: 'https://example.com/v1', signal: controller.signal, fetchFn });
+    const assertion = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+
+    // Let the fetch promise resolve so the cancellation occurs after the headers.
+    await Promise.resolve();
+    controller.abort();
+    await assertion;
+  });
+
   it('GET {baseURL}/models with Bearer auth and returns ids', async () => {
     const fetchFn = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }, { id: 'o3-mini' }] }), {

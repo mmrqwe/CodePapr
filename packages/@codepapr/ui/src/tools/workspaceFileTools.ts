@@ -6,6 +6,7 @@ import {
   asOptionalBoolean,
   asOptionalPositiveInteger,
   asPatchArray,
+  SearchReplaceDiffError,
 } from '@codepapr/core';
 import type { IImageContent } from '@codepapr/types';
 import { toolByName } from './workspaceToolDefinitions';
@@ -82,6 +83,13 @@ function extractFilePath(args: Record<string, unknown>, paramName = 'relativePat
     args.file ??
     args.src;
   return asString(value, paramName);
+}
+
+function asPatchText(value: unknown, name: 'search' | 'replace'): string {
+  if (typeof value !== 'string') {
+    throw new Error(`${name} 必须是字符串`);
+  }
+  return value;
 }
 
 function extractOptionalFilePath(args: Record<string, unknown>): string | undefined {
@@ -340,8 +348,8 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
   registry.register(toolByName('workspace_apply_patch'), async (args: Record<string, unknown>, context) => {
     const parsed: ApplyPatchArgs = {
       relativePath: extractFilePath(args, 'relativePath'),
-      search: asString(args.search, 'search'),
-      replace: asString(args.replace, 'replace'),
+      search: asPatchText(args.search, 'search'),
+      replace: asPatchText(args.replace, 'replace'),
       replaceAll: asOptionalBoolean(args.replaceAll, 'replaceAll'),
       expectedOccurrences: asOptionalPositiveInteger(args.expectedOccurrences, 'expectedOccurrences'),
     };
@@ -419,8 +427,8 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     const parsed: ApplyDiffArgs = {
       patches: asPatchArray(args.patches).map((patch) => ({
         relativePath: extractFilePath(patch, 'relativePath'),
-        search: asString(patch.search, 'search'),
-        replace: asString(patch.replace, 'replace'),
+        search: asPatchText(patch.search, 'search'),
+        replace: asPatchText(patch.replace, 'replace'),
         replaceAll: asOptionalBoolean(patch.replaceAll, 'replaceAll'),
         expectedOccurrences: asOptionalPositiveInteger(patch.expectedOccurrences, 'expectedOccurrences'),
       })),
@@ -430,6 +438,7 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
     const fileBytes: Record<string, number> = {};
 
     for (const relativePath of uniquePaths) {
+      assertNotMemoryFileWrite(relativePath);
       await ensureExternalPathAllowed(relativePath, 'write', context?.signal);
       assertCodePapr(relativePath, 'write', context?.appAccess);
       const current = await invoke<ReadFileResult>('read_text_file', {
@@ -442,27 +451,22 @@ export function registerWorkspaceFileTools(ctx: WorkspaceToolContext): void {
       fileBytes[relativePath] = current.bytes;
     }
 
-    // 歧义预检：给出比 applySearchReplaceDiff 泛化报错更明确的提示。
-    // 旧实现曾在同一循环里"干跑"逐条应用并维护 runningContents，但结果
-    // 从未被使用（applySearchReplaceDiff 会从头重算），且 `catch { break }`
-    // 会静默吞掉错误——已删除这段死代码。
-    for (const patch of parsed.patches) {
-      const patchContent = fileContents[patch.relativePath] ?? '';
-      const ambiguity = await describeAmbiguousMatches(
-        patch.relativePath,
-        patchContent,
-        patch.search,
-        patch.replaceAll
-      );
-      if (ambiguity) {
-        throw new Error(`${patch.relativePath}: ${ambiguity}`);
+    let diff;
+    try {
+      diff = applySearchReplaceDiff(fileContents, parsed.patches);
+    } catch (error) {
+      if (error instanceof SearchReplaceDiffError && !error.patch.replaceAll) {
+        const { patch, patchNumber, content } = error;
+        const ambiguity = await describeAmbiguousMatches(
+          patch.relativePath, content, patch.search, patch.replaceAll,
+        );
+        if (ambiguity) {
+          throw new Error(`补丁 ${patchNumber} (${patch.relativePath}) 应用失败: ${ambiguity}`);
+        }
       }
+      throw error;
     }
 
-    for (const patch of parsed.patches) {
-      assertNotMemoryFileWrite(patch.relativePath);
-    }
-    const diff = applySearchReplaceDiff(fileContents, parsed.patches);
     const writeFiles = diff.files;
 
     // 前置 AST 语法预检：任一文件引入新语法错误则整体拦截、全部不落盘（语言不支持则降级跳过）

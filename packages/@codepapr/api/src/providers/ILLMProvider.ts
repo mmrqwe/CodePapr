@@ -137,6 +137,32 @@ function truncateErrorBody(body: string): string {
   return `${trimmed.slice(0, 1999)}…`;
 }
 
+const BILLING_ERROR_CODES = new Set([
+  'insufficient_quota',
+  'billing_hard_limit_reached',
+  'organization_spend_limit_exceeded',
+  'project_spend_limit_exceeded',
+  'organization_usage_limit_exceeded',
+]);
+
+export function isBillingErrorCode(code: unknown): boolean {
+  return typeof code === 'string' && BILLING_ERROR_CODES.has(code.trim().toLowerCase());
+}
+
+function isBillingErrorBody(body: string): boolean {
+  try {
+    const result = JSON.parse(body) as {
+      error?: { code?: unknown; type?: unknown };
+      code?: unknown;
+      type?: unknown;
+    } | null;
+    return [result?.error?.code, result?.error?.type, result?.code, result?.type]
+      .some(isBillingErrorCode);
+  } catch {
+    return false;
+  }
+}
+
 function extractRequestId(headers: Headers): string | undefined {
   return (
     headers.get('x-request-id') ??
@@ -265,9 +291,11 @@ export abstract class BaseLLMProvider implements ILLMProvider {
           return response;
         }
 
-        const errorText = truncateErrorBody(await response.text());
+        const responseBody = await response.text();
+        const errorText = truncateErrorBody(responseBody);
         const requestId = extractRequestId(response.headers);
-        const retriable = response.status >= 500 || response.status === 429;
+        const retriable = response.status >= 500 ||
+          (response.status === 429 && !isBillingErrorBody(responseBody));
         const providerError = new ProviderRequestError({
           provider: this.name,
           message: `HTTP ${response.status}: ${errorText}`,
@@ -291,7 +319,7 @@ export abstract class BaseLLMProvider implements ILLMProvider {
         cleanup();
 
         if (!retriable) {
-          // 4xx（429 除外）重试无意义，立即失败。注意：在 catch 里必须把
+          // 确定性 4xx（含额度耗尽的 429）立即失败。注意：在 catch 里必须把
           // 不可重试的 ProviderRequestError 原样重抛，否则会被当成普通异常
           // 进入重试循环（旧实现的 bug）。
           throw providerError;

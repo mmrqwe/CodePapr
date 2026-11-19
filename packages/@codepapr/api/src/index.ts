@@ -15,7 +15,7 @@ export {
   isOpencodeGatewayBase,
   resolveOpencodeSessionId,
 } from './providers/opencodeGateway';
-export { ClaudeProvider } from './providers/ClaudeProvider';
+export { ClaudeProvider, CLAUDE_ADAPTIVE_EFFORTS, usesClaudeAdaptiveThinking } from './providers/ClaudeProvider';
 export { LocalProvider, DEFAULT_LOCAL_BASE_URL } from './providers/LocalProvider';
 export {
   ANTHROPIC_API_VERSION,

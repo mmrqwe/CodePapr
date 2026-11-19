@@ -200,6 +200,21 @@ describe('updateTodoList（回合内进度通道，光标只派生不推进）',
     expect(updated.currentTaskId).toBe('a');
   });
 
+  it('matches an update using the original spelling of a normalized task ID', () => {
+    const ctx = makeContext([['Verify_Tests', 'pending']]);
+    const updated = updateTodoList(ctx, [{ id: ' Verify_Tests ', status: 'completed' }]);
+
+    expect(updated.tasks[0]).toMatchObject({ id: 'verify-tests', status: 'completed' });
+  });
+
+  it('prefers an exact ID in a saved list when the normalized alias also exists', () => {
+    const ctx = makeContext([['verify-tests', 'pending']]);
+    ctx.tasks = [ctx.tasks[0]!, { ...ctx.tasks[0]!, id: 'Verify_Tests' }];
+    const updated = updateTodoList(ctx, [{ id: 'Verify_Tests', status: 'running' }]);
+
+    expect(updated.tasks.map((task) => task.status)).toEqual(['pending', 'running']);
+  });
+
   it('应更新任务 summary', () => {
     const ctx = makeContext([['a', 'pending']]);
     const updated = updateTodoList(ctx, [{ id: 'a', status: 'completed', summary: '完成!' }]);

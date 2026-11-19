@@ -42,15 +42,15 @@ fn no_match_error_names_cause_and_recovery_path() {
 }
 
 #[test]
-fn newline_mismatch_is_diagnosed_on_both_sides() {
+fn normalized_newlines_are_not_reported_as_the_cause_of_missing_text() {
     let crlf_file = must_err(apply_search_replace("a\r\nb\r\n", "x\ny", "z", None, None));
     assert!(
-        crlf_file.contains("CRLF 换行，但 search 使用了 LF"),
+        crlf_file.contains("未找到要替换的文本块") && !crlf_file.contains("CRLF"),
         "got: {crlf_file}"
     );
     let lf_file = must_err(apply_search_replace("a\nb\n", "x\r\ny", "z", None, None));
     assert!(
-        lf_file.contains("LF 换行，但 search 使用了 CRLF"),
+        lf_file.contains("未找到要替换的文本块") && !lf_file.contains("CRLF"),
         "got: {lf_file}"
     );
 }

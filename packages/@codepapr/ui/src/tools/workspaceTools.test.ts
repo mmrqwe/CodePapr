@@ -1237,6 +1237,46 @@ describe('workspace_apply_diff 写入原子性', () => {
     useAppRuntimeStore.setState((state) => ({ ...state, apps: [] }));
   });
 
+  it('uses the previous patch result for matching and ambiguity diagnostics', async () => {
+    let content = 'mark\r\nremove: mark\r\nnext\r\n';
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === 'read_text_file') {
+        return { path: 'a.txt', content, bytes: content.length };
+      }
+      if (command === 'write_text_file') {
+        content = String(args?.content);
+        return { path: 'a.txt', bytes: content.length };
+      }
+      if (command === 'check_syntax') {
+        return { supported: false, errorCount: 0, errors: [] };
+      }
+      if (command === 'extract_project_map_symbols') {
+        return [];
+      }
+      throw new Error(`Unexpected invoke: ${command}`);
+    });
+
+    const registry = build();
+    await registry.execute('patch', {
+      patches: [
+        { relativePath: 'a.txt', search: 'remove: mark\n', replace: '' },
+        { relativePath: 'a.txt', search: 'mark\n', replace: '  updated \n' },
+      ],
+    });
+    expect(content).toBe('  updated \r\nnext\r\n');
+
+    await expect(registry.execute('patch', {
+      patches: [
+        { relativePath: 'a.txt', search: '  updated \n', replace: 'mark\nmark\n' },
+        { relativePath: 'a.txt', search: 'mark\n', replace: 'another\n' },
+      ],
+    })).rejects.toThrow(/补丁 2 \(a\.txt\) 应用失败: 匹配到 2 处[\s\S]*L1\n {2}L2/);
+    expect(content).toBe('  updated \r\nnext\r\n');
+
+    await registry.execute('edit', { relativePath: 'a.txt', search: '  updated \n', replace: '' });
+    expect(content).toBe('next\r\n');
+  });
+
   it('#25 多文件写入中途失败时回滚已写入的文件，不留部分应用状态', async () => {
     const originalContents = new Map<string, string>([
       ['a.txt', 'AAA\n'],

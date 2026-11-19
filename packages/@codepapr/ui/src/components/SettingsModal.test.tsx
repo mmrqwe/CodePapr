@@ -402,9 +402,9 @@ describe('SettingsModal', () => {
     expect(maxContextInput.value).toBe('200000');
 
     await act(async () => {
-      setInputValue(maxContextInput, '150000');
+      setInputValue(maxContextInput, '500000');
     });
-    expect(maxContextInput.value).toBe('150000');
+    expect(maxContextInput.value).toBe('500000');
 
     const saveProfileButton = Array.from(container.querySelectorAll('button')).find(
       (b) => b.textContent?.trim() === '保存配置'
@@ -424,11 +424,11 @@ describe('SettingsModal', () => {
     });
 
     const currentSettings = useAgentStore.getState().settings;
-    expect(currentSettings.maxContextTokens).toBe(150000);
+    expect(currentSettings.maxContextTokens).toBe(500_000);
     const primary = currentSettings.modelProfiles.find(
       (p) => p.id === currentSettings.primaryProfileId
     );
-    expect(primary?.maxContextTokens).toBe(150000);
+    expect(primary?.maxContextTokens).toBe(500_000);
   });
 
   it('edits to a non-slot profile (local) survive the settings save round-trip', async () => {

@@ -140,6 +140,15 @@ describe('applySearchReplacePatch', () => {
     // 区域风格取首个被替换行（m\n）的 LF；第二个 m 行的 CRLF 被区域替换；a/b/c 行尾不变
     expect(result.content).toBe('a\nx\ny\nb\nx\ny\nc\n');
   });
+
+  it('lets adjacent matches consume their own newlines in a mixed file', () => {
+    const result = applySearchReplacePatch('保留\n头\r\nx\r\nx\n尾\r\n', {
+      search: '\nx',
+      replace: 'Y',
+      replaceAll: true,
+    });
+    expect(result).toEqual({ content: '保留\n头YY\r\n尾\r\n', replacements: 2 });
+  });
 });
 
 describe('applySearchReplaceDiff', () => {

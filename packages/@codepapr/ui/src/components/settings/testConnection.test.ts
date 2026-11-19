@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ResponseProvider } from '@codepapr/api';
 import type { IChatRequest, IChatResponse, ILLMProvider } from '@codepapr/api';
 import { CONNECTION_TEST_MAX_TOKENS, runConnectionTest } from './testConnection';
 
@@ -25,6 +26,33 @@ function okResponse(): IChatResponse {
 }
 
 describe('runConnectionTest', () => {
+  it.each([true, false])('sends a valid GPT-6 Luna payload with thinking=%s', async (thinkingEnabled) => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'Hi' }] }],
+    }));
+    const provider = new ResponseProvider({ apiKey: 'test-key', fetchFn });
+
+    await runConnectionTest(provider, {
+      model: 'gpt-6-luna',
+      providerName: 'response',
+      thinkingEnabled,
+      reasoningEffort: 'high',
+      thinkingBudgetTokens: 4096,
+      thinkingPayload: 'both',
+    });
+
+    const payload = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(payload).not.toHaveProperty('thinking');
+    expect(payload.reasoning).toEqual(thinkingEnabled ? { effort: 'high', summary: 'auto' } : { effort: 'none' });
+    if (thinkingEnabled) {
+      expect(payload).not.toHaveProperty('temperature');
+      expect(payload).not.toHaveProperty('top_p');
+    } else {
+      expect(payload).toMatchObject({ temperature: 0.3, top_p: 0.9 });
+    }
+  });
+
   it('发极简请求且 maxTokens 足够大以携带 thinking（Claude 预算约束）', async () => {
     const chat = vi.fn<(_: IChatRequest) => Promise<IChatResponse>>().mockResolvedValue(okResponse());
     await runConnectionTest(mockProvider(chat), {

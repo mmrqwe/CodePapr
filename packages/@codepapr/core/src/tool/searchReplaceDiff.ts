@@ -23,6 +23,18 @@ export interface ApplySearchReplaceDiffResult {
   totalReplacements: number;
 }
 
+export class SearchReplaceDiffError extends Error {
+  constructor(
+    readonly patchNumber: number,
+    readonly patch: ApplySearchReplaceDiffPatch,
+    readonly content: string,
+    cause: unknown,
+  ) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(`补丁 ${patchNumber} (${patch.relativePath}) 应用失败: ${message}`);
+  }
+}
+
 export interface SearchOccurrenceLocation {
   line: number;
   column: number;
@@ -104,15 +116,7 @@ export function applySearchReplacePatch(
   const occurrences = locateSearchOccurrences(content, plan.search).length;
 
   if (occurrences === 0) {
-    let hint = '';
-    if (plan.search.includes('\r\n') && !fileHasCrLf) {
-      hint = '（文件使用 LF 换行，但 search 使用了 CRLF）';
-    } else if (!plan.search.includes('\r\n') && fileHasCrLf) {
-      hint = '（文件使用 CRLF 换行，但 search 使用了 LF）';
-    }
-    throw new Error(
-      `未找到要替换的文本块${hint}。请核对 search 与文件当前内容是否一致（含缩进、空白与结尾换行），必要时先用 read 读取后再试`
-    );
+    throw new Error('未找到要替换的文本块，请用 read 重新读取文件并核对 search 的内容和空白');
   }
 
   if (
@@ -193,35 +197,29 @@ function spliceMixedEol(
   replaceLf: string,
   replacedSpans: ReadonlyArray<readonly [number, number]>
 ): string {
-  // LF 规范化偏移 → 原文偏移（\r\n 中的 \r 与其 \n 同归属，映射跳过 \r）
+  // LF 规范化偏移 → 原文偏移（\r\n 对应的换行指向 \r）
   const lfToOrig: number[] = [];
   for (let i = 0; i < original.length; i += 1) {
-    if (original[i] === '\r' && original[i + 1] === '\n') {
-      continue;
-    }
     lfToOrig.push(i);
+    if (original[i] === '\r' && original[i + 1] === '\n') {
+      i += 1;
+    }
   }
   lfToOrig.push(original.length);
 
   // 区域行尾：首个替换区间所在行的原始行尾；该行无换行（文件末尾）时用主导行尾
-  const eolOfOriginalLineAt = (origOffset: number): string | null => {
-    const nl = original.indexOf('\n', origOffset);
-    if (nl === -1) {
-      return null;
-    }
-    return nl > 0 && original[nl - 1] === '\r' ? '\r\n' : '\n';
-  };
-  const firstSpan = replacedSpans[0];
-  const regionEol =
-    (firstSpan ? eolOfOriginalLineAt(lfToOrig[firstSpan[0]]!) : null) ??
-    dominantLineEnding(original);
+  const firstNewline = contentLf.indexOf('\n', replacedSpans[0]![0]);
+  const regionEol = firstNewline === -1
+    ? dominantLineEnding(original)
+    : original[lfToOrig[firstNewline]!] === '\r' ? '\r\n' : '\n';
   const replaceWithEol = regionEol === '\n' ? replaceLf : replaceLf.replace(/\n/g, regionEol);
 
   let out = '';
   let prevOrigEnd = 0;
-  for (const [spanStart, spanEnd] of replacedSpans) {
-    // search 不以换行结尾且匹配后紧跟换行：区间扩展至包含该换行
-    const extendsTrailingEol = !searchLf.endsWith('\n') && contentLf[spanEnd] === '\n';
+  for (const [index, [spanStart, spanEnd]] of replacedSpans.entries()) {
+    // 下一处匹配若从这处换行开始，由下一处匹配处理该换行。
+    const extendsTrailingEol = !searchLf.endsWith('\n') && contentLf[spanEnd] === '\n'
+      && replacedSpans[index + 1]?.[0] !== spanEnd;
     const origStart = lfToOrig[spanStart]!;
     const origEnd = lfToOrig[extendsTrailingEol ? spanEnd + 1 : spanEnd]!;
     const piece = extendsTrailingEol ? replaceWithEol + regionEol : replaceWithEol;
@@ -283,9 +281,7 @@ export function applySearchReplaceDiff(
         replacements: current.replacements + patched.replacements,
       });
     } catch (error) {
-      throw new Error(
-        `补丁 ${index + 1} (${patch.relativePath}) 应用失败: ${(error as Error).message}`
-      );
+      throw new SearchReplaceDiffError(index + 1, patch, current.content, error);
     }
   });
 

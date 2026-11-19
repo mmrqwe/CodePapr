@@ -123,7 +123,7 @@ export async function listModels(options: {
     throw options.signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
   }
 
-  const url = `${baseURL}/models`;
+  const url = `${baseURL.replace(/\/(?:responses|models)$/, '')}/models`;
   const fetchFn = options.fetchFn ?? getGlobalFetchFn();
   const timeoutMs = options.timeoutMs ?? LIST_MODELS_TIMEOUT_MS;
   const controller = new AbortController();
@@ -131,19 +131,53 @@ export async function listModels(options: {
   const onAbort = (): void => controller.abort();
   options.signal?.addEventListener('abort', onAbort, { once: true });
 
-  let response: Response;
   try {
-    response = await fetchFn(url, {
+    const response = await fetchFn(url, {
       method: 'GET',
       headers: buildHeaders(options.auth ?? 'bearer', options.apiKey ?? ''),
       signal: controller.signal,
     });
+
+    if (response.status === 401 || response.status === 403) {
+      throw new ListModelsError('unauthorized', 'API key rejected', response.status);
+    }
+    if (response.status === 404) {
+      throw new ListModelsError('not_found', 'Model list endpoint not found', 404);
+    }
+    if (!response.ok) {
+      const body = truncateBody(await response.text().catch((err) => {
+        if (controller.signal.aborted) throw err;
+        return '';
+      }));
+      throw new ListModelsError(
+        'http',
+        body ? `HTTP ${response.status}: ${body}` : `HTTP ${response.status}`,
+        response.status
+      );
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = await response.json();
+    } catch (err) {
+      if (controller.signal.aborted) throw err;
+      throw new ListModelsError('invalid', 'Response was not JSON');
+    }
+
+    const ids = parseModelCatalog(parsed);
+    if (ids.length === 0) {
+      throw new ListModelsError('empty', 'Model list was empty');
+    }
+    return ids;
   } catch (err) {
     if (options.signal?.aborted) {
       throw options.signal.reason ?? err;
     }
-    if (controller.signal.aborted && !options.signal?.aborted) {
+    if (controller.signal.aborted) {
       throw new ListModelsError('network', 'Request timed out');
+    }
+    if (isListModelsError(err)) {
+      throw err;
     }
     const message = err instanceof Error ? err.message : String(err);
     throw new ListModelsError('network', message || 'Network request failed');
@@ -151,32 +185,4 @@ export async function listModels(options: {
     clearTimeout(timeoutId);
     options.signal?.removeEventListener('abort', onAbort);
   }
-
-  if (response.status === 401 || response.status === 403) {
-    throw new ListModelsError('unauthorized', 'API key rejected', response.status);
-  }
-  if (response.status === 404) {
-    throw new ListModelsError('not_found', 'Model list endpoint not found', 404);
-  }
-  if (!response.ok) {
-    const body = truncateBody(await response.text().catch(() => ''));
-    throw new ListModelsError(
-      'http',
-      body ? `HTTP ${response.status}: ${body}` : `HTTP ${response.status}`,
-      response.status
-    );
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = await response.json();
-  } catch {
-    throw new ListModelsError('invalid', 'Response was not JSON');
-  }
-
-  const ids = parseModelCatalog(parsed);
-  if (ids.length === 0) {
-    throw new ListModelsError('empty', 'Model list was empty');
-  }
-  return ids;
 }

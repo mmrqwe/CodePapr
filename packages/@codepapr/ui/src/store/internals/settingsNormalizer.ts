@@ -76,14 +76,10 @@ function normalizeModelProfile(input: unknown, fallbackId: string): ModelProfile
     typeof obj.maxTokens === 'number' && Number.isFinite(obj.maxTokens)
       ? Math.max(100, Math.floor(obj.maxTokens))
       : (apiMode === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS);
-  const rawMaxContextTokens =
+  const maxContextTokens =
     typeof obj.maxContextTokens === 'number' && Number.isFinite(obj.maxContextTokens)
       ? Math.max(1000, Math.floor(obj.maxContextTokens))
       : undefined;
-  const maxContextTokens =
-    rawMaxContextTokens === 500_000 || rawMaxContextTokens === 220_000
-      ? DEFAULT_MAX_CONTEXT_TOKENS
-      : rawMaxContextTokens;
   const thinkingEnabled = typeof obj.thinkingEnabled === 'boolean' ? obj.thinkingEnabled : false;
   const thinkingEffort = typeof obj.thinkingEffort === 'string' ? obj.thinkingEffort.trim() : '';
   const thinkingBudgetTokens =
@@ -503,14 +499,10 @@ export function normalizeSettings(
     typeof input.maxToolRounds === 'number' && Number.isFinite(input.maxToolRounds)
       ? Math.max(1, Math.floor(input.maxToolRounds))
       : DEFAULT_SETTINGS.maxToolRounds;
-  const rawMaxContextTokens =
+  const maxContextTokens =
     typeof input.maxContextTokens === 'number' && Number.isFinite(input.maxContextTokens)
       ? Math.max(1000, Math.floor(input.maxContextTokens))
       : DEFAULT_MAX_CONTEXT_TOKENS;
-  const maxContextTokens =
-    rawMaxContextTokens === 500_000 || rawMaxContextTokens === 220_000
-      ? DEFAULT_MAX_CONTEXT_TOKENS
-      : rawMaxContextTokens;
   const chatRenderBatchRounds =
     typeof input.chatRenderBatchRounds === 'number' && Number.isFinite(input.chatRenderBatchRounds)
       ? Math.max(1, Math.min(50, Math.floor(input.chatRenderBatchRounds)))
@@ -980,7 +972,6 @@ export function normalizeSettings(
       ? activePrimaryProfile.topP
       : topP;
   if (
-    hasExplicitProfiles &&
     typeof input.maxContextTokens === 'number' &&
     Number.isFinite(input.maxContextTokens)
   ) {

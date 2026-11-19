@@ -140,6 +140,102 @@ async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
 }
 
 describe('Agent parallel tool execution', () => {
+  it.each([
+    { tool: 'bash', progress: { updates: [{ id: 'verify', status: 'running' }] } },
+    { tool: 'task', progress: { tasks: [{ id: 'verify', title: 'Verify' }] } },
+    { tool: 'read', progress: { updates: [{ id: 'verify', summary: 'Checking results' }] } },
+  ])('publishes checklist progress before an earlier $tool call and keeps result order', async ({ tool, progress }) => {
+    let startWork: () => void = () => {};
+    let releaseWork: () => void = () => {};
+    const started = new Promise<void>((resolve) => { startWork = resolve; });
+    const release = new Promise<void>((resolve) => { releaseWork = resolve; });
+    const completion = { updates: [{ id: 'verify', status: 'completed' }] };
+    const afterCompletion = { updates: [{ id: 'next', status: 'running' }] };
+    const todo = vi.fn(() => ({ ok: true }));
+    const provider = providerWithOneToolRound([
+      { id: 'slow-work', name: tool, arguments: {} },
+      { id: 'show-progress', name: 'todo', arguments: progress },
+      { id: 'mark-complete', name: 'todo', arguments: completion },
+      { id: 'next-progress', name: 'todo', arguments: afterCompletion },
+    ]);
+    const { agent, log } = buildAgent({
+      provider,
+      tools: [
+        {
+          def: makeToolDefinition(tool),
+          handler: () => {
+            startWork();
+            return release;
+          },
+        },
+        { def: makeToolDefinition('todo'), handler: todo },
+      ],
+    });
+
+    const run = agent.chat('Verify the result');
+    try {
+      await started;
+      expect(todo.mock.calls).toEqual([[progress]]);
+    } finally {
+      releaseWork();
+      await run;
+    }
+    expect(todo.mock.calls).toEqual([[progress], [completion], [afterCompletion]]);
+    const toolIds = log.getAllMessages().filter((m) => m.role === 'tool')
+      .map((m) => m.toolResult?.toolCallId);
+    expect(toolIds).toEqual(['slow-work', 'show-progress', 'mark-complete', 'next-progress']);
+  });
+
+  it('does not publish progress scheduled after a question', async () => {
+    const todo = vi.fn();
+    const { agent, log } = buildAgent({
+      provider: providerWithOneToolRound([
+        { id: 'ask', name: 'question', arguments: {} },
+        { id: 'progress', name: 'todo', arguments: { updates: [{ id: 'verify', status: 'running' }] } },
+      ]),
+      tools: [
+        { def: makeToolDefinition('question'), handler: () => ({ __question: true, question: 'Continue?' }) },
+        { def: makeToolDefinition('todo'), handler: todo },
+      ],
+    });
+
+    await agent.chat('Verify the result');
+
+    expect(todo).not.toHaveBeenCalled();
+    const results = log.getAllMessages().filter((m) => m.role === 'tool').map((m) => m.toolResult);
+    expect(results).toMatchObject([
+      { toolCallId: 'ask', success: true },
+      { toolCallId: 'progress', success: false },
+    ]);
+  });
+
+  it('matches skipped and already executed calls after cancellation changes the execution order', async () => {
+    const controller = new AbortController();
+    const todo = vi.fn(() => {
+      controller.abort();
+      return { ok: true };
+    });
+    const slow = vi.fn();
+    const { agent, log } = buildAgent({
+      provider: providerWithOneToolRound([
+        { id: 'slow-work', name: 'bash', arguments: {} },
+        { id: 'progress', name: 'todo', arguments: { updates: [{ id: 'verify', status: 'running' }] } },
+      ]),
+      tools: [
+        { def: makeToolDefinition('bash'), handler: slow },
+        { def: makeToolDefinition('todo'), handler: todo },
+      ],
+    });
+
+    await agent.chat('Verify the result', undefined, undefined, controller.signal);
+
+    expect(todo).toHaveBeenCalledOnce();
+    expect(slow).not.toHaveBeenCalled();
+    const toolIds = log.getAllMessages().filter((m) => m.role === 'tool')
+      .map((m) => m.toolResult?.toolCallId);
+    expect(toolIds).toEqual(['slow-work', 'progress']);
+  });
+
   it('executes consecutive parallel-safe calls concurrently', async () => {
     const started: string[] = [];
     let releaseGate: () => void = () => {};

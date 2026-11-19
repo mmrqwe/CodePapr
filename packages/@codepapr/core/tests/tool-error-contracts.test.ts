@@ -65,20 +65,22 @@ describe('tool error contracts: search/replace (edit & patch 内核)', () => {
     });
   });
 
-  it('CRLF/LF 换行不匹配时点名两侧的换行风格', () => {
+  it('跨 CRLF/LF 匹配失败时提示核对文本内容', () => {
     const crlfFile = captureThrow(() =>
       applySearchReplacePatch('a\r\nb\r\n', { search: 'x\ny', replace: 'z' })
     );
     assertErrorContract(crlfFile, {
       locate: [/search/],
-      explain: [/CRLF 换行，但 search 使用了 LF/],
+      explain: [/未找到/],
       action: [/换行|read|核对/],
     });
+    expect(crlfFile).not.toContain('CRLF');
     const lfFile = captureThrow(() =>
       applySearchReplacePatch('a\nb\n', { search: 'x\r\ny', replace: 'z' })
     );
+    expect(lfFile).not.toContain('CRLF');
     assertErrorContract(lfFile, {
-      explain: [/LF 换行，但 search 使用了 CRLF/],
+      explain: [/未找到/],
       action: [/换行|read|核对/],
     });
   });

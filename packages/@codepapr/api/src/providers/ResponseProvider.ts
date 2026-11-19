@@ -11,7 +11,7 @@ import {
   IToolCall,
 } from '@codepapr/types';
 import { Logger, sortedStringify } from '@codepapr/common';
-import { BaseLLMProvider, ProviderConfig, ProviderRequestError } from './ILLMProvider';
+import { BaseLLMProvider, isBillingErrorCode, ProviderConfig, ProviderRequestError } from './ILLMProvider';
 import {
   finalizeStreamingToolCalls,
   isRetriableStreamErrorType,
@@ -60,6 +60,7 @@ interface ResponseUsage {
 interface ResponseOutputMessagePart {
   type?: 'output_text' | 'text' | 'reasoning_text' | 'reasoning' | 'summary_text' | string;
   text?: string;
+  refusal?: string;
 }
 
 interface ResponseReasoningSummaryPart {
@@ -78,6 +79,12 @@ interface ResponseOutputItem {
   summary?: string | ResponseReasoningSummaryPart[];
   text?: string;
   status?: string;
+}
+
+interface ResponseError {
+  code?: string | null;
+  type?: string | null;
+  message?: string;
 }
 
 interface ResponseObject {
@@ -101,17 +108,15 @@ interface ResponseObject {
   }>;
   usage?: ResponseUsage;
   system_fingerprint?: string;
-  error?: {
-    message?: string;
-    type?: string;
-  };
+  error?: ResponseError | null;
+  incomplete_details?: { reason?: string } | null;
 }
 
-interface ResponseStreamChunk {
-  type?: string;
+interface ResponseStreamChunk extends ResponseError {
   id?: string;
   delta?: string | { text?: string; content?: string };
   text?: string;
+  refusal?: string;
   call_id?: string;
   item_id?: string;
   item?: ResponseOutputItem;
@@ -136,11 +141,15 @@ interface ResponseStreamChunk {
     finish_reason?: string | null;
   }>;
   usage?: ResponseUsage;
-  error?: {
-    message?: string;
-    type?: string;
-  };
+  error?: ResponseError | null;
 }
+
+const RETRIABLE_RESPONSES_ERROR_CODES = new Set([
+  'server_error',
+  'server_is_overloaded',
+  'rate_limit_exceeded',
+  'slow_down',
+]);
 
 const REASONING_DELTA_EVENT_TYPES = new Set([
   'response.reasoning_text.delta',
@@ -352,6 +361,8 @@ function extractAssistantTextFromOutputItem(item: ResponseOutputItem): string {
   for (const part of item.content) {
     if (part.type === 'output_text' || part.type === 'text' || !part.type) {
       text += part.text ?? '';
+    } else if (part.type === 'refusal') {
+      text += part.refusal ?? '';
     }
   }
   return text;
@@ -424,6 +435,38 @@ export class ResponseProvider extends BaseLLMProvider {
     return `${base}/responses`;
   }
 
+  private responseError(error: ResponseError | null | undefined, fallback: string) {
+    const code = error?.code?.trim().toLowerCase();
+    const kind = code || error?.type?.trim().toLowerCase();
+    const detail = error?.message || fallback;
+    return new ProviderRequestError({
+      provider: this.name,
+      message: code ? `${code}: ${detail}` : detail,
+      retriable: !!kind &&
+        ![code, error?.type].some(isBillingErrorCode) &&
+        (RETRIABLE_RESPONSES_ERROR_CODES.has(kind) || isRetriableStreamErrorType(kind)),
+    });
+  }
+
+  private checkResponseStatus(response: ResponseObject | undefined, status = response?.status): void {
+    if (status === 'cancelled') {
+      throw new ProviderRequestError({
+        provider: this.name,
+        message: response?.error?.message || 'Responses API response was cancelled by the server',
+      });
+    }
+    if (status === 'failed' || response?.error) {
+      throw this.responseError(response?.error, 'Responses API response failed');
+    }
+    const reason = response?.incomplete_details?.reason;
+    if (status === 'incomplete' && reason && reason !== 'max_output_tokens') {
+      throw new ProviderRequestError({
+        provider: this.name,
+        message: `Responses API response was incomplete: ${reason}`,
+      });
+    }
+  }
+
   async streamChat(
     request: IChatRequest,
     onEvent: (event: IChatStreamEvent) => void,
@@ -471,7 +514,7 @@ export class ResponseProvider extends BaseLLMProvider {
         let usage: ResponseUsage | undefined;
         let sawDone = false;
         let sawFinishReason = false;
-        // response.completed/done 事件携带的最终状态('completed'/'incomplete'/'failed')。
+        // 终止事件携带的最终状态；兼容端点也可能只发 [DONE]。
         // 网关截断时可能缺失——缺失时靠 usage 输出 token 达顶作为截断证据。
         let responseStatus: string | undefined;
         const toolCallStates: ResponsesToolCallState[] = [];
@@ -507,14 +550,8 @@ export class ResponseProvider extends BaseLLMProvider {
               return false;
             }
 
-            if (chunk.error) {
-              const msg = chunk.error.message || 'Responses API stream error';
-              const isRetriable = isRetriableStreamErrorType(chunk.error.type);
-              throw new ProviderRequestError({
-                provider: this.name,
-                message: msg,
-                retriable: isRetriable,
-              });
+            if (chunk.error || chunk.type === 'error') {
+              throw this.responseError(chunk.error ?? chunk, 'Responses API stream error');
             }
 
             // 1. Response metadata
@@ -558,13 +595,18 @@ export class ResponseProvider extends BaseLLMProvider {
             // 3. Text delta
             if (
               eventType === 'response.output_text.delta' ||
-              eventType === 'response.text.delta'
+              eventType === 'response.text.delta' ||
+              eventType === 'response.refusal.delta'
             ) {
               const delta = extractStreamText(chunk);
               if (delta) {
                 content += delta;
                 emit({ type: 'content-delta', delta });
               }
+            } else if (eventType === 'response.refusal.done' && chunk.refusal) {
+              content = appendUniqueText(
+                content, chunk.refusal, (delta) => emit({ type: 'content-delta', delta }),
+              );
             }
 
             // 4. Reasoning delta / done
@@ -608,18 +650,22 @@ export class ResponseProvider extends BaseLLMProvider {
               }
             }
 
-            // 6. Response completion
+            // 6. Response termination
             if (
               eventType === 'response.completed' ||
-              eventType === 'response.done'
+              eventType === 'response.done' ||
+              eventType === 'response.incomplete' ||
+              eventType === 'response.failed' ||
+              eventType === 'response.cancelled'
             ) {
               sawDone = true;
-              // 终止信号以 response.status 为准（'incomplete' = 输出达到
-              // max_output_tokens 上限被截断）。不在此处置 sawFinishReason——
-              // 那是 choices 兼容路径 finish_reason 的专用标志。
-              if (chunk.response?.status) {
-                responseStatus = chunk.response.status;
-              }
+              // Some compatible endpoints send completed/done without a status.
+              // Keep the token-based fallback for those responses.
+              const eventStatus = eventType === 'response.completed' || eventType === 'response.done'
+                ? responseStatus
+                : eventType.slice('response.'.length);
+              responseStatus = chunk.response?.status ?? eventStatus;
+              this.checkResponseStatus(chunk.response, responseStatus);
               if (chunk.response?.usage) {
                 usage = chunk.response.usage;
               } else if (chunk.usage) {
@@ -714,7 +760,7 @@ export class ResponseProvider extends BaseLLMProvider {
           });
         }
 
-        // 流干净地结束但没有任何终止信号（response.completed/done 或 choices
+        // 流干净地结束但没有任何终止信号（Responses 终止事件或 choices
         // finish_reason）：典型是中转/网关截断后直接关连接。即使已发出部分内容
         // 也绝不能当正常完成处理——抛可重试错误走流层重试（部分内容由
         // stream-restart 流程丢弃）。usage 不算终止信号：截断流常常先发 usage。
@@ -726,15 +772,9 @@ export class ResponseProvider extends BaseLLMProvider {
           });
         }
 
-        if (responseStatus === 'failed' || responseStatus === 'cancelled') {
-          throw new ProviderRequestError({
-            provider: this.name,
-            message: `Responses API stream ended with status '${responseStatus}'`,
-            retriable: true,
-          });
-        }
-
-        const effectiveToolCalls = finalizeNamedResponsesToolCalls(toolCallStates);
+        const effectiveToolCalls = responseStatus === 'incomplete'
+          ? undefined
+          : finalizeNamedResponsesToolCalls(toolCallStates);
         const outputTokensSeen = getResponseOutputTokens(usage);
 
         let effectiveFinishReason: string;
@@ -854,6 +894,7 @@ export class ResponseProvider extends BaseLLMProvider {
   }
 
   private transformResponse(data: ResponseObject): IChatResponse {
+    this.checkResponseStatus(data);
     let content = '';
     let reasoningContent = '';
     const toolCalls: IToolCall[] = [];
@@ -861,13 +902,10 @@ export class ResponseProvider extends BaseLLMProvider {
     if (Array.isArray(data.output)) {
       for (const item of data.output) {
         if (item.type === 'message' || item.role === 'assistant') {
-          if (typeof item.content === 'string') {
-            content += item.content;
-          } else if (Array.isArray(item.content)) {
+          content += extractAssistantTextFromOutputItem(item);
+          if (Array.isArray(item.content)) {
             for (const part of item.content) {
-              if (part.type === 'output_text' || part.type === 'text' || !part.type) {
-                content += part.text ?? '';
-              } else if (part.type === 'reasoning_text' || part.type === 'reasoning') {
+              if (part.type === 'reasoning_text' || part.type === 'reasoning') {
                 reasoningContent += part.text ?? '';
               }
             }
@@ -903,14 +941,6 @@ export class ResponseProvider extends BaseLLMProvider {
       }
     }
 
-    if (data.status === 'failed' || data.status === 'cancelled') {
-      throw new ProviderRequestError({
-        provider: this.name,
-        message: data.error?.message || `Responses API response ended with status '${data.status}'`,
-        retriable: true,
-      });
-    }
-
     let finishReason: string;
     if (data.status === 'incomplete') {
       // 输出达到 max_output_tokens 被截断：映射 'length' 走 Agent 续写守卫，
@@ -933,7 +963,7 @@ export class ResponseProvider extends BaseLLMProvider {
             role: 'assistant',
             content,
             reasoningContent: reasoningContent || undefined,
-            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            toolCalls: data.status !== 'incomplete' && toolCalls.length > 0 ? toolCalls : undefined,
           },
           finishReason,
         },
@@ -1065,19 +1095,28 @@ export class ResponseProvider extends BaseLLMProvider {
         });
     }
 
+    const isLuna = /^gpt-6-luna(?:-\d{4}-\d{2}-\d{2})?$/i.test(request.model.trim());
+    const requestedEffort = resolveResponsesReasoningEffort(request.thinking?.reasoningEffort);
+    const lunaEffort = request.thinking?.type === 'disabled' ? 'none'
+      : requestedEffort === 'minimal' ? 'low' : requestedEffort;
     const officialEffort = this.usesOfficialApi
       ? officialOpenAIReasoningEffort(request, 'medium')
       : undefined;
-    if (!this.usesOfficialApi || supportsOfficialOpenAISampling(request.model, officialEffort)) {
-      if (typeof request.temperature === 'number') {
-        payload.temperature = request.temperature;
-      }
-      if (typeof request.topP === 'number') {
-        payload.top_p = request.topP;
-      }
+    const allowsSampling = isLuna ? lunaEffort === 'none'
+      : !this.usesOfficialApi || supportsOfficialOpenAISampling(request.model, officialEffort);
+
+    if (allowsSampling && typeof request.temperature === 'number') {
+      payload.temperature = request.temperature;
+    }
+    if (allowsSampling && typeof request.topP === 'number') {
+      payload.top_p = request.topP;
     }
 
-    if (officialEffort) {
+    if (isLuna && request.thinking) {
+      payload.reasoning = lunaEffort === 'none'
+        ? { effort: 'none' }
+        : { effort: lunaEffort, summary: 'auto' };
+    } else if (officialEffort) {
       payload.reasoning = { effort: officialEffort, summary: 'auto' };
     } else if (!this.usesOfficialApi && request.thinking) {
       const thinkingType = request.thinking.type || 'enabled';

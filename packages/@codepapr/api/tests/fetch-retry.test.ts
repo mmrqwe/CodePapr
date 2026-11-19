@@ -96,6 +96,29 @@ describe('fetchWithRetry 重试语义', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    { type: 'insufficient_quota' },
+    { code: 'organization_spend_limit_exceeded', type: 'rate_limit_error' },
+    { code: 'organization_usage_limit_exceeded' },
+    { code: 'billing_hard_limit_reached' },
+  ])('stops immediately on a quota-related 429: %j', async (error) => {
+    const fetchFn = vi.fn<typeof fetch>().mockImplementation(async () => Response.json(
+      { error },
+      { status: 429, headers: { 'x-request-id': 'quota-request' } },
+    ));
+    const onRequestRetry = vi.fn();
+    const provider = makeProvider({ fetchFn, onRequestRetry });
+
+    await expect(provider.callFetch('http://x', { method: 'POST' })).rejects.toMatchObject({
+      status: 429,
+      retriable: false,
+      requestId: 'quota-request',
+      attempts: 1,
+    });
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(onRequestRetry).not.toHaveBeenCalled();
+  });
+
   it('P1-11: 超时与用户取消区分——超时重试并以可重试错误结束，而非 AbortError', async () => {
     // fetch 挂起直到内部超时控制器 abort（尊重 signal）。
     const fetchMock = vi.fn(

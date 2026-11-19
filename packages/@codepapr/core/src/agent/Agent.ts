@@ -39,6 +39,7 @@ import {
 } from '@codepapr/types';
 import { Logger, estimateTokens } from '@codepapr/common';
 import { PARALLEL_SAFE_TOOL_NAMES } from './agentConfig';
+import { prioritizeTodoProgress } from './todoList';
 import { Session, mergeOptionalTokenCount } from './Session';
 import { MessageFactory, redactTranscriptOutputString } from '../message/Message';
 import { Serializer } from '../cache/Serializer';
@@ -353,8 +354,8 @@ function accumulateStats(
 /**
  * 由统一参数构建 thinking 字段（主代理与子代理共用）：
  * - thinkingEnabled 缺省视为开启；显式 false 时，DeepSeek 必须发
- *   {type:'disabled'}（省略字段默认开思考），OpenAI/Claude 格式直接省略字段
- *   （缺省即不思考，且避免第三方端点对未知 thinking 字段返回 400）。
+ *   {type:'disabled'}。Responses 也保留显式关闭，由适配器按模型转换；
+ *   OpenAI Chat Completions 与 Claude 格式继续省略。
  * - reasoningEffort 任意非空字符串透传（OpenAI 兼容生态取值各异）。
  * - budgetTokens 仅 Claude 格式使用，provider 侧按 API 硬约束钳制。
  * - thinkingPayload 决定请求体带 thinking / reasoning / 两者；缺省 DeepSeek
@@ -366,7 +367,9 @@ export function buildThinking(
 ): IChatThinking | undefined {
   const enabled = params.thinkingEnabled !== false;
   if (!enabled) {
-    return providerName === 'deepseek' ? { type: 'disabled' } : undefined;
+    return providerName === 'deepseek' || providerName === 'response'
+      ? { type: 'disabled' }
+      : undefined;
   }
   const reasoningEffort =
     typeof params.reasoningEffort === 'string' && params.reasoningEffort.trim()
@@ -975,9 +978,7 @@ export class Agent {
       let mergedContent = '';
       let mergedReasoning = '';
       let roundThinking = baseThinking;
-      // DeepSeek 省略 thinking 字段时默认开启思考，必须显式 disabled 才算关闭。
-      const thinkingDisabled: IChatThinking | undefined =
-        this.providerName === 'deepseek' ? { type: 'disabled' } : undefined;
+      const thinkingDisabled = buildThinking({ thinkingEnabled: false }, this.providerName);
       let request!: IChatRequest;
       let assistant!: IChatResponse['choices'][number]['message'];
       // 本轮 LLM 实际生成耗时：只累计 provider 请求本身的墙钟（含续写重试的
@@ -1328,15 +1329,16 @@ export class Agent {
         }
       };
 
-      const records: ToolCallRecord[] = [];
+      const executionOrder = prioritizeTodoProgress(assistant.toolCalls);
+      const records = new Map<IToolCall, ToolCallRecord>();
       const isParallelSafe = (call: IToolCall): boolean =>
         PARALLEL_SAFE_TOOL_NAMES.has(call.name) && !call.arguments._parseError;
       let cursor = 0;
-      while (cursor < assistant.toolCalls.length) {
+      while (cursor < executionOrder.length) {
         if (effectiveSignal?.aborted || question) {
           break;
         }
-        const head = assistant.toolCalls[cursor];
+        const head = executionOrder[cursor];
 
         if (!isParallelSafe(head)) {
           // 串行段：question 短路依赖执行后立即提取 __question
@@ -1347,7 +1349,7 @@ export class Agent {
             arguments: head.arguments,
           });
           const record = await executeOne(head);
-          records.push(record);
+          records.set(head, record);
           if (
             record.result &&
             typeof record.result === 'object' &&
@@ -1369,8 +1371,8 @@ export class Agent {
         // 并行段：合并连续安全调用，全段先发 start，再按块并发执行
         const group: IToolCall[] = [head];
         let next = cursor + 1;
-        while (next < assistant.toolCalls.length && isParallelSafe(assistant.toolCalls[next])) {
-          group.push(assistant.toolCalls[next]);
+        while (next < executionOrder.length && isParallelSafe(executionOrder[next])) {
+          group.push(executionOrder[next]);
           next += 1;
         }
         for (const call of group) {
@@ -1388,7 +1390,9 @@ export class Agent {
           }
           const chunk = group.slice(chunkStart, chunkStart + PARALLEL_TOOL_CHUNK_SIZE);
           const chunkRecords = await Promise.all(chunk.map((call) => executeOne(call)));
-          records.push(...chunkRecords);
+          for (const record of chunkRecords) {
+            records.set(record.call, record);
+          }
         }
         cursor = next;
       }
@@ -1398,8 +1402,18 @@ export class Agent {
       // assistant tool_calls 之后紧跟每个 tool_call_id 的 tool 消息，中间插入
       // user 消息会被 400 拒绝（insufficient tool messages following tool_calls）。
       const deferredToolImageMessages: IMessage[] = [];
-      for (const record of records) {
-        const { call, result, success, errorMessage, toolDurationMs } = record;
+      const skipReason = question
+        ? '该工具调用被跳过：会话已进入提问流程'
+        : '该工具调用未执行：会话已取消';
+      for (const call of assistant.toolCalls) {
+        const record = records.get(call);
+        // 取消或提问后，未执行的调用仍需在原位置配对工具结果。
+        const { result, success, errorMessage, toolDurationMs } = record ?? {
+          result: { error: skipReason },
+          success: false,
+          errorMessage: skipReason,
+          toolDurationMs: undefined,
+        };
         const consumed = this.consumeToolResultSideChannels(result);
         const contextResult = consumed.contextResult;
         const subagentToolInvocations = consumed.subagentToolInvocations;
@@ -1414,6 +1428,8 @@ export class Agent {
           // 转录投影只留图片引用（data 置空）：事件输出会进 UI store 并被
           // 持久化，base64 曾把兼容快照撑爆 20MB 上限（保存失败根因）。
           output: redactTranscriptOutputString(safeStringifyOutput(contextResult)),
+          // 未执行的工具没有 start 事件，重建日志仍需要原始参数。
+          ...(!record ? { arguments: call.arguments } : {}),
           contextContent: toolMsg.content,
           contextSummary:
             typeof toolMsg.metadata?.[TOOL_SUMMARY_METADATA_KEY] === 'string'
@@ -1433,42 +1449,6 @@ export class Agent {
               )
             );
           }
-        }
-      }
-
-      const executedToolCalls = records.length;
-
-      // 为被跳过的 tool call 补占位结果：OpenAI/DeepSeek 要求每个 tool_call 都有
-      // 配对的 tool 消息、Claude 要求每个 tool_use 后必须跟 tool_result，否则下一
-      // 轮请求被 400 拒绝。question 中断与取消中断都会留下同批未执行的调用——
-      // 不补占位会污染日志，用户回答 question 后的第一个请求即失败。
-      if (executedToolCalls < assistant.toolCalls.length) {
-        const skipReason = question
-          ? '该工具调用被跳过：会话已进入提问流程'
-          : '该工具调用未执行：会话已取消';
-        for (const skipped of assistant.toolCalls.slice(executedToolCalls)) {
-          const placeholder = await this.buildToolMessage(
-            skipped,
-            { error: skipReason },
-            false
-          );
-          await this.session.logStore.append(placeholder);
-          onStreamEvent?.({
-            type: 'tool-call-end',
-            toolCallId: skipped.id,
-            toolName: skipped.name,
-            success: false,
-            error: skipReason,
-            output: JSON.stringify({ error: skipReason }),
-            // 携带原始参数：该事件没有对应的 start 事件，UI 侧从 end 事件新建
-            // invocation 时需要真实参数，否则重建上下文与活日志字节不一致。
-            arguments: skipped.arguments,
-            contextContent: placeholder.content,
-            contextSummary:
-              typeof placeholder.metadata?.[TOOL_SUMMARY_METADATA_KEY] === 'string'
-                ? (placeholder.metadata[TOOL_SUMMARY_METADATA_KEY] as string)
-                : undefined,
-          });
         }
       }
 

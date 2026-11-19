@@ -1,10 +1,12 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import {
+  CLAUDE_ADAPTIVE_EFFORTS,
   DEFAULT_MAX_TOKENS,
   DEEPSEEK_DEFAULT_MAX_TOKENS,
   DEFAULT_MAX_CONTEXT_TOKENS,
   isRequestBodyOverrideField,
   normalizeRequestBodyOverrides,
+  usesClaudeAdaptiveThinking,
 } from '@codepapr/api';
 import type { RequestBodyOverrides } from '@codepapr/types';
 import type { ApiFormat, Lang, ModelProfile } from '../../store/agentStore';
@@ -144,6 +146,8 @@ export function ProfileEditorModal({
 
   const isLocal = draft.apiMode === 'local';
   const isClaudeFormat = draft.apiMode === 'custom' && draft.apiFormat === 'claude';
+  const adaptiveClaude = isClaudeFormat && usesClaudeAdaptiveThinking(draft.model.trim());
+  const claudeEffort = draft.thinkingEffort?.trim().toLowerCase() || 'high';
 
   const modelPresets =
     draft.apiMode === 'deepseek'
@@ -749,7 +753,19 @@ export function ProfileEditorModal({
             }
           />
 
-          {draft.thinkingEnabled && isClaudeFormat && (
+          {draft.thinkingEnabled && adaptiveClaude && (
+            <InlineSelectRow
+              title={t.thinkingEffort}
+              value={CLAUDE_ADAPTIVE_EFFORTS.includes(claudeEffort) ? claudeEffort : 'high'}
+              onChange={(thinkingEffort) => update({ thinkingEffort })}
+            >
+              {CLAUDE_ADAPTIVE_EFFORTS.map((effort) => (
+                <option key={effort} value={effort}>{effort}</option>
+              ))}
+            </InlineSelectRow>
+          )}
+
+          {draft.thinkingEnabled && isClaudeFormat && !adaptiveClaude && (
             <TextField
               label={t.thinkingBudgetLabel}
               type="number"
