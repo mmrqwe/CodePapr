@@ -70,8 +70,7 @@ const DEFAULT_TOOL_TIMEOUT_MS = 270_000;
 export const PARALLEL_TOOL_CHUNK_SIZE = 8;
 
 /** 输出被 max_tokens 截断（finish_reason='length'）后，单回合自动续写的上限。
- *  防止遇到中转的极小输出上限时无限续写；达到上限后以已合并内容正常收尾
- *  （绝不报错——任务在后续回合仍可继续）。 */
+ *  防止无限续写。达到上限后保留已合并内容，并报告截断。 */
 export const MAX_CONTINUATIONS_PER_ROUND = 12;
 
 /** 截断续写时追加在请求尾部的指令（临时消息，不落日志）。 */
@@ -978,6 +977,7 @@ export class Agent {
       let mergedContent = '';
       let mergedReasoning = '';
       let roundThinking = baseThinking;
+      let outputTruncation: Extract<IChatStreamEvent, { type: 'assistant-round-complete' }>['outputTruncation'];
       const thinkingDisabled = buildThinking({ thinkingEnabled: false }, this.providerName);
       let request!: IChatRequest;
       let assistant!: IChatResponse['choices'][number]['message'];
@@ -1177,10 +1177,13 @@ export class Agent {
           }
           continuationAttempt += 1;
           if (continuationAttempt > MAX_CONTINUATIONS_PER_ROUND) {
-            // 安全阀（如中转输出上限极小）：以已合并内容正常收尾，不报错。
+            outputTruncation = {
+              ...(choice.outputTruncation ?? { reason: choice.finishReason, maxOutputTokens: request.maxTokens }),
+              continuations: continuationAttempt - 1,
+            };
             log.warn('Max continuations reached; ending round with merged partial content', {
               round: roundNumber,
-              continuations: continuationAttempt - 1,
+              ...outputTruncation,
             });
             assistant = { ...segment, content: '', toolCalls: undefined, reasoningContent: undefined };
             break;
@@ -1256,6 +1259,7 @@ export class Agent {
         content: roundContent,
         reasoningContent: roundReasoning,
         hasToolCalls,
+        ...(outputTruncation ? { outputTruncation } : {}),
         ...(roundModelMs > 0 ? { durationMs: Math.round(roundModelMs) } : {}),
       });
 

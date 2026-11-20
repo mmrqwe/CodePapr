@@ -36,7 +36,12 @@ export function applyRequestBodyOverrides(
   return body;
 }
 
-export function reachedRequestOutputLimit(body: Record<string, unknown>, outputTokens: number): boolean {
+export function getRequestOutputTokenLimit(body: Record<string, unknown>): number | undefined {
   const limit = body.max_output_tokens ?? body.max_completion_tokens ?? body.max_tokens;
-  return typeof limit === 'number' && limit > 0 && outputTokens >= limit;
+  return typeof limit === 'number' && Number.isFinite(limit) && limit > 0 ? limit : undefined;
+}
+
+export function reachedRequestOutputLimit(body: Record<string, unknown>, outputTokens: number): boolean {
+  const limit = getRequestOutputTokenLimit(body);
+  return limit !== undefined && outputTokens >= limit;
 }

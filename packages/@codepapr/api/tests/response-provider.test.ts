@@ -131,7 +131,8 @@ describe('ResponseProvider', () => {
   it('preserves the partial answer on response.incomplete and drops truncated tool calls', async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(sseResponse(
       { type: 'response.output_text.delta', delta: 'Partial answer' },
-      { type: 'response.output_item.added', item: { type: 'function_call', call_id: 'call-1', name: 'test' } },
+      { type: 'response.output_item.added', item: { type: 'function_call', call_id: 'call-1', name: 'write' } },
+      { type: 'response.function_call_arguments.delta', call_id: 'call-1', delta: '{"relativePath":"TerrainDemo.cs","content":"' },
       {
         type: 'response.incomplete',
         response: {
@@ -141,14 +142,37 @@ describe('ResponseProvider', () => {
         },
       },
     ));
-    const provider = new ResponseProvider({ apiKey: 'test-key', fetchFn, streamMaxRetries: 0 });
+    const provider = new ResponseProvider({
+      apiKey: 'test-key', fetchFn, streamMaxRetries: 0, requestBodyOverrides: { max_output_tokens: 128 },
+    });
+    const onEvent = vi.fn();
 
-    const response = await provider.streamChat({ model: 'gpt-4o', messages: [] }, vi.fn());
+    const response = await provider.streamChat({ model: 'gpt-4o', messages: [], maxTokens: 4000 }, onEvent);
 
-    expect(response.choices[0]).toMatchObject({ finishReason: 'length', message: { content: 'Partial answer' } });
+    expect(response.choices[0]).toMatchObject({
+      finishReason: 'length',
+      message: { content: 'Partial answer' },
+      outputTruncation: { reason: 'max_output_tokens', maxOutputTokens: 128 },
+    });
     expect(response.choices[0].message.toolCalls).toBeUndefined();
     expect(response.usage?.output_tokens).toBe(128);
+    expect(onEvent.mock.calls.map(([event]) => event.type)).toEqual(['content-delta']);
     expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it('prioritizes a compatible length finish over buffered tool calls', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(sseResponse(
+      { choices: [{ delta: { tool_calls: [{ id: 'call-1', function: { name: 'write', arguments: '{"content":"' } }] } }] },
+      { choices: [{ finish_reason: 'length' }] },
+    ));
+    const provider = new ResponseProvider({ apiKey: 'test-key', fetchFn, streamMaxRetries: 0 });
+    const onEvent = vi.fn();
+
+    const response = await provider.streamChat({ model: 'gpt-4o', messages: [] }, onEvent);
+
+    expect(response.choices[0].finishReason).toBe('length');
+    expect(response.choices[0].message.toolCalls).toBeUndefined();
+    expect(onEvent).not.toHaveBeenCalled();
   });
 
   it.each([true, false])('preserves refusal text exactly once when streamed=%s', async (stream) => {
@@ -361,15 +385,7 @@ describe('ResponseProvider', () => {
     expect(res.choices[0].message.toolCalls?.[0].name).toBe('read_file');
     expect(res.choices[0].message.toolCalls?.[0].arguments).toEqual({ path: 'src/index.ts' });
 
-    const toolStarts = events.filter((e) => e.type === 'tool-call-start');
-    expect(toolStarts).toEqual([
-      {
-        type: 'tool-call-start',
-        toolCallId: 'call_999',
-        toolName: 'read_file',
-        arguments: {},
-      },
-    ]);
+    expect(events.some((e) => e.type === 'tool-call-start')).toBe(false);
   });
 
   it('default thinkingPayload (reasoning) omits thinking.type on Responses endpoints', async () => {
@@ -681,7 +697,7 @@ describe('ResponseProvider', () => {
     ]);
   });
 
-  it('merges fc_ item id and call_id into one named tool and announces it during the stream', async () => {
+  it('merges fc_ item id and call_id into one complete tool call', async () => {
     const sseChunks = [
       'data: {"type":"response.output_item.added","item":{"id":"fc_01a01fbf","type":"function_call","call_id":"call_01a01fbf","name":"app_render"}}\n\n',
       'data: {"type":"response.function_call_arguments.delta","item_id":"fc_01a01fbf","delta":"{\\"appId\\": "}\n\n',
@@ -713,14 +729,7 @@ describe('ResponseProvider', () => {
         arguments: { appId: 'learning-health-report' },
       },
     ]);
-    expect(events.filter((e) => e.type === 'tool-call-start')).toEqual([
-      {
-        type: 'tool-call-start',
-        toolCallId: 'call_01a01fbf',
-        toolName: 'app_render',
-        arguments: {},
-      },
-    ]);
+    expect(events.some((e) => e.type === 'tool-call-start')).toBe(false);
   });
 
   it('does not create a second empty-name tool when argument deltas arrive before output_item.added', async () => {
@@ -754,11 +763,7 @@ describe('ResponseProvider', () => {
         arguments: { title: 'report' },
       },
     ]);
-    expect(events.filter((e) => e.type === 'tool-call-start')).toHaveLength(1);
-    expect(events.filter((e) => e.type === 'tool-call-start')[0]).toMatchObject({
-      toolCallId: 'call_pre',
-      toolName: 'app_render',
-    });
+    expect(events.some((e) => e.type === 'tool-call-start')).toBe(false);
   });
 
   it('emits reasoning and assistant text from a completed payload that had no deltas', async () => {

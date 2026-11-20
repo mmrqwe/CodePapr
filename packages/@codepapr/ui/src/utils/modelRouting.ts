@@ -8,6 +8,7 @@ export interface RoutingSettings {
   fastModel: string;
   temperature: number;
   maxTokens: number;
+  fastMaxTokens?: number;
   thinkingEnabled: boolean;
   compactionTemperature?: number;
 }
@@ -88,7 +89,7 @@ export function selectTaskModelRoute(
       tier: 'fast',
       model: fastModel,
       temperature: settings.temperature,
-      maxTokens: settings.maxTokens,
+      maxTokens: settings.fastMaxTokens ?? settings.maxTokens,
       thinkingEnabled: false,
       reason: 'default',
     };

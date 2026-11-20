@@ -1160,10 +1160,13 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     expect(builds[0]?.thinking).toEqual({ type: 'enabled', payload: 'thinking', reasoningEffort: 'medium' });
   });
 
-  it('stops continuing after MAX_CONTINUATIONS_PER_ROUND and ends gracefully (no throw)', async () => {
+  it('reports output truncation after MAX_CONTINUATIONS_PER_ROUND and preserves the partial reply', async () => {
     const chatMock = vi.fn<(_: IChatRequest) => Promise<IChatResponse>>();
     for (let i = 0; i < MAX_CONTINUATIONS_PER_ROUND + 1; i += 1) {
-      chatMock.mockResolvedValueOnce(lengthResponse(`片段${i}`));
+      const response = lengthResponse(`片段${i}`);
+      response.choices[0].message.toolCalls = [{ id: `call-${i}`, name: 'write', arguments: {} }];
+      response.choices[0].outputTruncation = { reason: 'max_output_tokens', maxOutputTokens: 4000 };
+      chatMock.mockResolvedValueOnce(response);
     }
     const provider: ILLMProvider = {
       name: 'openai',
@@ -1173,13 +1176,24 @@ describe('Agent completion-quality guards (no silent stops)', () => {
     };
     const agent = createGuardedAgent(provider, 'openai', () => undefined);
 
-    const response = await agent.chat('请回答');
+    const events: IChatStreamEvent[] = [];
+    const response = await agent.chat('请回答', (event) => events.push(event));
 
     // 达到续写上限后以已合并内容正常收尾（绝不抛错）
     expect(chatMock).toHaveBeenCalledTimes(MAX_CONTINUATIONS_PER_ROUND + 1);
     const expected = Array.from({ length: MAX_CONTINUATIONS_PER_ROUND + 1 }, (_, i) => `片段${i}`).join('');
     expect(response.content).toBe(expected);
     expect(response.toolCalls).toBeUndefined();
+    expect(events.filter((event) => event.type === 'round-retry')).toHaveLength(MAX_CONTINUATIONS_PER_ROUND);
+    expect(events.some((event) => event.type === 'tool-call-start' || event.type === 'tool-call-end')).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'assistant-round-complete',
+      content: expected,
+      hasToolCalls: false,
+      outputTruncation: {
+        reason: 'max_output_tokens', maxOutputTokens: 4000, continuations: MAX_CONTINUATIONS_PER_ROUND,
+      },
+    }));
   });
 
   it('retries an empty completion instead of silently ending the turn', async () => {

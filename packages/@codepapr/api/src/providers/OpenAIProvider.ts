@@ -32,7 +32,7 @@ import {
   officialOpenAIReasoningEffort,
   supportsOfficialOpenAISampling,
 } from './officialApi';
-import { reachedRequestOutputLimit } from './requestBodyOverrides';
+import { getRequestOutputTokenLimit, reachedRequestOutputLimit } from './requestBodyOverrides';
 import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
 import {
   applyOpencodeGatewayHeaders,
@@ -390,6 +390,12 @@ export class OpenAIProvider extends BaseLLMProvider {
                 toolCalls: finalizeStreamingToolCalls(toolCallStates),
               },
               finishReason: effectiveFinishReason,
+              ...(effectiveFinishReason === 'length' ? {
+                outputTruncation: {
+                  reason: sawFinishReason ? finishReason : 'output_token_limit',
+                  maxOutputTokens: getRequestOutputTokenLimit(body),
+                },
+              } : {}),
             },
           ],
           usage: {

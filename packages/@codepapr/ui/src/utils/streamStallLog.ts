@@ -12,6 +12,8 @@
  * 写入失败不影响对话。
  */
 
+import type { IChatStreamEvent } from '@codepapr/types';
+
 export interface StreamStallRecord {
   /** 本回合观察到的最长无真实输出等待（毫秒） */
   maxWaitMs: number;
@@ -27,8 +29,7 @@ export interface StreamStallLogInput {
   messageId: string;
   modelName?: string;
   modelTier?: string;
-  /** retry = 正在重连；recovered = 重连后该轮成功收尾 */
-  outcome: 'retry' | 'recovered';
+  outcome: 'retry' | 'recovered' | 'output-truncated';
   /** outcome=retry 时的重连类型 */
   event?: 'stream-restart' | 'request-retry';
   attempt?: number;
@@ -36,8 +37,9 @@ export interface StreamStallLogInput {
   maxWaitMs: number;
   retries: number;
   firstStallAt: number;
-  /** outcome=recovered：该轮最终耗时（含重连等待） */
+  /** 该轮最终耗时（含重连等待） */
   roundDurationMs?: number;
+  outputTruncation?: Extract<IChatStreamEvent, { type: 'assistant-round-complete' }>['outputTruncation'];
 }
 
 const records = new Map<string, StreamStallRecord>();
@@ -94,6 +96,13 @@ export function buildStreamStallLogText(input: StreamStallLogInput, now = new Da
     );
   } else if (typeof input.roundDurationMs === 'number') {
     lines.push(`roundDurationMs: ${input.roundDurationMs}`);
+  }
+  if (input.outputTruncation) {
+    lines.push(
+      `finishReason: ${input.outputTruncation.reason}`,
+      `maxOutputTokens: ${input.outputTruncation.maxOutputTokens ?? 'n/a'}`,
+      `continuations: ${input.outputTruncation.continuations}`,
+    );
   }
   return `${lines.join('\n')}\n`;
 }

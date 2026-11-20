@@ -48,9 +48,12 @@ describe('modelRouting', () => {
   });
 
   it('honors an explicit fast model hint', () => {
-    const route = selectTaskModelRoute(settings, 'agent', '帮我摘要这篇文章', 'fast');
+    const route = selectTaskModelRoute(
+      { ...settings, fastMaxTokens: 16_000 }, 'agent', '帮我摘要这篇文章', 'fast',
+    );
     expect(route.tier).toBe('fast');
     expect(route.model).toBe('deepseek-flash');
+    expect(route.maxTokens).toBe(16_000);
   });
 
   it('routes context compaction to the fast model when available', () => {

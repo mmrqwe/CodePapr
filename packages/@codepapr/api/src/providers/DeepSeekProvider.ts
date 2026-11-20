@@ -32,7 +32,7 @@ import {
 } from './streaming';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
-import { reachedRequestOutputLimit } from './requestBodyOverrides';
+import { getRequestOutputTokenLimit, reachedRequestOutputLimit } from './requestBodyOverrides';
 
 const log = new Logger('DeepSeekProvider');
 
@@ -341,6 +341,12 @@ export class DeepSeekProvider extends BaseLLMProvider {
                 toolCalls: finalizeStreamingToolCalls(toolCallStates),
               },
               finishReason: effectiveFinishReason,
+              ...(effectiveFinishReason === 'length' ? {
+                outputTruncation: {
+                  reason: sawFinishReason ? finishReason : 'output_token_limit',
+                  maxOutputTokens: getRequestOutputTokenLimit(body),
+                },
+              } : {}),
             },
           ],
           usage: {

@@ -2032,6 +2032,35 @@ describe('useAgentStore.sendMessage', () => {
     expect(statusDuringEmpty).toContain('(2)');
   });
 
+  it('shows the final truncation notice alongside the partial reply and logs the request limit', async () => {
+    const chat = vi.fn(async (_input: string, onEvent?: (event: IChatStreamEvent) => void) => {
+      onEvent?.({ type: 'content-delta', delta: '准备写入 TerrainDemo.cs' });
+      onEvent?.({
+        type: 'assistant-round-complete', round: 1, content: '准备写入 TerrainDemo.cs', hasToolCalls: false,
+        outputTruncation: { reason: 'max_output_tokens', maxOutputTokens: 4000, continuations: 12 },
+      });
+      return createAgentResponse('准备写入 TerrainDemo.cs');
+    });
+    useAgentStore.setState({
+      _agent: createMockAgent({ chat }),
+      _agentModel: 'deepseek-v4-pro',
+    });
+
+    await useAgentStore.getState().sendMessage('写入地形脚本', '写入地形脚本', 'ask');
+
+    const state = useAgentStore.getState();
+    const assistantMessages = state.sessionMessages['session-1']?.filter((message) => message.role === 'assistant');
+    expect(state.isLoading).toBe(false);
+    expect(assistantMessages).toMatchObject([
+      { content: '准备写入 TerrainDemo.cs', isStreaming: false },
+      { content: expect.stringContaining('自动续写已停止'), synthetic: true, carryForwardInContext: false },
+    ]);
+    expect(assistantMessages?.[0].toolInvocations).toBeUndefined();
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith('write_text_file', expect.objectContaining({
+      content: expect.stringContaining('finishReason: max_output_tokens\nmaxOutputTokens: 4000\ncontinuations: 12'),
+    })));
+  });
+
   it('stores request-context snapshots on assistant messages when debug mode is enabled', async () => {
     const requestContext = '{\n  "round": 1,\n  "model": "deepseek-v4-pro"\n}';
     const contextSnapshot: IContextSnapshot = {

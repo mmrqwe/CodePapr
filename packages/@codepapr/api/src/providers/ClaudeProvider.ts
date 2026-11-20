@@ -23,6 +23,7 @@ import {
 import { buildClaudeImageContent, ClaudeContentPart } from './imageContent';
 import { DEFAULT_MAX_TOKENS } from '../tokenLimits';
 import { isOfficialApiHost } from './officialApi';
+import { getRequestOutputTokenLimit } from './requestBodyOverrides';
 import {
   applyOpencodeGatewayHeaders,
   resolveOpencodeSessionId,
@@ -292,6 +293,7 @@ export class ClaudeProvider extends BaseLLMProvider {
   ): Promise<IChatResponse> {
     const url = `${this.config.baseURL}/messages`;
     const payload = this.buildPayload(request, true);
+    const body = this.applyRequestBodyOverrides(payload);
 
     log.info('LLM request started', {
       model: payload.model,
@@ -305,7 +307,7 @@ export class ClaudeProvider extends BaseLLMProvider {
         const response = await this.fetchWithRetry(url, {
           method: 'POST',
           headers: this.requestHeaders(),
-          body: sortedStringify(this.applyRequestBodyOverrides(payload)),
+          body: sortedStringify(body),
         }, signal, (attempt, maxRetries, err) => {
           onEvent({
             type: 'request-retry',
@@ -480,6 +482,9 @@ export class ClaudeProvider extends BaseLLMProvider {
                     : undefined,
               },
               finishReason,
+              ...(finishReason === 'length' ? {
+                outputTruncation: { reason: 'max_tokens', maxOutputTokens: getRequestOutputTokenLimit(body) },
+              } : {}),
             },
           ],
           usage: {

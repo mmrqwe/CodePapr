@@ -26,7 +26,7 @@ import {
   officialOpenAIReasoningEffort,
   supportsOfficialOpenAISampling,
 } from './officialApi';
-import { reachedRequestOutputLimit } from './requestBodyOverrides';
+import { getRequestOutputTokenLimit, reachedRequestOutputLimit } from './requestBodyOverrides';
 import { shouldSendReasoningEffort, shouldSendThinkingType } from './thinkingPayload';
 import {
   applyOpencodeGatewayHeaders,
@@ -282,7 +282,6 @@ interface ResponsesToolCallState {
   itemId?: string;
   name: string;
   argumentsText: string;
-  announced: boolean;
 }
 
 function findResponsesToolCall(
@@ -312,7 +311,7 @@ function upsertResponsesToolCall(
     argumentsText?: string;
     appendArguments?: string;
   },
-): ResponsesToolCallState {
+): void {
   let state = findResponsesToolCall(states, patch.callId, patch.itemId);
   if (!state) {
     const id = (patch.callId || patch.itemId || `call-${states.length}`).trim() || `call-${states.length}`;
@@ -321,7 +320,6 @@ function upsertResponsesToolCall(
       itemId: patch.itemId?.trim() || undefined,
       name: '',
       argumentsText: '',
-      announced: false,
     };
     states.push(state);
   }
@@ -335,23 +333,6 @@ function upsertResponsesToolCall(
   if (patch.appendArguments) {
     state.argumentsText += patch.appendArguments;
   }
-  return state;
-}
-
-function announceToolCallStart(
-  state: ResponsesToolCallState,
-  onEvent: (event: IChatStreamEvent) => void,
-): void {
-  if (state.announced) return;
-  const name = state.name.trim();
-  if (!name) return;
-  state.announced = true;
-  onEvent({
-    type: 'tool-call-start',
-    toolCallId: state.id,
-    toolName: name,
-    arguments: safeParseToolArguments(state.argumentsText.trim() || '{}'),
-  });
 }
 
 function extractAssistantTextFromOutputItem(item: ResponseOutputItem): string {
@@ -517,6 +498,7 @@ export class ResponseProvider extends BaseLLMProvider {
         // 终止事件携带的最终状态；兼容端点也可能只发 [DONE]。
         // 网关截断时可能缺失——缺失时靠 usage 输出 token 达顶作为截断证据。
         let responseStatus: string | undefined;
+        let incompleteReason: string | undefined;
         const toolCallStates: ResponsesToolCallState[] = [];
 
         try {
@@ -525,11 +507,7 @@ export class ResponseProvider extends BaseLLMProvider {
             // 超时；心跳/usage/response.created 等元数据不算（心跳不续命）。
             let progress = false;
             const emit = (event: IChatStreamEvent): void => {
-              if (
-                event.type === 'content-delta' ||
-                event.type === 'reasoning-delta' ||
-                event.type === 'tool-call-start'
-              ) {
+              if (event.type === 'content-delta' || event.type === 'reasoning-delta') {
                 progress = true;
               }
               onEvent(event);
@@ -570,13 +548,13 @@ export class ResponseProvider extends BaseLLMProvider {
               chunk.item
             ) {
               if (chunk.item.type === 'function_call') {
-                const state = upsertResponsesToolCall(toolCallStates, {
+                upsertResponsesToolCall(toolCallStates, {
                   callId: chunk.item.call_id,
                   itemId: chunk.item.id,
                   name: chunk.item.name,
                   argumentsText: chunk.item.arguments,
                 });
-                announceToolCallStart(state, emit);
+                progress = true;
               } else if (chunk.item.type === 'reasoning' || chunk.item.type === 'reasoning_summary') {
                 reasoningContent = appendUniqueText(
                   reasoningContent,
@@ -636,16 +614,16 @@ export class ResponseProvider extends BaseLLMProvider {
               const delta = extractStreamText(chunk);
               if (delta) {
                 if (chunk.call_id || chunk.item_id) {
-                  const state = upsertResponsesToolCall(toolCallStates, {
+                  upsertResponsesToolCall(toolCallStates, {
                     callId: chunk.call_id,
                     itemId: chunk.item_id,
                     appendArguments: delta,
                   });
-                  announceToolCallStart(state, emit);
+                  progress = true;
                 } else if (toolCallStates.length > 0) {
                   const state = toolCallStates[toolCallStates.length - 1];
                   state.argumentsText += delta;
-                  announceToolCallStart(state, emit);
+                  progress = true;
                 }
               }
             }
@@ -666,6 +644,7 @@ export class ResponseProvider extends BaseLLMProvider {
                 : eventType.slice('response.'.length);
               responseStatus = chunk.response?.status ?? eventStatus;
               this.checkResponseStatus(chunk.response, responseStatus);
+              incompleteReason = chunk.response?.incomplete_details?.reason ?? incompleteReason;
               if (chunk.response?.usage) {
                 usage = chunk.response.usage;
               } else if (chunk.usage) {
@@ -686,13 +665,13 @@ export class ResponseProvider extends BaseLLMProvider {
                       (delta) => emit({ type: 'content-delta', delta }),
                     );
                   } else if (item.type === 'function_call') {
-                    const state = upsertResponsesToolCall(toolCallStates, {
+                    upsertResponsesToolCall(toolCallStates, {
                       callId: item.call_id,
                       itemId: item.id,
                       name: item.name,
                       argumentsText: item.arguments,
                     });
-                    announceToolCallStart(state, emit);
+                    progress = true;
                   }
                 }
               }
@@ -701,6 +680,10 @@ export class ResponseProvider extends BaseLLMProvider {
             // 7. Compatible choices fallback
             if (chunk.choices?.length) {
               for (const choice of chunk.choices) {
+                if (choice.finish_reason) {
+                  finishReason = choice.finish_reason;
+                  sawFinishReason = true;
+                }
                 const delta = choice.delta;
                 if (!delta) continue;
 
@@ -717,18 +700,13 @@ export class ResponseProvider extends BaseLLMProvider {
 
                 if (delta.tool_calls?.length) {
                   for (const tc of delta.tool_calls) {
-                    const state = upsertResponsesToolCall(toolCallStates, {
+                    upsertResponsesToolCall(toolCallStates, {
                       callId: tc.id,
                       name: tc.function?.name,
                       appendArguments: tc.function?.arguments,
                     });
-                    announceToolCallStart(state, emit);
                   }
-                }
-
-                if (choice.finish_reason) {
-                  finishReason = choice.finish_reason;
-                  sawFinishReason = true;
+                  progress = true;
                 }
               }
             }
@@ -772,13 +750,16 @@ export class ResponseProvider extends BaseLLMProvider {
           });
         }
 
-        const effectiveToolCalls = responseStatus === 'incomplete'
-          ? undefined
-          : finalizeNamedResponsesToolCalls(toolCallStates);
         const outputTokensSeen = getResponseOutputTokens(usage);
+        const reachedLimitWithoutStatus = !responseStatus && !sawFinishReason
+          && reachedRequestOutputLimit(body, outputTokensSeen);
+        const truncated = responseStatus === 'incomplete' || finishReason === 'length' || reachedLimitWithoutStatus;
+        const truncationReason = incompleteReason
+          ?? (reachedLimitWithoutStatus ? 'output_token_limit' : 'incomplete');
+        const effectiveToolCalls = truncated ? undefined : finalizeNamedResponsesToolCalls(toolCallStates);
 
         let effectiveFinishReason: string;
-        if (responseStatus === 'incomplete') {
+        if (truncated) {
           // 输出达到 max_output_tokens 被截断：映射 'length' 走 Agent 续写守卫。
           // 优先于 tool_calls——截断的 tool call JSON 绝不能执行。
           effectiveFinishReason = 'length';
@@ -790,11 +771,7 @@ export class ResponseProvider extends BaseLLMProvider {
           // 收到终止信号但无最终状态（部分中转只发 response.done/[DONE]）：
           // 与 OpenAIProvider 对齐——绝不默认伪装 'stop'，以输出 token 达顶作
           // 截断证据降级 'length'，否则显式标记 'unknown'。
-          effectiveFinishReason = sawFinishReason
-            ? finishReason
-            : reachedRequestOutputLimit(body, outputTokensSeen)
-              ? 'length'
-              : 'unknown';
+          effectiveFinishReason = sawFinishReason ? finishReason : 'unknown';
         }
 
         const result: IChatResponse = {
@@ -808,6 +785,12 @@ export class ResponseProvider extends BaseLLMProvider {
                 toolCalls: effectiveToolCalls,
               },
               finishReason: effectiveFinishReason,
+              ...(truncated ? {
+                outputTruncation: {
+                  reason: finishReason === 'length' ? finishReason : truncationReason,
+                  maxOutputTokens: getRequestOutputTokenLimit(body),
+                },
+              } : {}),
             },
           ],
           usage: {
@@ -847,6 +830,7 @@ export class ResponseProvider extends BaseLLMProvider {
   async chat(request: IChatRequest, signal?: AbortSignal): Promise<IChatResponse> {
     const url = this.getEndpointUrl();
     const payload = this.buildPayload(request, false);
+    const body = this.applyRequestBodyOverrides(payload);
 
     log.info('LLM Responses API non-streaming request started', {
       inputCount: payload.input.length,
@@ -860,7 +844,7 @@ export class ResponseProvider extends BaseLLMProvider {
       {
         method: 'POST',
         headers: this.requestHeaders(),
-        body: sortedStringify(this.applyRequestBodyOverrides(payload)),
+        body: sortedStringify(body),
       },
       signal,
       undefined,
@@ -890,10 +874,10 @@ export class ResponseProvider extends BaseLLMProvider {
       outputTokens: data.usage?.output_tokens ?? 0,
     });
 
-    return this.transformResponse(data);
+    return this.transformResponse(data, getRequestOutputTokenLimit(body));
   }
 
-  private transformResponse(data: ResponseObject): IChatResponse {
+  private transformResponse(data: ResponseObject, maxOutputTokens: number | undefined): IChatResponse {
     this.checkResponseStatus(data);
     let content = '';
     let reasoningContent = '';
@@ -966,6 +950,12 @@ export class ResponseProvider extends BaseLLMProvider {
             toolCalls: data.status !== 'incomplete' && toolCalls.length > 0 ? toolCalls : undefined,
           },
           finishReason,
+          ...(finishReason === 'length' ? {
+            outputTruncation: {
+              reason: data.incomplete_details?.reason ?? 'incomplete',
+              maxOutputTokens,
+            },
+          } : {}),
         },
       ],
       usage: {

@@ -490,11 +490,6 @@ export function normalizeSettings(
     input.lang === 'zh-CN' || input.lang === 'zh-TW' || input.lang === 'en'
       ? input.lang
       : DEFAULT_SETTINGS.lang ?? 'zh-CN';
-  const maxTokens = sanitizeMaxTokens(
-    activeConfig.maxTokens,
-    provider,
-    provider === 'deepseek' ? DEEPSEEK_DEFAULT_MAX_TOKENS : DEFAULT_MAX_TOKENS
-  );
   const maxToolRounds =
     typeof input.maxToolRounds === 'number' && Number.isFinite(input.maxToolRounds)
       ? Math.max(1, Math.floor(input.maxToolRounds))
@@ -910,6 +905,10 @@ export function normalizeSettings(
   const effectiveApiFormat = hasExplicitProfiles ? activePrimaryProfile.apiFormat : apiFormat;
   const effectiveProvider = hasExplicitProfiles ? resolveProviderName(activePrimaryProfile) : provider;
   const effectiveModel = hasExplicitProfiles ? activePrimaryProfile.model : model;
+  const maxTokens = sanitizeMaxTokens(
+    hasExplicitProfiles ? activePrimaryProfile.maxTokens : activeConfig.maxTokens,
+    effectiveProvider,
+  );
   const effectiveFastModel = hasExplicitProfiles ? activeFastProfile.model : fastModel;
   const effectiveApiKey = hasExplicitProfiles ? activePrimaryProfile.apiKey : apiKey;
   const effectiveBaseURL = hasExplicitProfiles ? activePrimaryProfile.baseURL : baseURL;

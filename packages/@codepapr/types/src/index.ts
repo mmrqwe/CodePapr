@@ -372,6 +372,11 @@ export interface IContextSnapshot {
   };
 }
 
+export interface IOutputTruncation {
+  reason: string;
+  maxOutputTokens?: number;
+}
+
 export type IChatStreamEvent =
   | { type: 'assistant-round-start'; round: number }
   | { type: 'request-context'; round: number; content: string; snapshot: IContextSnapshot }
@@ -384,6 +389,7 @@ export type IChatStreamEvent =
       durationMs?: number;
       /** 本轮 assistant 带了 tool_calls，随后还会执行工具；UI 不得把回合标成已完成。 */
       hasToolCalls?: boolean;
+      outputTruncation?: IOutputTruncation & { continuations: number };
     }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'content-delta'; delta: string }
@@ -515,6 +521,7 @@ export interface IChatResponse {
       toolCalls?: IToolCall[];
     };
     finishReason: string;
+    outputTruncation?: IOutputTruncation;
   }>;
   usage?: {
     prompt_cache_hit_tokens?: number;

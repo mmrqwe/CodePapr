@@ -102,7 +102,7 @@ interface CommandResult {
   timedOut: boolean;
 }
 
-import { normalizeSettings, getSettingsError } from './settingsNormalizer';
+import { normalizeSettings, getSettingsError, resolveFastProfile } from './settingsNormalizer';
 import { addConversationRuntime, addConversationStats, addTierRuntimeMs, getSessionConversationStats } from './stats';
 import { maybeApplySessionTitle, touchSession } from './persistence';
 import { saveCurrentProjectState } from './projectSnapshot';
@@ -1234,6 +1234,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               model: normalizedSettings.model,
               fastModelEnabled: normalizedSettings.fastModelEnabled,
               fastModel: normalizedSettings.fastModel,
+              fastMaxTokens: resolveFastProfile(normalizedSettings).maxTokens,
               temperature: normalizedSettings.temperature,
               maxTokens: normalizedSettings.maxTokens,
               thinkingEnabled: normalizedSettings.thinkingEnabled,
@@ -1641,21 +1642,20 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                   firstStallAt: stallRecord.firstStallAt,
                 });
               } else if (event.type === 'assistant-round-complete') {
-                // 重连后的轮次成功收尾：补一条 recovered 记录说明恢复结果。
-                // 仅当确实发生过重连才落盘（单纯 stream-wait 不产生日志文件）。
                 const stallRecord = readStreamStallRecord(assistantMessageId);
-                if (stallRecord && stallRecord.retries > 0) {
+                if (event.outputTruncation || (stallRecord && stallRecord.retries > 0)) {
                   void writeStreamStallLog({
                     workspacePath: turnWorkspacePath,
                     sessionId: activeSessionId!,
                     messageId: assistantMessageId,
                     modelName: route.model,
                     modelTier: route.tier,
-                    outcome: 'recovered',
-                    maxWaitMs: stallRecord.maxWaitMs,
-                    retries: stallRecord.retries,
-                    firstStallAt: stallRecord.firstStallAt,
+                    outcome: event.outputTruncation ? 'output-truncated' : 'recovered',
+                    maxWaitMs: stallRecord?.maxWaitMs ?? 0,
+                    retries: stallRecord?.retries ?? 0,
+                    firstStallAt: stallRecord?.firstStallAt ?? 0,
                     roundDurationMs: event.durationMs,
+                    outputTruncation: event.outputTruncation,
                   });
                 }
                 clearStreamStallRecord(assistantMessageId);
@@ -1795,8 +1795,16 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               });
 
               // 耗时测量：事件回调内更新完消息后再累加（保持 updater 纯函数）。
-              if (event.type === 'assistant-round-complete' && typeof event.durationMs === 'number') {
-                passModelRuntimeMs += event.durationMs;
+              if (event.type === 'assistant-round-complete') {
+                passModelRuntimeMs += event.durationMs ?? 0;
+                if (event.outputTruncation) {
+                  appendInfoMessage(
+                    set,
+                    getTranslation(normalizedSettings.lang).outputTruncatedNotice,
+                    activeSessionId,
+                    { resetLoading: false },
+                  );
+                }
               }
               if (event.type === 'tool-call-end' && typeof event.durationMs === 'number') {
                 passToolRuntimeMs += event.durationMs;

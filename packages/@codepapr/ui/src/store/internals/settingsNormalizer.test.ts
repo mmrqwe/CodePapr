@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { ResponseProvider } from '@codepapr/api';
 import {
   createDefaultProfile,
   findProfileById,
@@ -9,6 +10,7 @@ import {
   resolveThinkingPayload,
 } from './settingsNormalizer';
 import { CORE_TOKEN_KEYS } from '../../theme/themeEngine';
+import { buildPrimaryModelRoute } from '../../utils/modelRouting';
 import type { CustomThemeRecord } from '../../theme/types';
 import type { ModelProfile, Settings } from './types';
 
@@ -478,7 +480,7 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     expect(settings.model).toBe('model-1');
   });
 
-  it('正确支持并归一化 response API 格式（Responses API）', () => {
+  it('Responses 请求使用当前模型的输出上限，旧版仅有 per-mode 配置时沿用旧值', async () => {
     const responseProfile: ModelProfile = {
       id: 'prof-ark-resp',
       name: '火山 Responses API',
@@ -487,10 +489,18 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
       baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
       apiKey: 'sk-ark-secret',
       model: 'doubao-1.5-pro-32k',
-      maxTokens: 32000,
+      maxTokens: 100_000,
     };
 
+    const legacySettings = {
+      apiMode: 'custom' as const,
+      apiFormat: 'response' as const,
+      custom: {
+        apiKey: '', baseURL: '', model: 'legacy-model', fastModel: '', maxTokens: 4000,
+      },
+    };
     const settings = normalizeSettings({
+      ...legacySettings,
       modelProfiles: [responseProfile],
       primaryProfileId: 'prof-ark-resp',
       mentorApiFormat: 'response',
@@ -501,6 +511,18 @@ describe('ModelProfile 与 Slot 角色分配机制', () => {
     expect(settings.model).toBe('doubao-1.5-pro-32k');
     expect(settings.baseURL).toBe('https://ark.cn-beijing.volces.com/api/v3');
     expect(settings.mentorApiFormat).toBe('response');
+    expect(normalizeSettings(legacySettings).maxTokens).toBe(4000);
+
+    const fetchFn = vi.fn<typeof fetch>().mockImplementation(async () => new Response(
+      'data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+    await new ResponseProvider({ apiKey: 'test-key', baseURL: settings.baseURL, fetchFn })
+      .streamChat({ ...buildPrimaryModelRoute(settings), messages: [] }, () => {});
+    expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).toMatchObject({
+      model: responseProfile.model,
+      max_output_tokens: 100_000,
+    });
   });
 
   it('maxContextTokens 默认值为 200,000', () => {
