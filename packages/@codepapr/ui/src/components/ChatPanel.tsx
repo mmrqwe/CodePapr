@@ -1703,6 +1703,15 @@ export const ChatPanel = memo(function ChatPanel({ onOpenWorkspacePath, onOpenPr
                   : '提示：已打开文件中尚未保存的修改会在文件重载时被覆盖。命中 .gitignore 的文件（如 node_modules/、dist/、下载的素材）以及 CodePapr 自身的 .codepapr/ 数据不会受影响。'}
               </p>
               )}
+              {resetInFlight && resetHasCheckpoint && (
+                <p role="status" className="mb-4 text-xs text-fg-muted">
+                  {settings.lang === 'en'
+                    ? 'Backing up the workspace and restoring files. Large projects can take a while.'
+                    : settings.lang === 'zh-TW'
+                    ? '正在備份工作區並還原檔案。大型專案可能需要一些時間。'
+                    : '正在备份工作区并恢复文件。大型项目可能需要一些时间。'}
+                </p>
+              )}
               <div className="flex justify-end gap-3">
                 <button
                   className="rounded-lg border border-line px-4 py-2 text-xs text-fg-muted transition-colors hover:border-line-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"

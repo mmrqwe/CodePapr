@@ -37,6 +37,8 @@ vi.mock('./WorkspaceInsightPanel', async () => {
 });
 
 import { normalizeSettings, useAgentStore } from '../store/agentStore';
+import { cancelBackgroundWorkspaceWork } from '../store/internals/backgroundDiagnostics';
+import { clearLanguageIntelligenceWorkspace } from '../utils/languageIntelligence';
 import { CodingWorkbench } from './CodingWorkbench';
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
@@ -88,6 +90,8 @@ describe('CodingWorkbench', () => {
     await act(async () => {
       root.unmount();
     });
+    cancelBackgroundWorkspaceWork();
+    clearLanguageIntelligenceWorkspace(useAgentStore.getState().workspacePath);
     container.remove();
   });
 

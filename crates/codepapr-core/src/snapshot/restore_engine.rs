@@ -1,5 +1,6 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use git2::{Repository, ResetType, Oid, Tree};
+use git2::{DiffOptions, Index, Oid, Repository, ResetType, Tree};
 use super::types::{RestorePlan, RestoreResult, FileChange};
 use super::ignore_resolver::{git_relative_path, IgnoreResolver};
 use crate::git_operations::validate_git_ref;
@@ -71,6 +72,11 @@ fn remove_untracked_not_in_tree(
 const BACKUP_REF: &str = "refs/codepapr-backup-before-reset";
 const BACKUP_COMMIT_MESSAGE: &str = "codepapr:backup-before-reset";
 
+struct BackupSnapshot {
+    oid: Oid,
+    empty_worktree: bool,
+}
+
 /// 把任意 git 引用解析为提交（短 SHA / 完整 SHA / 分支名 / HEAD 等）。
 /// 旧实现只认完整 40 位十六进制（Oid::from_str），工具定义却宣称接受
 /// 「回退目标引用」——LLM 拿 shortHash/分支名必然失败（#23）。
@@ -99,7 +105,7 @@ fn code_papr_git_path(workspace: &Path) -> PathBuf {
 ///
 /// 工作区无可快照文件（空/全被忽略）时降级为备份当前 HEAD；
 /// HEAD 也不存在则返回错误（调用方应拒绝无安全网的破坏性操作）。
-fn create_backup_snapshot(repo: &Repository, workspace: &Path) -> Result<Oid, String> {
+fn create_backup_snapshot(repo: &Repository, workspace: &Path) -> Result<BackupSnapshot, String> {
     let head_commit = repo
         .head()
         .ok()
@@ -109,48 +115,60 @@ fn create_backup_snapshot(repo: &Repository, workspace: &Path) -> Result<Oid, St
     let files = IgnoreResolver::new(workspace).collect_files_for_backup()?;
     if files.is_empty() {
         return head_commit
-            .map(|c| c.id())
+            .map(|c| BackupSnapshot { oid: c.id(), empty_worktree: true })
             .ok_or_else(|| "没有可备份的内容（工作区为空且无 HEAD）".to_string());
     }
 
-    let mut index = repo
-        .index()
-        .map_err(|e| format!("index: {}", e.message()))?;
-    index.clear().map_err(|e| format!("clear index: {}", e.message()))?;
+    if repo.path().join("index.lock").exists() {
+        return Err("index is locked".to_string());
+    }
+    let mut index = repo.index().map_err(|e| format!("index: {}", e.message()))?;
+    let mut options = DiffOptions::new();
+    options.include_typechange(true).include_unreadable(true);
+    let changed = repo.diff_index_to_workdir(Some(&index), Some(&mut options))
+        .ok()
+        .map(|diff| {
+            diff.deltas()
+                .flat_map(|delta| [delta.old_file().path(), delta.new_file().path()])
+                .flatten()
+                .map(git_relative_path)
+                .collect::<HashSet<_>>()
+        });
 
-    let mut added = 0usize;
-    let mut skipped = 0usize;
-    for file in &files {
-        // collect_files 返回 OS 原生分隔符（Windows 为 '\'），libgit2 只认 '/'
-        match index.add_path(&git_relative_path(file)) {
-            Ok(()) => added += 1,
-            Err(e) => {
-                skipped += 1;
-                eprintln!(
-                    "[CodePapr] backup_snapshot: add_path failed for {:?}: {}",
-                    file,
-                    e.message()
-                );
+    // Reuse the cached blobs for unchanged tracked files. The walker also finds
+    // new files hidden by the shadow Git repo's exclude rules.
+    let mut backup_index = Index::new().map_err(|e| format!("backup index: {}", e.message()))?;
+    let collect = (|| -> Result<(), String> {
+        for file in &files {
+            let path = git_relative_path(file);
+            if changed.as_ref().is_none_or(|changed| changed.contains(&path))
+                || index.get_path(&path, 0).is_none()
+            {
+                // add_path applies the same filters and modes as a normal snapshot.
+                index.add_path(&path)
+                    .map_err(|e| format!("备份快照不完整：{}：{}", file.display(), e.message()))?;
             }
+            let entry = index.get_path(&path, 0)
+                .ok_or_else(|| format!("备份快照不完整：找不到 {}", file.display()))?;
+            backup_index.add(&entry)
+                .map_err(|e| format!("backup index entry {}: {}", file.display(), e.message()))?;
+        }
+        Ok(())
+    })();
+    // Discard backup-only paths from libgit2's cached index without writing them
+    // to disk. The next checkout must still see those paths as untracked.
+    let reload = index.read(true);
+    collect?;
+    reload.map_err(|e| format!("reload index: {}", e.message()))?;
+
+    let tree_oid = backup_index.write_tree_to(repo)
+        .map_err(|e| format!("write_tree: {}", e.message()))?;
+    if let Some(head) = &head_commit {
+        if tree_oid == head.tree_id() {
+            return Ok(BackupSnapshot { oid: head.id(), empty_worktree: false });
         }
     }
-    if skipped > 0 {
-        // #23：备份不完整（add_path 失败的未跟踪文件会被 reset 删除且无法
-        // undo 恢复）绝不能继续——宁可拒绝整个 reset。
-        return Err(format!(
-            "备份快照不完整：{skipped} 个文件未能加入备份，已拒绝执行 reset（避免无法恢复的数据丢失）"
-        ));
-    }
-    if added == 0 {
-        return head_commit
-            .map(|c| c.id())
-            .ok_or_else(|| "备份快照未能添加任何文件".to_string());
-    }
 
-    index.write().map_err(|e| format!("write index: {}", e.message()))?;
-    let tree_oid = index
-        .write_tree()
-        .map_err(|e| format!("write_tree: {}", e.message()))?;
     let tree = repo
         .find_tree(tree_oid)
         .map_err(|e| format!("find_tree: {}", e.message()))?;
@@ -166,19 +184,7 @@ fn create_backup_snapshot(repo: &Repository, workspace: &Path) -> Result<Oid, St
             &parents,
         )
         .map_err(|e| format!("backup commit: {}", e.message()))?;
-    // 备份提交只作为 undo 安全网，不得污染工作区 index：备份过程把当前
-    // 磁盘状态（含未跟踪文件）全部 add 进 index，若放任不管，随后的 force
-    // checkout 会把"备份暂存过、但目标树没有"的文件当作应删除条目处理
-    // （restore 时误删 include_untracked=false 本应保留的未跟踪文件）。
-    // Mixed 重置 index 回 HEAD 只动 index 不动工作区；HEAD 不存在时放弃。
-    if let Ok(head) = repo.head() {
-        if let Some(head_target) = head.target() {
-            if let Ok(object) = repo.find_object(head_target, None) {
-                let _ = repo.reset(&object, git2::ResetType::Mixed, None);
-            }
-        }
-    }
-    Ok(oid)
+    Ok(BackupSnapshot { oid, empty_worktree: false })
 }
 
 fn delta_status_code(delta: &git2::DiffDelta) -> &'static str {
@@ -339,58 +345,40 @@ impl RestoreEngine {
             return Err("target checkpoint has an empty tree; refusing reset to prevent data loss".to_string());
         }
 
-        let head_tree = repo.head().ok()
-            .and_then(|h| h.target())
-            .and_then(|h_oid| repo.find_commit(h_oid).ok())
-            .and_then(|c| c.tree().ok());
-
-        let (files_changed, files_deleted) = match &head_tree {
-            Some(prev) => {
-                let diff = repo.diff_tree_to_tree(Some(prev), Some(&target_tree), None);
-                match diff {
-                    Ok(d) => {
-                        let total = d.deltas().count();
-                        let deleted = d.deltas()
-                            .filter(|delta| delta.status() == git2::Delta::Deleted)
-                            .count();
-                        (total, deleted)
-                    }
-                    Err(_) => (0, 0),
-                }
-            }
-            None => (target_tree.len(), 0),
-        };
-
         // 备份 = reset 前工作区的真实状态（而非最后一次快照），
         // 确保最后一次快照之后新增/修改的文件也能通过 undo 找回。
         // backup_sha 一并返回：BACKUP_REF 是所有破坏性操作共用的单一引用，
         // 撤销方必须能用它校验备份未被后续操作覆盖（见 undo）。
-        let (backup_ref, backup_sha) = match create_backup_snapshot(&repo, &self.workspace) {
-            Ok(backup_oid) => {
-                eprintln!("[CodePapr] restore_execute: backup ref -> {}", backup_oid);
-                match repo.reference(BACKUP_REF, backup_oid, true, "codepapr backup before reset") {
-                    Ok(_) => (Some(BACKUP_REF.to_string()), Some(backup_oid.to_string())),
-                    Err(e) => return Err(format!(
-                        "failed to create backup ref: {} (refusing reset without safety net)", e.message()
-                    )),
-                }
-            }
-            Err(e) => {
-                return Err(format!(
-                    "failed to create backup snapshot: {e} (refusing reset without safety net)"
-                ))
-            }
+        let backup = create_backup_snapshot(&repo, &self.workspace)
+            .map_err(|e| format!("failed to create backup snapshot: {e} (refusing reset without safety net)"))?;
+        let before = if backup.empty_worktree {
+            None
+        } else {
+            Some(repo.find_commit(backup.oid).and_then(|commit| commit.tree())
+                .map_err(|e| format!("backup tree: {}", e.message()))?)
         };
+        let diff = repo.diff_tree_to_tree(before.as_ref(), Some(&target_tree), None)
+            .map_err(|e| format!("restore diff: {}", e.message()))?;
+        let files_changed = diff.deltas().len();
+        let files_deleted = diff.deltas()
+            .filter(|delta| delta.status() == git2::Delta::Deleted)
+            .count();
+        repo.reference(BACKUP_REF, backup.oid, true, "codepapr backup before reset")
+            .map_err(|e| format!("failed to create backup ref: {} (refusing reset without safety net)", e.message()))?;
 
-        let mut checkout = git2::build::CheckoutBuilder::new();
-        checkout.force();
-        repo.reset(target_commit.as_object(), ResetType::Hard, Some(&mut checkout))
-            .map_err(|e| format!("reset: {}", e.message()))?;
-
-        // 清理目标树中不存在的未跟踪文件，确保恢复后工作区与目标快照完全一致
-        let untracked_removed = remove_untracked_not_in_tree(&repo, &self.workspace, &target_tree);
-        let files_changed = files_changed + untracked_removed;
-        let files_deleted = files_deleted + untracked_removed;
+        let is_clean_target = !backup.empty_worktree && files_changed == 0
+            && repo.head().ok().and_then(|head| head.target()) == Some(oid)
+            && repo.diff_tree_to_index(Some(&target_tree), None, None)
+                .is_ok_and(|diff| diff.deltas().len() == 0);
+        let untracked_removed = if is_clean_target {
+            0
+        } else {
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.force();
+            repo.reset(target_commit.as_object(), ResetType::Hard, Some(&mut checkout))
+                .map_err(|e| format!("reset: {}", e.message()))?;
+            remove_untracked_not_in_tree(&repo, &self.workspace, &target_tree)
+        };
 
         eprintln!("[CodePapr] restore_execute: reset to {}, {} files changed ({} untracked removed)", target_sha, files_changed, untracked_removed);
 
@@ -398,8 +386,8 @@ impl RestoreEngine {
             ok: true,
             files_restored: files_changed,
             files_deleted,
-            backup_ref,
-            backup_sha,
+            backup_ref: Some(BACKUP_REF.to_string()),
+            backup_sha: Some(backup.oid.to_string()),
             error: None,
         })
     }
@@ -413,7 +401,7 @@ impl RestoreEngine {
             .map_err(|e| format!("open repo: {}", e.message()))?;
         repo.set_workdir(&self.workspace, false)
             .map_err(|e| format!("set workdir: {}", e.message()))?;
-        let oid = create_backup_snapshot(&repo, &self.workspace)?;
+        let oid = create_backup_snapshot(&repo, &self.workspace)?.oid;
         repo.reference(BACKUP_REF, oid, true, "codepapr backup before destructive op")
             .map_err(|e| format!("failed to update backup ref: {}", e.message()))?;
         Ok(oid.to_string())
@@ -463,7 +451,8 @@ impl RestoreEngine {
         // undo 前先备份当前工作区状态：restore 之后用户新写的文件不丢失，
         // 且 undo 本身可再次 undo（在两个状态间可逆切换）。
         let current_oid = create_backup_snapshot(&repo, &self.workspace)
-            .map_err(|e| format!("failed to backup current state before undo: {e}"))?;
+            .map_err(|e| format!("failed to backup current state before undo: {e}"))?
+            .oid;
         repo.reference(BACKUP_REF, current_oid, true, "codepapr backup before undo")
             .map_err(|e| format!("failed to update backup ref: {}", e.message()))?;
 
@@ -501,6 +490,55 @@ mod tests {
     }
 
     #[test]
+    fn reset_to_clean_head_reuses_the_checkpoint_as_backup() {
+        let workspace = temp_workspace("clean-head");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        fs::write(workspace.join("tracked.txt"), "initial\n").unwrap();
+        let checkpoint = engine.create("checkpoint").unwrap();
+        let restore = RestoreEngine::new(&workspace);
+
+        let result = restore.execute(&checkpoint.sha).unwrap();
+        assert_eq!(result.files_restored, 0);
+        assert_eq!(result.backup_sha.as_deref(), Some(checkpoint.sha.as_str()));
+        assert_eq!(fs::read_to_string(workspace.join("tracked.txt")).unwrap(), "initial\n");
+
+        // The same target still requires a full backup when there are newer files.
+        fs::write(workspace.join("new.txt"), "not in checkpoint\n").unwrap();
+        let result = restore.execute(&checkpoint.sha).unwrap();
+        assert_ne!(result.backup_sha.as_deref(), Some(checkpoint.sha.as_str()));
+        assert!(!workspace.join("new.txt").exists());
+        restore.undo(result.backup_sha.as_deref()).unwrap();
+        assert!(workspace.join("new.txt").exists());
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn reset_counts_one_unsnapshotted_change_and_keeps_unchanged_files() {
+        let workspace = temp_workspace("single-change");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        let changed = workspace.join("changed.txt");
+        let unchanged = workspace.join("unchanged.bin");
+        fs::write(&changed, b"original").unwrap();
+        fs::write(&unchanged, b"unchanged bytes").unwrap();
+        let checkpoint = engine.create("checkpoint").unwrap();
+        let unchanged_mtime = fs::metadata(&unchanged).unwrap().modified().unwrap();
+        fs::write(&changed, b"modified locally").unwrap();
+        let restore = RestoreEngine::new(&workspace);
+
+        let result = restore.execute(&checkpoint.sha).unwrap();
+        assert_eq!(result.files_restored, 1);
+        assert_eq!(result.files_deleted, 0);
+        assert_eq!(fs::read(&changed).unwrap(), b"original");
+        assert_eq!(fs::metadata(&unchanged).unwrap().modified().unwrap(), unchanged_mtime);
+        restore.undo(result.backup_sha.as_deref()).unwrap();
+        assert_eq!(fs::read(&changed).unwrap(), b"modified locally");
+        assert_eq!(fs::metadata(&unchanged).unwrap().modified().unwrap(), unchanged_mtime);
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
     fn test_undo_recovers_changes_made_after_last_snapshot() {
         let workspace = temp_workspace("post-snapshot-changes");
         let engine = SnapshotEngine::new(&workspace);
@@ -516,6 +554,8 @@ mod tests {
         let restore = RestoreEngine::new(&workspace);
         let exec = restore.execute(&cp.sha).expect("restore should succeed");
         assert!(exec.ok);
+        assert_eq!(exec.files_restored, 2);
+        assert_eq!(exec.files_deleted, 1);
         assert_eq!(fs::read_to_string(workspace.join("tracked.txt")).unwrap(), "v1\n");
         assert!(!workspace.join("brand-new.txt").exists());
 

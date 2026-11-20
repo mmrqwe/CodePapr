@@ -813,6 +813,19 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
         // the stream/worker idle timeouts settle the promise first and the finally
         // below clears this timer before it ever fires.
         const STORE_IDLE_TIMEOUT_MS = 330_000;
+        const startupAbort = new AbortController();
+        let agentPassStarted = false;
+        // These reads can be abandoned without leaving an in-progress turn write.
+        const waitForStartupRead = <T>(read: Promise<T>): Promise<T> =>
+          new Promise<T>((resolve, reject) => {
+            const { signal } = startupAbort;
+            const onAbort = () => reject(signal.reason);
+            signal.addEventListener('abort', onAbort, { once: true });
+            void read.then(resolve, reject).finally(() => {
+              signal.removeEventListener('abort', onAbort);
+            });
+            if (signal.aborted) onAbort();
+          });
         let storeIdleTimer: ReturnType<typeof setTimeout> | undefined;
         const clearStoreIdle = () => {
           if (storeIdleTimer !== undefined) {
@@ -824,7 +837,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           clearStoreIdle();
           storeIdleTimer = setTimeout(() => {
             storeIdleTimer = undefined;
-            if (!get().isLoading) return;
+            if (!get().isLoading || get()._turnSeq !== turnSeq) return;
             // N6：权限确认弹窗等待不限时 + 静默长工具由工具自身 IPC 超时
             // 兜底——两者在飞时看门狗必须推迟触发（重新武装），不能强制
             // 恢复误杀回合（与 worker 层 idle backstop 的暂停语义对齐）。
@@ -838,8 +851,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             console.warn(
               '[sendMessage] idle watchdog: no activity for',
               STORE_IDLE_TIMEOUT_MS,
-              'ms; forcing recovery'
+              agentPassStarted ? 'ms during agent execution' : 'ms before agent execution'
             );
+            set({ _stopRequestedSeq: get()._stopRequestedSeq + 1 });
+            startupAbort.abort(new DOMException('Turn exceeded its startup idle timeout', 'AbortError'));
             try {
               get()._agent?.cancel();
             } catch {
@@ -879,7 +894,9 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (watchdogSessionId) {
               appendInfoMessage(
                 set,
-                getTranslation(normalizedSettings.lang ?? 'zh-CN').idleWatchdogStopped,
+                agentPassStarted
+                  ? getTranslation(normalizedSettings.lang ?? 'zh-CN').idleWatchdogStopped
+                  : getTranslation(normalizedSettings.lang ?? 'zh-CN').idleWatchdogStartupStopped,
                 watchdogSessionId,
                 { resetLoading: false }
               );
@@ -964,8 +981,12 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           // 本回合在每次前置 await 之后检查序号变化即抛 AbortError 终止。
           const ensureNotStopped = () => {
             if (get()._stopRequestedSeq !== stopSeqAtStart) {
-              throw new DOMException('Turn was cancelled before the agent started', 'AbortError');
+              throw new DOMException('Turn was cancelled', 'AbortError');
             }
+          };
+          const yieldBeforeAgentPass = async () => {
+            await yieldToMainThread(50);
+            ensureNotStopped();
           };
           ensureNotStopped();
 
@@ -1072,9 +1093,8 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
           const skillDefinitions = get()._skillDefinitions;
           let subagentProjectGraphSummary: string | undefined;
           try {
-            const cachedRaw = await invoke<string | null>(
-              'load_projectgraph_cache',
-              { workspacePath },
+            const cachedRaw = await waitForStartupRead(
+              invoke<string | null>('load_projectgraph_cache', { workspacePath })
             );
             ensureNotStopped();
             if (cachedRaw) {
@@ -1093,14 +1113,14 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // Cache not available - proceed without
           }
           const memorySection = workspacePath
-            ? (await loadMemorySectionForPrompt(workspacePath)) ?? undefined
+            ? (await waitForStartupRead(loadMemorySectionForPrompt(workspacePath))) ?? undefined
             : undefined;
           ensureNotStopped();
           let mcpToolDefinitions: IToolDefinition[] = [];
           let mcpToolMappings: Array<{ serverId: string; toolName: string; displayName: string }> = [];
           if (normalizedSettings.mcp.enabled && normalizedSettings.mcp.exposeTools) {
             try {
-              const loadedMcpTools = await loadMcpToolDefinitions(normalizedSettings.mcp);
+              const loadedMcpTools = await waitForStartupRead(loadMcpToolDefinitions(normalizedSettings.mcp));
               ensureNotStopped();
               mcpToolDefinitions = loadedMcpTools.definitions;
               mcpToolMappings = loadedMcpTools.toolMappings;
@@ -1365,7 +1385,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             // 读前排空挂起保存队列：取消/出错收尾的保存走异步队列，尚未落库
             // 时 surface 缓存的节点列表缺少最近消息——取消后 agent 失效重建
             // （N3）会静默截掉被取消回合，UI 显示而模型上下文没有。
-            await waitForPendingProjectStateSave(workspacePath);
+            await waitForStartupRead(waitForPendingProjectStateSave(workspacePath));
             ensureNotStopped();
             hasSessionBase = true;
             // 用实时数组水合：surface 维护自实时数组（含本回合用户消息），
@@ -1385,6 +1405,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               // surface 读取失败 → 沿用实时数组（legacy 行为），同样剔除本回合输入。
               turnBaseMessages = liveMessages.filter((m) => m.id !== userMsg?.id);
             }
+            ensureNotStopped();
           }
           const agentSessionId = get()._agentSessionId;
           if (!agent || agent.isCrashed() || (agentSessionId !== null && agentSessionId !== activeSessionId) || agentModel !== route.model || (agentPromptKey !== null && agentPromptKey !== runtimePromptKey)) {
@@ -1570,13 +1591,17 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               getTranslation(normalizedSettings.lang).streamingStatus
             )
           );
-          await yieldToMainThread();
+          armStoreIdle();
+          await yieldBeforeAgentPass();
 
           const runAgentPass = async (
             passInput: string,
             passImages?: import('@codepapr/types').IImageContent[],
             passUserMessageId?: string,
           ) => {
+            ensureNotStopped();
+            agentPassStarted = true;
+            armStoreIdle();
             // 本次 pass 的耗时累加器：崩溃恢复会重跑整个 pass，事件也会重新
             // 发射，因此按 pass 重置、按回合（turn）累加，避免重试路径重复计数。
             passModelRuntimeMs = 0;
@@ -1917,9 +1942,10 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                 await waitForPageVisible(CRASH_RECOVERY_VISIBLE_WAIT_MS);
               }
               await delay(CRASH_RECOVERY_RETRY_DELAYS_MS[attempt - 1] ?? 1000);
+              ensureNotStopped();
               rebuildAgentForRetry(false);
               resetStreamingForRetry();
-              await yieldToMainThread();
+              await yieldBeforeAgentPass();
               try {
                 return await runPass();
               } catch (retryError) {
@@ -1931,10 +1957,11 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
             if (!shouldUseSidecarAgentRuntime()) {
               await waitForPageVisible(CRASH_RECOVERY_VISIBLE_WAIT_MS);
             }
+            ensureNotStopped();
             rebuildAgentForRetry(true);
             mainThreadFallbackUsed = true;
             resetStreamingForRetry();
-            await yieldToMainThread();
+            await yieldBeforeAgentPass();
             return await runPass();
           };
 
@@ -2031,7 +2058,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
                         getTranslation(normalizedSettings.lang).streamingStatus
                       )
                     );
-                    await yieldToMainThread();
+                    await yieldBeforeAgentPass();
                   }
 
                   let turnStartIndex = sessionLogStartIndex;
@@ -2341,7 +2368,7 @@ export function createSendMessage(set: StoreSet, get: StoreGet): AgentActions['s
               }));
             }
 
-            await yieldToMainThread();
+            await yieldBeforeAgentPass();
             resp = await runWithCrashRecovery(runtimeUserPrompt, passImages);
           }
           }

@@ -45,7 +45,14 @@ impl IgnoreResolver {
             .git_exclude(true)
             .git_global(true)
             .ignore(true)
-            .follow_links(false);
+            .follow_links(false)
+            .filter_entry(|entry| {
+                entry.depth() == 0
+                    || !matches!(
+                        entry.file_name().to_str(),
+                        Some(".git" | ".CodePapr" | ".codepapr_git_backup")
+                    )
+            });
 
         let mut files = Vec::new();
         let mut oversized_count = 0usize;
@@ -55,10 +62,7 @@ impl IgnoreResolver {
             let Some(ft) = entry.file_type() else { continue };
             if !ft.is_file() || ft.is_symlink() { continue; }
             let Ok(relative) = entry.path().strip_prefix(&self.workspace) else { continue };
-            if relative.components().any(|c| {
-                c == std::path::Component::ParentDir
-                    || matches!(c.as_os_str().to_str(), Some(".git" | ".CodePapr" | ".codepapr_git_backup"))
-            }) {
+            if relative.components().any(|c| c == std::path::Component::ParentDir) {
                 continue;
             }
             let len = match entry.metadata() {

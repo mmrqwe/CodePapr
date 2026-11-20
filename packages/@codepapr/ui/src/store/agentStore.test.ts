@@ -3432,6 +3432,25 @@ describe('useAgentStore.sendMessage', () => {
       expect(secondChat.mock.calls[0]?.[0]).toContain('第二问');
     });
 
+    it('starts the agent when the webview stops delivering animation frames', async () => {
+      const chat = vi.fn(async () => createAgentResponse('已回复'));
+      setCrashRecoveryState(createMockAgent({ chat }));
+      const requestAnimationFrame = vi.fn(() => 1);
+      vi.stubGlobal('window', { requestAnimationFrame, cancelAnimationFrame: vi.fn() });
+      vi.useFakeTimers();
+      try {
+        const sending = useAgentStore.getState().sendMessage('任务', '任务', 'agent');
+        await vi.advanceTimersByTimeAsync(100);
+        expect(requestAnimationFrame).toHaveBeenCalled();
+        expect(chat).toHaveBeenCalledOnce();
+        await sending;
+        expect(useAgentStore.getState().messages.at(-1)?.content).toBe('已回复');
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('idle watchdog cancels a silently stuck turn and surfaces a synthetic notice', async () => {
       // 回归：看门狗强制取消此前完全静默（只有 cancelled 工具芯片），
       // 用户以为回合"凭空停止"。现在必须追加一条不进模型上下文的提示消息。
@@ -3467,6 +3486,45 @@ describe('useAgentStore.sendMessage', () => {
       );
       expect(notice).toBeDefined();
       expect(sessionMessages.filter((m) => m.role === 'error')).toHaveLength(0);
+    });
+
+    it('releases the turn after a startup read times out and ignores its late result', async () => {
+      let resolveRead!: (value: null) => void;
+      const stalledRead = new Promise<null>((resolve) => { resolveRead = resolve; });
+      const invoke = invokeMock.getMockImplementation()!;
+      let stallNextGraphRead = true;
+      invokeMock.mockImplementation((command, args) => {
+        if (command === 'load_projectgraph_cache' && stallNextGraphRead) {
+          stallNextGraphRead = false;
+          return stalledRead;
+        }
+        return invoke(command, args);
+      });
+      const chat = vi.fn(async () => createAgentResponse('重发成功'));
+      const agent = createMockAgent({ chat });
+      setCrashRecoveryState(agent);
+      createAgentMock.mockReturnValue(agent);
+
+      vi.useFakeTimers();
+      try {
+        const firstTurn = useAgentStore.getState().sendMessage('第一次', '第一次', 'agent');
+        await vi.advanceTimersByTimeAsync(330_000);
+        expect(useAgentStore.getState().isLoading).toBe(false);
+        expect(useAgentStore.getState().messages.at(-1)?.content).toContain('启动代理前等待超时');
+        expect(chat).not.toHaveBeenCalled();
+        await firstTurn;
+
+        const secondTurn = useAgentStore.getState().sendMessage('重发', '重发', 'agent');
+        resolveRead(null);
+        await vi.advanceTimersByTimeAsync(100);
+        await secondTurn;
+        expect(chat).toHaveBeenCalledOnce();
+        expect(useAgentStore.getState().messages.at(-1)?.content).toBe('重发成功');
+      } finally {
+        resolveRead(null);
+        vi.useRealTimers();
+        invokeMock.mockImplementation(invoke);
+      }
     });
 
     it('page thaw re-arms the idle watchdog instead of firing on the overdue timer', async () => {

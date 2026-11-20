@@ -1623,7 +1623,7 @@ export const useAgentStore = create<AgentState & AgentActions>()((set, get) => (
       resetToMessage: async (messageId): Promise<ResetToMessageResult> => {
         // 纵深防御：UI 在回合运行中已隐藏重置入口，store 层再守一道——
         // 运行中的回合会持续写文件/消息，重置会与它互相践踏。
-        if (get().isLoading) {
+        if (get().isLoading || isTurnInFlight()) {
           return { ok: false, reason: 'turn-running' };
         }
 
