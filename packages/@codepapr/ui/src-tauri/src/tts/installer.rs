@@ -1,3 +1,4 @@
+use codepapr_core::shell::process_tree::background_command;
 use std::{
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
@@ -366,7 +367,7 @@ pub(crate) fn install(app: AppHandle, source: Option<String>) {
             "install-deps", "Installing Python packages",
             "Downloading NLTK data (averaged_perceptron_tagger_eng, punkt)...",
         ));
-        let mut nltk_cmd = Command::new(&venv_python);
+        let mut nltk_cmd = background_command(&venv_python);
         nltk_cmd.args(["-m", "nltk.downloader", "averaged_perceptron_tagger_eng", "punkt", "-q"]);
         let _ = run_and_stream(nltk_cmd, &app, "install-deps", "Installing Python packages");
     }
@@ -409,7 +410,7 @@ pub(crate) fn install(app: AppHandle, source: Option<String>) {
 
     #[cfg(windows)]
     if !has_text_models(&target_path) {
-        let mut cmd = Command::new(&venv_python);
+        let mut cmd = background_command(&venv_python);
         cmd.arg("-u")
             .arg("-c")
             .arg(include_str!("../../resources/tts_text_models.py"))
@@ -454,7 +455,7 @@ pub(crate) const MIN_PYTHON_MINOR: u32 = 10;
 /// Probes a Python executable and returns (major, minor, sys.executable).
 /// Returns None if the path is not a valid Python or fails to execute.
 pub(crate) fn probe_python_version(path: &str) -> Option<(u32, u32, String)> {
-    let output = Command::new(path)
+    let output = background_command(path)
         .arg("-c")
         .arg("import sys; print(sys.executable); print(sys.version_info.major, sys.version_info.minor)")
         .output()
@@ -499,7 +500,7 @@ pub(crate) fn collect_python_candidates() -> Vec<String> {
         "python3.13", "python3.12", "python3.11", "python3.10",
         "python3", "python",
     ] {
-        if let Ok(output) = Command::new(cmd)
+        if let Ok(output) = background_command(cmd)
             .arg("-c")
             .arg("import sys; print(sys.executable)")
             .output()
@@ -655,7 +656,7 @@ fn clone_code(app: &AppHandle, target_path: &Path) -> Result<(), String> {
             let _ = std::fs::remove_dir_all(target_path);
         }
 
-        let mut cmd = Command::new("git");
+        let mut cmd = background_command("git");
         cmd.args(["clone", "--depth=1", repo])
             .arg(target_name)
             .current_dir(parent);
@@ -696,7 +697,7 @@ fn install_deps(app: &AppHandle, system_python: &str, target_path: &Path) -> Res
     // Create venv (skip if already exists and is healthy)
     if !venv_python.exists() {
         emit(app, &InstallProgress::running("install-deps", "Installing Python packages", "Creating virtual environment..."));
-        let mut cmd = Command::new(system_python);
+        let mut cmd = background_command(system_python);
         cmd.args(["-m", "venv"]).arg(&venv_path);
         run_and_stream(cmd, app, "install-deps", "Installing Python packages")
             .map_err(|e| format!("venv creation failed: {e}"))?;
@@ -774,7 +775,7 @@ fn pip_install_with_fallback(
             &format!("Trying PyPI index {}/{}: {}", idx + 1, PIP_INDEXES.len(), index),
         ));
 
-        let mut cmd = Command::new(venv_python);
+        let mut cmd = background_command(venv_python);
         cmd.args(["-m", "pip", "install", "-i", index]);
         for a in extra_args {
             cmd.arg(a);
@@ -930,7 +931,7 @@ print("DONE OK", flush=True)
         local_dir = pretrained_dir.to_string_lossy(),
     );
 
-    let mut cmd = Command::new(venv_python);
+    let mut cmd = background_command(venv_python);
     cmd.arg("-c").arg(&script).env("PYTHONIOENCODING", "utf-8");
     run_and_stream(cmd, app, "download-models", "Downloading pretrained models")
 }
@@ -986,7 +987,7 @@ pub(crate) fn venv_python_runs_ok(venv_python: &Path) -> bool {
     if !venv_python.exists() {
         return false;
     }
-    Command::new(venv_python)
+    background_command(venv_python)
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -1083,7 +1084,7 @@ fn verify_files(_app: &AppHandle, target_path: &Path, venv_python: &Path) -> Res
     }
 
     // Optional: probe the venv python to confirm it runs.
-    let probe = Command::new(venv_python)
+    let probe = background_command(venv_python)
         .arg("--version")
         .output()
         .map_err(|e| format!("venv python failed to run: {e}"))?;

@@ -2,14 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
+use crate::shell::process_tree::background_command;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs,
     io::{BufRead, BufReader, Read, Write},
     path::{Component, Path, PathBuf},
-    process::{Child, ChildStdin, Command, Stdio},
+    process::{Child, ChildStdin, Stdio},
     sync::{
         mpsc::{self, RecvTimeoutError},
         Arc, Mutex, OnceLock, RwLock,
@@ -498,7 +497,7 @@ fn detect_python_path_uncached() -> Option<String> {
     let primary_candidates: &[&str] = &["python3", "python"];
 
     for candidate in primary_candidates {
-        if let Ok(output) = std::process::Command::new(candidate)
+        if let Ok(output) = background_command(candidate)
             .arg("-c")
             .arg("import sys; print(sys.executable)")
             .output()
@@ -1347,17 +1346,12 @@ fn spawn_server_candidate(
     let command = candidate.command.clone();
     let args = candidate.args.clone();
 
-    #[cfg(windows)]
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    let mut cmd = Command::new(&command);
+    let mut cmd = background_command(&command);
     cmd.args(&args)
         .current_dir(workspace)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
     // 独立进程组：停止 LSP 时 kill_process_tree 才能连后代一起杀。
     // pyright 的 node worker、csharp-ls→dotnet、JDTLS 等都会派生子进程，
     // 只杀直接子进程会留下常驻孤儿占内存。
@@ -1374,7 +1368,7 @@ fn spawn_server_candidate(
             .or_else(|| std::env::var("DOTNET_INSTALL_DIR").ok())
             .or_else(|| {
                 let dotnet_bin = dotnet_binary();
-                let output = std::process::Command::new(dotnet_bin)
+                let output = background_command(dotnet_bin)
                     .args(["--list-runtimes"])
                     .output()
                     .ok()?;

@@ -3,14 +3,12 @@
 use flate2::read::GzDecoder;
 use reqwest::blocking::Client;
 use serde::Serialize;
-use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
+use crate::shell::process_tree::{background_command, kill_process_tree, prepare_new_process_group};
 use std::{
     env, fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
@@ -2334,17 +2332,12 @@ fn run_command_with_timeout(
     cwd: &Path,
     timeout: Duration,
 ) -> Result<ManagedCommandOutput, String> {
-    #[cfg(windows)]
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    let mut cmd = Command::new(command);
+    let mut cmd = background_command(command);
     cmd.args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
     // 独立进程组：超时 kill 必须连孙进程一起杀（go install / npm / sh -c
     // 包装都会再派生子进程）。旧实现只杀直接子进程，孙进程继续持有管道
     // 写端 → stdout 读线程永远等不到 EOF → join 永久阻塞。

@@ -34,7 +34,7 @@ use std::{
 };
 
 #[cfg(windows)]
-use std::os::windows::process::CommandExt;
+use crate::shell::process_tree::background_command;
 
 pub(crate) const MAX_COMMAND_SECONDS: u64 = 600;
 pub(crate) const MAX_OUTPUT_BYTES: usize = 200_000;
@@ -483,8 +483,6 @@ pub(crate) fn run_workspace_command_impl(
     let cwd = resolve_shell_workdir(&workspace, workdir)?;
     let memory = super::memory_guard::snapshot(&workspace);
 
-    #[cfg(windows)]
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
     let mut cmd = sandboxed_command(&command, &args, &workspace, None, &cwd)?;
     cmd
         .env("PATH", expanded_path())
@@ -493,8 +491,6 @@ pub(crate) fn run_workspace_command_impl(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
     prepare_new_process_group(&mut cmd);
     let child = match cmd.spawn() {
         Ok(child) => child,
@@ -705,10 +701,8 @@ fn build_shell_spawn_command(
 ) -> Result<Command, String> {
     #[cfg(windows)]
     {
-        const CREATE_NO_WINDOW_SHELL: u32 = 0x08000000;
-        let mut cmd = Command::new("cmd");
+        let mut cmd = background_command("cmd");
         cmd.arg("/C").arg(command);
-        cmd.creation_flags(CREATE_NO_WINDOW_SHELL);
         cmd.current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -918,8 +912,6 @@ fn start_background_common(
         .transpose()?;
     let workspace_path = register_workspace;
 
-    #[cfg(windows)]
-    const CREATE_NO_WINDOW_BG: u32 = 0x08000000;
     // sandboxed_command 内部已把 args 追加到 Command（macOS: sandbox-exec -p <profile>
     // <program> <args...>；其他平台: <program> <args...>），此处不得再次 .args(&args)，
     // 否则所有后台命令都会以重复的 argv 启动（如 `node server.js server.js`）。
@@ -940,8 +932,6 @@ fn start_background_common(
             bg_cmd.env(key, value);
         }
     }
-    #[cfg(windows)]
-    bg_cmd.creation_flags(CREATE_NO_WINDOW_BG);
     prepare_new_process_group(&mut bg_cmd);
     prepare_parent_death_signal(&mut bg_cmd);
 

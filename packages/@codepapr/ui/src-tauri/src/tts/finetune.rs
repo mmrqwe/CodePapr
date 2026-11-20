@@ -1,6 +1,7 @@
+use codepapr_core::shell::process_tree::background_command;
 use std::{
     io::{BufRead, BufReader}, path::PathBuf,
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{atomic::{AtomicBool, Ordering}, Mutex},
     thread,
 };
@@ -124,7 +125,7 @@ pub(crate) fn start_finetune(
     let app_clone = app.clone();
 
     thread::spawn(move || {
-        let mut cmd = Command::new(&venv_python);
+        let mut cmd = background_command(&venv_python);
         cmd.arg("-u")
             .arg(&finetune_script)
             .arg("--train_dir").arg(&train_dir)

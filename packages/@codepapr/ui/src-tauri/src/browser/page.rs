@@ -1,3 +1,4 @@
+use codepapr_core::shell::process_tree::background_command;
 use crate::browser::types::{
     BrowserDomContentType, BrowserPageActionResult, BrowserPageCloseResult, BrowserPageDomResult,
     BrowserPageScreenshotResult, BrowserPageSessionResult, BrowserScreenshotFormat,
@@ -8,13 +9,11 @@ use codepapr_core::shared::{
     resolve_existing_path, run_blocking_workspace_task, unix_millis,
 };
 use headless_chrome::{Browser, LaunchOptionsBuilder, Tab};
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -311,7 +310,7 @@ pub(crate) fn write_browser_binary_file(
 fn open_target_in_browser(target: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        Command::new("open")
+        background_command("open")
             .arg(target)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -323,13 +322,11 @@ fn open_target_in_browser(target: &str) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        Command::new("cmd")
+        background_command("cmd")
             .args(["/C", "start", "", target])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|err| format!("打开浏览器失败: {err}"))?;
         return Ok(());
@@ -337,7 +334,7 @@ fn open_target_in_browser(target: &str) -> Result<(), String> {
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        Command::new("xdg-open")
+        background_command("xdg-open")
             .arg(target)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

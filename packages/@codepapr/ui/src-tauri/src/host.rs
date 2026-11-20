@@ -5,11 +5,12 @@
 //! Core events arrive as JSON-RPC notifications `{ method: "event", params }`
 //! and are forwarded onto the Tauri event bus.
 
+use codepapr_core::shell::process_tree::background_command;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -274,7 +275,7 @@ async fn spawn_and_connect(app: AppHandle) -> Result<HostHandle, String> {
     eprintln!("[CodePapr] host: spawning");
 
     let token = codepapr_core::host_auth::random_token();
-    let mut cmd = Command::new(&server_bin);
+    let mut cmd = background_command(&server_bin);
     cmd.arg("--port")
         .arg("0")
         .arg("--port-file")
@@ -283,11 +284,6 @@ async fn spawn_and_connect(app: AppHandle) -> Result<HostHandle, String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
 
     let mut child = cmd.spawn().map_err(|e| {
         format!(

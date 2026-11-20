@@ -1,9 +1,10 @@
+use codepapr_core::shell::process_tree::background_command;
 use std::{
     collections::VecDeque,
     io::{BufRead, BufReader},
     net::{Ipv4Addr, SocketAddrV4},
     path::{Path, PathBuf},
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{Child, ExitStatus, Stdio},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -83,7 +84,7 @@ impl GptSovitsServer {
             ));
         }
 
-        let mut cmd = Command::new(&python);
+        let mut cmd = background_command(&python);
         cmd.arg("api.py")
             .arg("-p")
             // Uvicorn binds port 0 directly, so the OS reserves the port for this child.
@@ -468,7 +469,7 @@ pub(crate) fn recommended_device(_api_path: &Path) -> &'static str {
     {
         let venv = _api_path.join(super::installer::VENV_DIR_NAME);
         let python = super::installer::venv_python_path(&venv);
-        let mps_works = Command::new(python)
+        let mps_works = background_command(python)
             .args(["-c", "import torch; x = torch.ones(1, device='mps', dtype=torch.float16); (x + 1).item()"])
             .env_remove("PYTORCH_ENABLE_MPS_FALLBACK")
             .stdout(Stdio::null())

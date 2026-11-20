@@ -7,12 +7,12 @@
 
 use crate::agent_runtime_tools::{self, RuntimeSearxngSettings, RuntimeSkillEntry, RuntimeToolContext};
 use crate::lsp_managed_tools;
-use crate::shell::process_tree::{kill_process_tree, prepare_new_process_group};
+use crate::shell::process_tree::{background_command, kill_process_tree, prepare_new_process_group};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -470,7 +470,7 @@ pub fn agent_runtime_start(
     }
     let node = resolve_node()?;
     let script = resolve_sidecar_script(resource_dir.as_deref())?;
-    let mut command = Command::new(&node);
+    let mut command = background_command(&node);
     command
         .arg(&script)
         .stdin(Stdio::piped())
@@ -478,11 +478,6 @@ pub fn agent_runtime_start(
         .stderr(Stdio::piped())
         .env("NODE_NO_WARNINGS", "1");
     prepare_new_process_group(&mut command);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
     let mut child = command.spawn().map_err(|err| {
         format!(
             "启动 agent sidecar 失败 ({} {}): {err}",

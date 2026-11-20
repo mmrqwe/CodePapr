@@ -22,8 +22,6 @@ use std::{
     thread,
 };
 
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 const MAX_TERMINAL_OUTPUT_LINES: usize = 200;
 
@@ -115,16 +113,12 @@ pub fn open_shell_session(
 ) -> Result<ShellSessionResult, String> {
     let workspace = canonical_workspace(&workspace_path)?;
     let shell = detect_default_shell(shell)?;
-    #[cfg(windows)]
-    const CREATE_NO_WINDOW_SHELL: u32 = 0x08000000;
     let mut shell_cmd = sandboxed_command(&shell, &[], &workspace, None, &workspace)?;
     shell_cmd
         .current_dir(&workspace)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    shell_cmd.creation_flags(CREATE_NO_WINDOW_SHELL);
     prepare_new_process_group(&mut shell_cmd);
     let mut child = shell_cmd
         .spawn()

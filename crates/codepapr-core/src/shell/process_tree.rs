@@ -1,7 +1,27 @@
 use std::{
+    ffi::OsStr,
     process::{Child, Command},
     time::{Duration, Instant},
 };
+
+/// Start a CodePapr-managed helper with no separate Windows console. Callers
+/// still choose how to pipe I/O and manage the process tree.
+pub fn background_command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    hide_console_window(&mut command);
+    command
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
 
 /// 让命令在独立进程组中启动（Unix）。停止/超时时据此杀整个进程树：
 /// 只杀直接子进程（shell 包装器）会让真正的工作进程（`npm run dev`、
@@ -159,11 +179,8 @@ pub fn kill_process_group_by_pid(pid: u32) {
 /// 而不是只杀主进程。
 #[cfg(windows)]
 pub fn kill_process_group_by_pid(pid: u32) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let _ = std::process::Command::new("taskkill")
+    let _ = background_command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
@@ -242,12 +259,9 @@ pub fn kill_process_tree(child: &mut Child) -> std::io::Result<()> {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
         let pid = child.id().to_string();
-        let killed = std::process::Command::new("taskkill")
+        let killed = background_command("taskkill")
             .args(["/PID", &pid, "/T", "/F"])
-            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false);
@@ -283,5 +297,51 @@ mod tests {
             matches!(child.try_wait(), Ok(Some(_))),
             "sleep child must be reaped"
         );
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::background_command;
+    use std::ffi::c_void;
+
+    const PROBE_ENV: &str = "CODEPAPR_TEST_CONSOLE_VISIBILITY";
+
+    #[test]
+    fn background_command_keeps_the_console_hidden_and_captures_output() {
+        let output = background_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "shell::process_tree::windows_tests::console_visibility_probe",
+                "--nocapture",
+            ])
+            .env(PROBE_ENV, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stdout}\n{stderr}");
+        assert!(stdout.contains("console probe stdout"), "{stdout}");
+        assert!(stderr.contains("console probe stderr"), "{stderr}");
+    }
+
+    #[test]
+    fn console_visibility_probe() {
+        if std::env::var_os(PROBE_ENV).is_none() {
+            return;
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetConsoleWindow() -> *mut c_void;
+        }
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn IsWindowVisible(window: *mut c_void) -> i32;
+        }
+        // SAFETY: GetConsoleWindow returns a null pointer or a valid HWND.
+        let window = unsafe { GetConsoleWindow() };
+        assert!(window.is_null() || unsafe { IsWindowVisible(window) } == 0);
+        println!("console probe stdout");
+        eprintln!("console probe stderr");
     }
 }

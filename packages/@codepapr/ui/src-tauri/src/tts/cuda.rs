@@ -1,12 +1,11 @@
+use codepapr_core::shell::process_tree::background_command;
 use std::{
     env, fs, io,
-    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
 const TORCH_VERSION: &str = "2.11.0";
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub(crate) struct CudaSetup {
     wheel_tag: &'static str,
@@ -18,9 +17,8 @@ impl CudaSetup {
         if !cfg!(target_arch = "x86_64") {
             return None;
         }
-        let output = Command::new("nvidia-smi")
+        let output = background_command("nvidia-smi")
             .args(["--query-gpu=driver_version", "--format=csv,noheader"])
-            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .ok()?;
         if !output.status.success() {
@@ -44,7 +42,7 @@ impl CudaSetup {
     }
 
     pub(crate) fn install_command(&self, python: &Path, venv: &Path) -> Command {
-        let mut cmd = Command::new(python);
+        let mut cmd = background_command(python);
         cmd.args([
             "-m", "pip", "--isolated", "install", "--disable-pip-version-check",
             "--upgrade", "--no-deps", "--timeout", "30", "--retries", "2", "--index-url",
@@ -55,8 +53,7 @@ impl CudaSetup {
             format!("torchaudio=={TORCH_VERSION}+{}", self.wheel_tag),
         ])
         .arg("--target")
-        .arg(cuda_packages(venv))
-        .creation_flags(CREATE_NO_WINDOW);
+        .arg(cuda_packages(venv));
         cmd
     }
 
@@ -85,13 +82,12 @@ pub(crate) fn is_usable(python: &Path, venv: &Path) -> bool {
     if !python.is_file() {
         return false;
     }
-    let mut cmd = Command::new(python);
+    let mut cmd = background_command(python);
     configure_python(&mut cmd, venv);
     cmd.args([
         "-c",
         "import torch, torchaudio; x = torch.ones(1, device='cuda', dtype=torch.float16); (x + 1).item()",
     ])
-    .creation_flags(CREATE_NO_WINDOW)
     .stdout(Stdio::null())
     .stderr(Stdio::null())
     .status()

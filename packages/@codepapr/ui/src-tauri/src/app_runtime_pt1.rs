@@ -11,6 +11,7 @@ use tauri::{
 };
 
 use crate::papr_runtime;
+use codepapr_core::shell::process_tree::background_command;
 
 static APP_WORKSPACES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 /// 运行时实际监听端口（占用时可能与 manifest 声明不同）。协议注入 __PAPR_BACKEND_URL 读这里。
@@ -298,11 +299,6 @@ pub fn install_app_npm_deps(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
 
     let mut child = cmd
         .spawn()

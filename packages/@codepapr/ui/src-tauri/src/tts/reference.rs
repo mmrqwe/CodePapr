@@ -1,8 +1,9 @@
+use codepapr_core::shell::process_tree::background_command;
 use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
 };
 
 use base64::Engine;
@@ -97,7 +98,7 @@ fn convert_mp3_to_wav(data: Vec<u8>, output: &Path) -> Result<(), String> {
 
 fn convert_with_ffmpeg(input: &Path, output: &Path) -> Result<(), String> {
     let ffmpeg = find_ffmpeg().ok_or("FFmpeg is required to convert this audio format")?;
-    let result = Command::new(ffmpeg)
+    let result = background_command(ffmpeg)
         .args(["-nostdin", "-loglevel", "error", "-i"])
         .arg(input)
         .args(["-ar", "16000", "-ac", "1", "-sample_fmt", "s16"])
@@ -128,7 +129,7 @@ fn find_ffmpeg() -> Option<PathBuf> {
     ]);
 
     candidates.into_iter().find(|candidate| {
-        Command::new(candidate)
+        background_command(candidate)
             .arg("-version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())

@@ -21,6 +21,7 @@ use std::{
     time::Duration,
 };
 use crate::events::SharedEventSink;
+use crate::shell::process_tree::background_command;
 use tokio::{process::Command, sync::Mutex as AsyncMutex};
 use futures_util::future::join_all;
 
@@ -609,7 +610,7 @@ async fn connect_stdio(
     let args = server.args.clone();
     let env = server.env.clone();
     let path = expanded_path();
-    let transport = TokioChildProcess::new(Command::new(command_name).configure(move |cmd| {
+    let transport = TokioChildProcess::new(Command::from(background_command(command_name)).configure(move |cmd| {
         cmd.args(args);
         cmd.env("PATH", path);
         for (key, value) in env {

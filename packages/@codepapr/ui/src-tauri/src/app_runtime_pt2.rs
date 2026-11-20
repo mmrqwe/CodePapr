@@ -70,7 +70,7 @@ pub fn check_port_owner(port: u16) -> Vec<u32> {
 }
 
 fn check_port_owner_lsof(port: u16) -> Vec<u32> {
-    let output = std::process::Command::new("lsof")
+    let output = background_command("lsof")
         .args(["-ti", &format!(":{port}")])
         .output();
     if let Ok(out) = output {
@@ -86,15 +86,15 @@ fn check_port_owner_lsof(port: u16) -> Vec<u32> {
 
 fn check_port_owner_netstat(port: u16) -> Vec<u32> {
     let output = if cfg!(windows) {
-        std::process::Command::new("netstat")
+        background_command("netstat")
             .args(["-ano", "-p", "TCP"])
             .output()
     } else {
-        std::process::Command::new("netstat")
+        background_command("netstat")
             .args(["-anv", "-p", "tcp"])
             .output()
             .or_else(|_| {
-                std::process::Command::new("netstat")
+                background_command("netstat")
                     .args(["-tlnp"])
                     .output()
             })
@@ -169,7 +169,7 @@ pub fn check_port_owned_by(port: u16, pid: u32) -> bool {
 /// 说明后端把服务暴露到了局域网，启动必须失败并给出明确提示。
 #[tauri::command]
 pub fn check_port_bind_address(port: u16) -> Vec<String> {
-    let lsof = std::process::Command::new("lsof")
+    let lsof = background_command("lsof")
         .args(["-nP", "-i", &format!(":{port}"), "-sTCP:LISTEN"])
         .output();
     if let Ok(out) = lsof {
@@ -183,11 +183,11 @@ pub fn check_port_bind_address(port: u16) -> Vec<String> {
     parse_netstat_bind_hosts(
         &{
             let output = if cfg!(windows) {
-                std::process::Command::new("netstat")
+                background_command("netstat")
                     .args(["-ano", "-p", "TCP"])
                     .output()
             } else {
-                std::process::Command::new("netstat")
+                background_command("netstat")
                     .args(["-an", "-p", "tcp"])
                     .output()
             };

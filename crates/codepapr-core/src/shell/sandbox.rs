@@ -600,7 +600,7 @@ pub fn sandboxed_command(
                 workspace.display()
             ));
         }
-        let mut command = Command::new(program);
+        let mut command = super::process_tree::background_command(program);
         command.args(args);
         Ok(command)
     }
