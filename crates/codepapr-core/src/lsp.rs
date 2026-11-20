@@ -21,7 +21,7 @@ use crate::events::EventSink;
 
 use crate::lsp_fallback;
 use crate::lsp_managed_tools::{
-    collect_lsp_inventory, dotnet_binary, ensure_managed_language_server, managed_lsp_commands,
+    bundled_dotnet_root, collect_lsp_inventory, dotnet_binary, ensure_managed_language_server, managed_lsp_commands,
     LspInventory, ManagedLspCommand, ManagedLspProgress,
 };
 use crate::shared::{child_reap_timeout, read, run_blocking_workspace_task, write};
@@ -1362,9 +1362,15 @@ fn spawn_server_candidate(
     // pyright 的 node worker、csharp-ls→dotnet、JDTLS 等都会派生子进程，
     // 只杀直接子进程会留下常驻孤儿占内存。
     crate::shell::process_tree::prepare_new_process_group(&mut cmd);
-    {
-        let dotnet_root = std::env::var("DOTNET_ROOT")
-            .ok()
+    if language_id == "csharp" {
+        let bundle = if cfg!(windows) && candidate.tool_label == "csharp-ls"
+            && candidate.tool_source != "system"
+        {
+            bundled_dotnet_root().map(|root| root.to_string_lossy().into_owned())
+        } else {
+            None
+        };
+        let dotnet_root = bundle.or_else(|| std::env::var("DOTNET_ROOT").ok())
             .or_else(|| std::env::var("DOTNET_INSTALL_DIR").ok())
             .or_else(|| {
                 let dotnet_bin = dotnet_binary();
@@ -1389,39 +1395,10 @@ fn spawn_server_candidate(
                     })
                     .max_by(|(va, _), (vb, _)| va.cmp(vb))
                     .map(|(_, root)| root)
-            });
+            })
+            .or_else(|| bundled_dotnet_root().map(|root| root.to_string_lossy().into_owned()));
         if let Some(root) = dotnet_root {
             cmd.env("DOTNET_ROOT", root);
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            for prefix in &[
-                exe_dir
-                    .join("_up_")
-                    .join("generated")
-                    .join("lsp-tools")
-                    .join("dotnet-sdk"),
-                exe_dir
-                    .join("..")
-                    .join("Resources")
-                    .join("_up_")
-                    .join("generated")
-                    .join("lsp-tools")
-                    .join("dotnet-sdk"),
-                exe_dir
-                    .join("..")
-                    .join("resources")
-                    .join("_up_")
-                    .join("generated")
-                    .join("lsp-tools")
-                    .join("dotnet-sdk"),
-            ] {
-                if prefix.join("dotnet").is_file() {
-                    cmd.env("DOTNET_ROOT", prefix);
-                    break;
-                }
-            }
         }
     }
     cmd.env("PATH", expanded_path());

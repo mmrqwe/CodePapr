@@ -522,10 +522,7 @@ const workflows = {
   'ui-build-tauri': {
     needsRust: true,
     needsDotnet: true,
-    run: async () => {
-      await ensureNoLockedCodePaprExecutable();
-      await runCommand(process.execPath, [path.resolve(uiDir, 'scripts/tauri-cli.mjs'), 'build', ...extraArgs], { cwd: uiDir });
-    },
+    run: () => runCommand(process.execPath, [path.resolve(uiDir, 'scripts/tauri-cli.mjs'), 'build', ...extraArgs], { cwd: uiDir }),
   },
 };
 

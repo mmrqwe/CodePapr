@@ -386,6 +386,8 @@ npm run publish
 
 桌面端打包现在会在 `tauri build` 前自动清理 `target/*/bundle/macos` 与 `target/*/bundle/dmg` 中残留的 `.dmg` / `rw.*.dmg` 临时产物，避免上一次失败或中断后，下一次 macOS DMG 构建继续被旧产物污染。构建成功后，最终运行文件和安装包会从 Tauri 默认 target 目录同步到仓库根目录 `Release/`，作为统一对外输出目录。
 
+Windows MSI 内置 WebView2 离线安装器和随包的语言工具。首次使用某个工具时，CodePapr 校验并展开对应的 ZIP；相同版本的已展开工具可跨应用升级复用。每次桌面发布构建成功后，`Release/` 仅保留本次产物，构建失败时保留上一次成功输出。
+
 ### 7.4 发布前人工检查建议
 
 建议在正式发布前再次确认：

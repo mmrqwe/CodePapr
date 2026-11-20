@@ -120,30 +120,6 @@ function cleanupStaleMacOsBundleArtifacts(args) {
   }
 }
 
-function ensureCleanDir(dirPath) {
-  try {
-    fs.rmSync(dirPath, { recursive: true, force: true });
-  } catch {
-    // Fallback for cases where rmSync fails (e.g. directory in use)
-    execSync(`rm -rf "${dirPath}"`, { stdio: 'pipe' });
-  }
-  fs.mkdirSync(dirPath, { recursive: true });
-}
-
-function copyRecursive(sourcePath, targetPath) {
-  const stat = fs.statSync(sourcePath);
-  if (stat.isDirectory()) {
-    fs.mkdirSync(targetPath, { recursive: true });
-    for (const entry of fs.readdirSync(sourcePath)) {
-      copyRecursive(path.join(sourcePath, entry), path.join(targetPath, entry));
-    }
-    return;
-  }
-
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.copyFileSync(sourcePath, targetPath);
-}
-
 function collectBundleArtifacts(bundleRoot, currentDir = bundleRoot) {
   if (!fs.existsSync(currentDir)) {
     return [];
@@ -260,59 +236,69 @@ function hideDmgVolumeIcons(bundleRoot) {
   }
 }
 
-function collectReleaseArtifacts(args) {
-  if (args[0] !== 'build' || args.includes('--debug')) {
-    return;
-  }
+function releaseOutputDir(args) {
+  const targetIndex = args.indexOf('--target');
+  const target = targetIndex >= 0
+    ? args[targetIndex + 1]
+    : args.find((arg) => arg.startsWith('--target='))?.slice('--target='.length)
+      ?? process.env.CARGO_BUILD_TARGET;
+  return path.join(resolveCargoTargetDir(), target || '', 'release');
+}
 
-  const profileDir = 'release';
-  const targetDirs = candidateCargoTargetDirs();
-  for (const targetDir of targetDirs) {
-    hideDmgVolumeIcons(path.join(targetDir, profileDir, 'bundle'));
+function releaseArtifactSnapshot(outputDir) {
+  const entries = collectBundleArtifacts(path.join(outputDir, 'bundle'));
+  for (const name of ['codepapr', 'codepapr.exe']) {
+    const binary = path.join(outputDir, name);
+    if (fs.existsSync(binary)) entries.push(binary);
   }
+  return new Map(entries.map((entry) => {
+    const appBinary = path.join(entry, 'Contents', 'MacOS', 'codepapr');
+    const stat = fs.statSync(entry.endsWith('.app') && fs.existsSync(appBinary) ? appBinary : entry);
+    return [entry, `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`];
+  }));
+}
 
-  const newestByName = new Map();
-  const consider = (sourcePath) => {
-    const stat = fs.statSync(sourcePath);
-    const name = path.basename(sourcePath);
-    const previous = newestByName.get(name);
-    if (!previous || stat.mtimeMs > previous.mtimeMs) {
-      newestByName.set(name, {
-        source: sourcePath,
-        target: path.join(releaseDir, name),
-        mtimeMs: stat.mtimeMs,
+function collectReleaseArtifacts(outputDir, before) {
+  const entries = [...releaseArtifactSnapshot(outputDir)]
+    .filter(([entry, stamp]) => before.get(entry) !== stamp)
+    .map(([entry]) => entry);
+  if (entries.length === 0) {
+    throw new Error('Desktop build did not produce any new release artifacts.');
+  }
+  if (entries.some((entry) => entry.endsWith('.dmg'))) {
+    hideDmgVolumeIcons(path.join(outputDir, 'bundle'));
+  }
+  const stage = fs.mkdtempSync(path.join(fs.realpathSync(repoRoot), '.tmp-release-'));
+  const next = path.join(stage, 'next');
+  const previous = path.join(stage, 'previous');
+  fs.mkdirSync(next);
+  let previousMoved = false;
+  try {
+    for (const entry of entries) {
+      fs.cpSync(entry, path.join(next, path.basename(entry)), {
+        recursive: true,
+        errorOnExist: true,
+        force: false,
+        verbatimSymlinks: true,
       });
     }
-  };
-
-  for (const targetDir of targetDirs) {
-    const bundleRoot = path.join(targetDir, profileDir, 'bundle');
-    if (fs.existsSync(bundleRoot)) {
-      for (const artifactPath of collectBundleArtifacts(bundleRoot)) {
-        consider(artifactPath);
+    const current = fs.lstatSync(releaseDir, { throwIfNoEntry: false });
+    if (current) {
+      if (!current.isDirectory() || current.isSymbolicLink()) {
+        throw new Error(`Refusing to replace unexpected release directory: ${releaseDir}`);
       }
+      fs.renameSync(releaseDir, previous);
+      previousMoved = true;
     }
-
-    for (const binaryName of ['codepapr', 'codepapr.exe']) {
-      const candidate = path.join(targetDir, 'release', binaryName);
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-        consider(candidate);
-      }
-    }
+    fs.renameSync(next, releaseDir);
+    previousMoved = false;
+  } finally {
+    if (previousMoved) fs.renameSync(previous, releaseDir);
+    fs.rmSync(stage, { recursive: true, force: true });
   }
-
-  const existingArtifacts = [...newestByName.values()];
-  if (existingArtifacts.length === 0) {
-    console.warn('[tauri-cli] No release artifacts found to stage into Release/.');
-    return;
+  for (const entry of entries) {
+    console.log(`[tauri-cli] Staged ${path.basename(entry)} from ${entry}`);
   }
-
-  ensureCleanDir(releaseDir);
-  for (const artifact of existingArtifacts) {
-    copyRecursive(artifact.source, artifact.target);
-    console.log(`[tauri-cli] Staged ${path.basename(artifact.target)} from ${artifact.source}`);
-  }
-
   console.log(`[tauri-cli] Staged release artifacts to ${releaseDir}`);
 }
 
@@ -451,6 +437,10 @@ function touchMainRsForFreshFrontend(args) {
 
 touchMainRsForFreshFrontend(cliArgs);
 
+const releaseOutput = cliArgs[0] === 'build' && !cliArgs.includes('--debug')
+  ? releaseOutputDir(cliArgs)
+  : null;
+const releaseBefore = releaseOutput ? releaseArtifactSnapshot(releaseOutput) : null;
 const child = spawn(process.execPath, [tauriCliEntry, ...cliArgs], {
   cwd: uiDir,
   stdio: 'inherit',
@@ -469,8 +459,13 @@ child.on('exit', (code, signal) => {
     finalCode = 0;
   }
 
-  if (finalCode === 0) {
-    collectReleaseArtifacts(cliArgs);
+  if (finalCode === 0 && releaseOutput) {
+    try {
+      collectReleaseArtifacts(releaseOutput, releaseBefore);
+    } catch (error) {
+      console.error('[tauri-cli] Release staging failed.', error);
+      finalCode = 1;
+    }
   }
 
   process.exit(finalCode);

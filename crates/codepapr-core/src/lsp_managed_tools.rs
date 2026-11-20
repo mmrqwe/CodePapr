@@ -19,6 +19,10 @@ use tar::Archive;
 use xz2::read::XzDecoder;
 use zip::ZipArchive;
 
+#[cfg(any(windows, test))]
+#[path = "lsp_offline_packs.rs"]
+mod offline_packs;
+
 #[derive(Clone)]
 pub struct ManagedLspCommand {
     pub command: String,
@@ -140,6 +144,8 @@ pub fn ensure_managed_language_server(
     language_id: &str,
     reporter: Option<&dyn Fn(ManagedLspProgress)>,
 ) -> Result<(), String> {
+    #[cfg(windows)]
+    prepare_offline_language_server(workspace, language_id, reporter)?;
     if !managed_install_enabled() {
         return Ok(());
     }
@@ -190,6 +196,54 @@ pub fn ensure_managed_language_server(
         "markdown" => ensure_markdown_support(reporter),
         _ => Ok(()),
     }
+}
+
+#[cfg(windows)]
+fn prepare_offline_language_server(
+    workspace: &Path,
+    language_id: &str,
+    reporter: Option<&dyn Fn(ManagedLspProgress)>,
+) -> Result<(), String> {
+    let pack = match language_id {
+        "typescript" | "typescriptreact" | "javascript" | "javascriptreact" | "html" | "css"
+        | "scss" | "less" | "json" | "jsonc" | "yaml" | "python" | "shellscript" => "node-packages",
+        "csharp" if find_in_path_or_dotnet_tools("csharp-ls").is_none() => "csharp-ls",
+        "java" => "java",
+        "c" | "cpp" => "clangd",
+        "rust" => "rust-analyzer",
+        "go" => "gopls",
+        "sql" => "sqls",
+        "markdown" => "marksman",
+        _ => return Ok(()),
+    };
+    if language_id == "csharp" {
+        prepare_offline_tool("csharp-ls", reporter)?;
+        if find_managed_tool(&["csharp-ls", "csharp-ls.exe"]).is_some() {
+            prepare_offline_tool("dotnet-sdk", reporter)?;
+        }
+        return Ok(());
+    }
+    if !managed_lsp_commands(workspace, language_id).is_empty() {
+        return Ok(());
+    }
+    prepare_offline_tool(pack, reporter)
+}
+
+#[cfg(windows)]
+fn prepare_offline_tool(
+    pack: &str,
+    reporter: Option<&dyn Fn(ManagedLspProgress)>,
+) -> Result<(), String> {
+    if offline_packs::is_cached(pack) {
+        return Ok(());
+    }
+    if let Some((archive, _)) = offline_packs::packed_tool(pack) {
+        emit_progress(reporter, "extracting", pack, String::new(), Some(&archive));
+    }
+    if let Some(root) = offline_packs::prepare(pack)? {
+        emit_progress(reporter, "ready", pack, String::new(), Some(&root.join(pack)));
+    }
+    Ok(())
 }
 
 fn managed_node_package_command(
@@ -246,6 +300,9 @@ fn managed_node_package_command_for_root(
     };
 
     let entry_path = package_module_entry_path(&package_root, package_name, module_specifier);
+    if !entry_path.is_file() {
+        return Vec::new();
+    }
     let mut command_args = vec![entry_path.to_string_lossy().to_string()];
     command_args.extend(args.iter().map(|arg| (*arg).to_string()));
 
@@ -510,7 +567,7 @@ fn managed_csharp_commands() -> Vec<ManagedLspCommand> {
         commands.extend(bundled);
     }
 
-    if commands.is_empty() {
+    if commands.is_empty() || cfg!(windows) {
         let executable = executable_name("CodePapr.CSharp.Analyzer");
         let bundled_commands = managed_binary_commands(
             &[
@@ -694,6 +751,8 @@ fn managed_tool_roots() -> Vec<PathBuf> {
 
     if let Some(app_data_root) = app_data_root() {
         roots.push(app_data_root.join("lsp-tools"));
+        #[cfg(windows)]
+        roots.extend(offline_packs::cached_roots(&app_data_root.join("lsp-tools").join("offline")));
     }
 
     if let Ok(current_exe) = env::current_exe() {
@@ -1018,7 +1077,9 @@ fn ensure_csharp_support(
 
     let has_csharp_ls = find_in_path_or_dotnet_tools("csharp-ls").is_some();
 
-    if has_csharp_ls {
+    if has_csharp_ls
+        || (cfg!(windows) && find_managed_tool(&["csharp-ls", "csharp-ls.exe"]).is_some())
+    {
         return Ok(());
     }
 
@@ -2671,8 +2732,22 @@ pub fn dotnet_binary() -> &'static str {
                     None
                 }
             })
+            .or_else(|| {
+                #[cfg(windows)]
+                if bundled_dotnet_root().is_none() {
+                    if let Err(error) = offline_packs::prepare("dotnet-sdk") {
+                        eprintln!("[CodePapr] {error}");
+                    }
+                }
+                bundled_dotnet_root().map(|root| root.join(name).to_string_lossy().into_owned())
+            })
             .unwrap_or_else(|| name.to_string())
     })
+}
+
+pub(crate) fn bundled_dotnet_root() -> Option<PathBuf> {
+    managed_tool_roots().into_iter().map(|root| root.join("dotnet-sdk"))
+        .find(|root| root.join(executable_name("dotnet")).is_file())
 }
 
 fn resolve_command_path(command: &str) -> Option<PathBuf> {
@@ -2878,6 +2953,22 @@ fn family_info(
         }
     }
 
+    #[cfg(windows)]
+    if let Some((path, size)) = relative.first().and_then(|name| offline_packs::packed_tool(name)) {
+        return LspFamilyInfo {
+            family_id: family_id.to_string(),
+            label: label.to_string(),
+            language_ids: language_ids.iter().map(|id| id.to_string()).collect(),
+            available: true,
+            origin: "bundled".into(),
+            tool_label: tool_label.to_string(),
+            path: Some(path.to_string_lossy().into_owned()),
+            size_bytes: if include_size { size } else { 0 },
+            uses_runtime: uses_runtime.map(str::to_string),
+            running: false,
+            enabled: true,
+        };
+    }
     LspFamilyInfo {
         family_id: family_id.to_string(),
         label: label.to_string(),
@@ -2907,6 +2998,18 @@ fn runtime_info(
             origin: origin_from_source(source).to_string(),
             path: Some(path.to_string_lossy().to_string()),
             size_bytes: directory_size(&path),
+            available: true,
+        };
+    }
+    #[cfg(windows)]
+    if let Some((path, size)) = relative.first().and_then(|name| offline_packs::packed_tool(name)) {
+        return LspRuntimeInfo {
+            id: id.to_string(),
+            label: label.to_string(),
+            used_by: used_by.iter().map(|item| item.to_string()).collect(),
+            origin: "bundled".into(),
+            path: Some(path.to_string_lossy().into_owned()),
+            size_bytes: size,
             available: true,
         };
     }
@@ -3286,6 +3389,7 @@ mod tests {
             .join("node_modules")
             .join("typescript-language-server")
             .join("package.json");
+        let package_entry = package_json.with_file_name("lib").join("cli.mjs");
         let node_binary = managed_root
             .join("node-runtime")
             .join("bin")
@@ -3296,6 +3400,8 @@ mod tests {
         fs::create_dir_all(node_binary.parent().expect("node parent")).expect("node dir");
         fs::write(&script, "").expect("script file");
         fs::write(&package_json, "{}").expect("package file");
+        fs::create_dir_all(package_entry.parent().unwrap()).expect("package entry dir");
+        fs::write(&package_entry, "").expect("package entry");
         fs::write(&node_binary, "").expect("node binary");
 
         let commands = managed_node_package_command_for_root(
@@ -3330,6 +3436,7 @@ mod tests {
             .join("node_modules")
             .join("bash-language-server")
             .join("package.json");
+        let package_entry = package_json.with_file_name("out").join("cli.js");
         let node_binary = managed_root
             .join("node-runtime")
             .join("bin")
@@ -3340,6 +3447,8 @@ mod tests {
         fs::create_dir_all(node_binary.parent().expect("node parent")).expect("node dir");
         fs::write(&script, "").expect("script file");
         fs::write(&package_json, "{}").expect("package file");
+        fs::create_dir_all(package_entry.parent().unwrap()).expect("package entry dir");
+        fs::write(&package_entry, "").expect("package entry");
         fs::write(&node_binary, "").expect("node binary");
 
         let commands = managed_node_package_command_for_root(

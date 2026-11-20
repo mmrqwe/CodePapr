@@ -1,0 +1,16 @@
+{
+  "bundle": {
+    "resources": [
+      "../generated/lsp-tools/node-runtime/**/*",
+      "../generated/lsp-tools/csharp-analyzer/**/*",
+      "../generated/lsp-packs/**/*",
+      "../dist-sidecar/agent-runtime.mjs"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      }
+    }
+  }
+}
