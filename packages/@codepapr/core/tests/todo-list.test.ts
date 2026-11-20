@@ -7,12 +7,30 @@ import {
   createEmptyTodoListContext,
   hasUnsettledTodoTasks,
   inferCurrentTaskId,
+  prioritizeTodoProgress,
   renderTodoListDigest,
   updateTodoList,
   writeTodoList,
   TODO_TOOL_NAME,
 } from '../src/agent/todoList';
 import type { TodoListContext, AgentTask } from '@codepapr/types';
+
+describe('prioritizeTodoProgress', () => {
+  it('publishes progress with an empty tasks array before work and completion', () => {
+    const build = { id: 'build', name: 'bash', arguments: { command: 'dotnet build' } };
+    const started = {
+      id: 'started',
+      name: TODO_TOOL_NAME,
+      arguments: { tasks: [], updates: [{ id: 'verify', status: 'running' }] },
+    };
+    const finished = {
+      id: 'finished',
+      name: TODO_TOOL_NAME,
+      arguments: { tasks: [], updates: [{ id: 'verify', status: 'completed' }] },
+    };
+    expect(prioritizeTodoProgress([build, started, finished])).toEqual([started, build, finished]);
+  });
+});
 
 describe('createEmptyTodoListContext', () => {
   it('应创建空 TodoListContext', () => {
@@ -355,7 +373,7 @@ describe('applyTodoToolRequest（创建窗口闸门——本回合一次创建�
   it('窗口开启时 tasks 创建清单并标记消耗', () => {
     const result = applyTodoToolRequest(
       null,
-      { tasks: tasksArg },
+      { tasks: tasksArg, updates: [] },
       { creationOpen: true, defaultGoal: '用户：修复退出停播' }
     );
 
@@ -426,6 +444,20 @@ describe('applyTodoToolRequest（创建窗口闸门——本回合一次创建�
     expect(updated.ctx.currentTaskId).toBe('b');
   });
 
+  it('接受同时带空 tasks 数组的进度更新', () => {
+    const created = applyTodoToolRequest(null, { tasks: tasksArg }, { creationOpen: true, defaultGoal: '地图编辑' });
+    const updated = applyTodoToolRequest(
+      created.ctx,
+      { goal: '', tasks: [], updates: [{ id: 'a', status: 'completed' }, { id: 'b', status: 'running' }] },
+      { creationOpen: false, defaultGoal: created.ctx.goal }
+    );
+
+    expect(updated.rejected).toBe(false);
+    expect(updated.created).toBe(false);
+    expect(updated.ctx.tasks.map((task) => task.status)).toEqual(['completed', 'running']);
+    expect(updated.ctx.currentTaskId).toBe('b');
+  });
+
   it('updates 不能凭空造清单：无清单时返回空清单并引导创建', () => {
     const result = applyTodoToolRequest(
       null,
@@ -450,9 +482,9 @@ describe('applyTodoToolRequest（创建窗口闸门——本回合一次创建�
     expect(goalOnly.ctx.tasks).toEqual(created.ctx.tasks);
   });
 
-  it('空参数调用返回同引用（no-op）', () => {
+  it.each([{}, { tasks: [], updates: [] }])('空参数调用返回同引用（no-op） %j', (args) => {
     const created = applyTodoToolRequest(null, { tasks: tasksArg }, { creationOpen: true, defaultGoal: 'g' });
-    const noop = applyTodoToolRequest(created.ctx, {}, { creationOpen: false, defaultGoal: '' });
+    const noop = applyTodoToolRequest(created.ctx, args, { creationOpen: true, defaultGoal: '' });
 
     expect(noop.ctx).toBe(created.ctx);
     expect(noop.created).toBe(false);

@@ -180,7 +180,9 @@ vi.mock('./internals/agentFactory', async (importOriginal) => {
 
 import { getSettingsError, normalizeSettings, useAgentStore } from './agentStore';
 import { useGoalStore } from './goalStore';
-import { parseGoalCondition } from '@codepapr/core';
+import { parseGoalCondition, ToolRegistry } from '@codepapr/core';
+import { isTodoCreationWindowOpen, openTodoCreationWindow, resetTodoListContext } from '../tools/todoListRegistry';
+import { registerTodoListTools } from '../tools/todoListTool';
 import { shouldDeferIdleWatchdog } from './internals/sendMessage';
 import { cancelExternalAccessRequests, usePermissionStore } from './permissionStore';
 import { useMcpConfirmStore } from './mcpConfirmStore';
@@ -222,6 +224,51 @@ describe('useAgentStore.sendMessage', () => {
     expect(normalizeSettings({}).maxToolRounds).toBe(500);
     expect(normalizeSettings({ maxToolRounds: 12.9 }).maxToolRounds).toBe(12);
     expect(normalizeSettings({ maxToolRounds: 0 }).maxToolRounds).toBe(1);
+  });
+
+  it('renders and persists todo updates from the desktop tool after creation closes', async () => {
+    const { activeSessionId, workspacePath } = useAgentStore.getState();
+    const sessionId = activeSessionId!;
+    const registry = new ToolRegistry();
+    resetTodoListContext(sessionId);
+    registerTodoListTools(registry, sessionId);
+    saveProjectMetaMock.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      openTodoCreationWindow(sessionId, '地图编辑');
+      await registry.execute('todo', {
+        tasks: [
+          { id: 'inspect-project', title: '梳理项目结构', description: '检查 Godot 项目', status: 'running' },
+          { id: 'verify', title: '验证修改', description: '编译项目并检查鼠标交互' },
+        ],
+        updates: [],
+      });
+      expect(isTodoCreationWindowOpen(sessionId)).toBe(false);
+      await expect(registry.execute('todo', {
+        goal: '',
+        tasks: [],
+        updates: [{ id: 'inspect-project', status: 'completed', summary: '项目结构已核对' }],
+      })).resolves.not.toHaveProperty('notice');
+
+      const checklist = useAgentStore.getState()._taskChecklists[sessionId];
+      expect(checklist?.items.map((item) => item.status)).toEqual(['completed', 'pending']);
+      expect(checklist?.currentTaskId).toBe('verify');
+      await vi.advanceTimersByTimeAsync(800);
+      expect(saveProjectMetaMock).toHaveBeenCalledWith(workspacePath, 'session_todo_lists', expect.objectContaining({
+        [sessionId]: expect.objectContaining({
+          currentTaskId: 'verify',
+          tasks: [
+            expect.objectContaining({ id: 'inspect-project', status: 'completed' }),
+            expect.objectContaining({ id: 'verify', status: 'pending' }),
+          ],
+        }),
+      }));
+    } finally {
+      await vi.advanceTimersByTimeAsync(800);
+      vi.useRealTimers();
+      resetTodoListContext(sessionId);
+    }
   });
 
   function createAgentResponse(

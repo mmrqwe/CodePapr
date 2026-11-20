@@ -29,8 +29,8 @@ export const TODO_CREATE_REJECTED_NOTICE =
 
 function isTodoProgressCall({ name, arguments: args }: IToolCall): boolean {
   if (name !== TODO_TOOL_NAME || args._parseError) return false;
-  if (Array.isArray(args.tasks)) {
-    return args.tasks.length > 0 && args.tasks.every((task: unknown) =>
+  if (Array.isArray(args.tasks) && args.tasks.length > 0) {
+    return args.tasks.every((task: unknown) =>
       !!task && typeof task === 'object' &&
       (!('status' in task) || task.status === 'pending' || task.status === 'running')
     );
@@ -436,7 +436,8 @@ export function buildTodoToolDefinition(): IToolDefinition {
           description:
             '创建任务清单（全量覆盖），每个用户回合至多一次。目标与上一版清单相同（续用/重排'
             + '同一计划）时，同 id 任务保留其状态与 summary；目标已变化（新用户消息＝新目标）'
-            + '时全部从 pending 起步，需要保留完成态的任务请显式传 status。与 updates 参数互斥。',
+            + '时全部从 pending 起步，需要保留完成态的任务请显式传 status。'
+            + '只在创建清单时传非空 tasks。空数组会被忽略，已有清单的进度通过 updates 更新。',
           items: {
             type: 'object',
             properties: {
@@ -519,7 +520,8 @@ export function applyTodoToolRequest(
 ): TodoToolRequestResult {
   const goal = parseTodoGoal(args.goal, opts.defaultGoal);
 
-  if (Array.isArray(args.tasks)) {
+  // Some providers fill unused array parameters with []. Only actual tasks create a list.
+  if (Array.isArray(args.tasks) && args.tasks.length > 0) {
     if (!opts.creationOpen) {
       return {
         ctx: previous ?? createEmptyTodoListContext(goal),

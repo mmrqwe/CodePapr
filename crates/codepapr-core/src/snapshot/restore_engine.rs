@@ -539,6 +539,40 @@ mod tests {
     }
 
     #[test]
+    fn undo_preserves_disk_edits_and_deletions_made_after_staging() {
+        let workspace = temp_workspace("staged-and-disk-changes");
+        let engine = SnapshotEngine::new(&workspace);
+        engine.ensure();
+        let edited = workspace.join("edited.txt");
+        let removed = workspace.join("removed.txt");
+        fs::write(&edited, b"checkpoint version").unwrap();
+        fs::write(&removed, b"tracked content").unwrap();
+        let checkpoint = engine.create("checkpoint").unwrap();
+
+        fs::write(&edited, b"staged version").unwrap();
+        {
+            let repo = Repository::open(code_papr_git_path(&workspace)).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("edited.txt")).unwrap();
+            index.write().unwrap();
+        }
+        fs::write(&edited, b"later uncommitted disk version").unwrap();
+        fs::remove_file(&removed).unwrap();
+
+        let restore = RestoreEngine::new(&workspace);
+        let result = restore.execute(&checkpoint.sha).unwrap();
+        assert_eq!(result.files_restored, 2);
+        assert_eq!(result.files_deleted, 0);
+        assert_eq!(fs::read(&edited).unwrap(), b"checkpoint version");
+        assert_eq!(fs::read(&removed).unwrap(), b"tracked content");
+
+        restore.undo(result.backup_sha.as_deref()).unwrap();
+        assert_eq!(fs::read(&edited).unwrap(), b"later uncommitted disk version");
+        assert!(!removed.exists());
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
     fn test_undo_recovers_changes_made_after_last_snapshot() {
         let workspace = temp_workspace("post-snapshot-changes");
         let engine = SnapshotEngine::new(&workspace);

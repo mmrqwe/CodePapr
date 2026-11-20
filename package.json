@@ -17,7 +17,8 @@
     "packages/@codepapr/ui"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=@codepapr/ui",
+    "build:desktop-deps": "npm run build --workspace=@codepapr/types --workspace=@codepapr/common --workspace=@codepapr/core --workspace=@codepapr/api --workspace=@codepapr/editor",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "node ./scripts/run-workspace-tests.mjs",
     "harness:smoke": "node ./scripts/harness-smoke.mjs",

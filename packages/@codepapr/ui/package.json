@@ -9,6 +9,7 @@
     "dev": "node ../../../scripts/run-module-bin.mjs vite/bin/vite.js",
     "build:frontend": "node ../../../scripts/run-module-bin.mjs vite/bin/vite.js build",
     "preview": "node ../../../scripts/run-module-bin.mjs vite/bin/vite.js preview",
+    "pretest": "npm --prefix ../../.. run build:desktop-deps",
     "test": "node ../../../scripts/run-module-bin.mjs vitest/vitest.mjs",
     "test:e2e:ui": "node ../../../scripts/run-module-bin.mjs @playwright/test/cli.js test --config=playwright.config.ts",
     "test:e2e:ui:install": "node ../../../scripts/run-module-bin.mjs @playwright/test/cli.js install --with-deps chromium",
@@ -20,6 +21,7 @@
     "prebuild:lsp": "node scripts/prebuild-lsp-servers.mjs",
     "build:sidecar": "node scripts/build-sidecar.mjs",
     "build:host-server": "node scripts/prepare-host-server.mjs",
+    "prebuild": "npm --prefix ../../.. run build:desktop-deps",
     "build": "npm run typecheck && npm run build:host-server && npm run build:sidecar && npm run build:frontend",
     "build:tauri": "node ../../../scripts/run-desktop-workflow.mjs ui-build-tauri",
     "release": "node ../../../scripts/run-desktop-workflow.mjs ui-build-tauri"

@@ -28,7 +28,7 @@ export function todoContextToChecklist(
     prompt: task.description,
     status: task.status as TaskChecklistItemStatus,
     summary: task.summary
-      ?? (task.errorLog ? `失败: ${task.errorLog}` : undefined),
+      ?? (task.status === 'failed' && task.errorLog ? `失败: ${task.errorLog}` : task.errorLog),
   }));
 
   return {

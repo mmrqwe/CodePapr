@@ -7,7 +7,7 @@ function makeContext(overrides: Partial<TodoListContext> = {}): TodoListContext 
     goal: '把歌词页做出来',
     tasks: [
       { id: 'a', title: '原生取数', description: '桥新增 lyrics.get', status: 'completed', summary: '拿到了' },
-      { id: 'b', title: '解析核心', description: 'LRC 解析', status: 'pending' },
+      { id: 'b', title: '解析核心', description: 'LRC 解析', status: 'pending', errorLog: '回合结束未确认' },
       { id: 'c', title: '歌词页', description: '跟随高亮', status: 'failed', errorLog: '布局崩了' },
     ],
     currentTaskId: 'b',
@@ -32,6 +32,7 @@ describe('todoContextToChecklist', () => {
     expect(checklist.items.map((item) => item.status)).toEqual(['completed', 'pending', 'failed']);
     expect(checklist.items[0]!.summary).toBe('拿到了');
     expect(checklist.items[1]!.prompt).toBe('LRC 解析');
+    expect(checklist.items[1]!.summary).toBe('回合结束未确认');
     // 失败任务把 errorLog 映射成渲染层摘要
     expect(checklist.items[2]!.summary).toBe('失败: 布局崩了');
   });
